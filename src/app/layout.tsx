@@ -8,8 +8,8 @@ import "./globals.css";
 import Studio from "@/components/Studio";
 
 export const metadata: Metadata = {
-  title: "Cafe HTML - Next",
-  description: "Ported version of Cafe HTML",
+  title: "MoneyTree",
+  description: "MoneyTree AI Image Generator",
 };
 
 export default function RootLayout({
@@ -36,3 +36,4 @@ export default function RootLayout({
     </html>
   );
 }
+

@@ -3,7 +3,6 @@ import Gallery from "@/components/Gallery";
 import HUD from "@/components/HUD";
 import TitleBar from "@/components/TitleBar";
 import ModulePanel from "@/components/ModulePanel";
-import Studio from "@/components/Studio";
 import ProjectsModal from "@/components/ProjectsModal";
 import SettingsModal from "@/components/SettingsModal";
 
@@ -15,9 +14,9 @@ export default function Home() {
       <HUD />
       <TitleBar />
       <ModulePanel />
-      <Studio />
       <ProjectsModal />
       <SettingsModal />
     </>
   );
 }
+
