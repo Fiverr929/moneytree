@@ -1,0 +1,50 @@
+ Current Output Pipeline                                                                                                                                                                                             
+  1. User hits Generate                                                                                    
+
+  CafeAPI.generate() fires. It calls PromptBuilder.collect() which reads the entire current state — prompt
+  bar text, mode (FRAME/SCENE), global refs, all module slots, and settings (ratio, variation, seed, etc.).
+
+  ---
+  2. Prompt Compilation (compilePrompt)
+
+  Walks through every active slot → every visible layer → every visible child and builds a flat string:    
+
+  - Image child with vision description → "character: tall male, short dark hair..." (using the Moondream  
+  scan result)
+  - Image child without vision description → falls back to a hardcoded role phrase like "use the person in 
+  this reference as the subject..."
+  - Text child → "character: whatever the user typed"
+  - Unknown layer name → uses "[layerName]: ..." as prefix
+
+  Layer names are matched against SUBJECT_ROLES and STAGE_ROLES dictionaries (CHARACTER, OUTFIT,
+  BACKGROUND, etc.) to pick the right prefix/instruction.
+
+  Final prompt = user's raw text + ,  + compiled module parts, all joined with commas.
+
+  ---
+  3. Image URL Collection (collectLayerImageUrls)
+
+  Separately walks the same structure and pulls every image src from visible children. Global refs go      
+  first, then module images.
+
+  ---
+  4. API Decision
+
+  If there are any image URLs → switches to the /edit endpoint of nano-banana-2
+  (fal-ai/nano-banana-2/edit), which accepts image_urls.
+
+  ---
+  5. fal.ai Queue (falQueue)
+
+  - POSTs to queue.fal.run/[model]
+  - Gets back a request_id
+  - Polls status_url every 1.5 seconds (max 3 minutes / 120 attempts)
+  - On COMPLETED → fetches from response_url
+
+  ---
+  6. Result → Gallery
+
+  - Adds loading cell(s) immediately when generate starts
+  - When result comes back, downloads each image URL, draws it through a canvas (to convert to local base64
+   / avoid CORS issues), then calls Gallery.resolveLoading() to swap the loading cell with the real image  
+  - Autosaves via Workspace.autosave()

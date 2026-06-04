@@ -1,0 +1,20 @@
+The module system is the real product. Not the generation itself. Any tool can call nano-banana-2. What          CafeHTML is building is a structured way to organize creative intent before generation. That's rare. Most tools   give you a text box and maybe 2-3 reference slots. CafeHTML's hierarchy — section → slot → layer → child, with   visibility control at every level — is how professional creatives actually think. Mood boards, character      
+  sheets, reference libraries. It maps to real workflow.                                                                                                                                                                          
+  SCENE mode is actually the bigger opportunity. Video AI is maturing fast — Veo, Kling, Sora — but nobody has     solved the control problem. Every shot in a video needs consistent characters, consistent environments,          consistent style. Right now people are manually re-prompting each scene and hoping for continuity. A structured
+   shot builder where each scene carries its own organized reference set — that's essentially a visual screenplay
+   tool for AI video. Nobody has built that well yet. When you get there, that's the differentiator.
+
+  The pipeline you're designing solves the right problem. The gap in every AI image tool right now isn't
+  generation quality — it's translation. Creative people know what they want visually but the tools make them    
+  become prompt engineers. Vision scan + LLM enhancer is the bridge that removes that tax. The user thinks in    
+  images and intent. The system handles translation.
+
+  My honest concern: complexity creep. The architecture is powerful but the surface area is growing. The pipeline
+   only works if it stays invisible to the new user — they upload references, organize them loosely, write one   
+  sentence, and get a result that reflects their intent. The moment they have to understand how the pipeline     
+  works, you've lost them.
+
+  What this really is: CafeHTML is building the creative brief layer that sits between human visual thinking and 
+  AI generation. That's a genuine gap in the market right now, especially with Whisk going away.
+
+  What's your actual end goal for it — personal tool, product, something else?
