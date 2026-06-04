@@ -1,6 +1,7 @@
 ﻿{
   "name": "moneytree",
-  "version": "0.1.0",`n  "description": "An advanced, custom-built AI image generation interface.",
+  "version": "0.1.0",
+  "description": "An advanced, custom-built AI image generation interface.",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -22,4 +23,5 @@
     "typescript": "^5"
   }
 }
+
 
