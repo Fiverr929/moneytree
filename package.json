@@ -1,6 +1,6 @@
-{
-  "name": "cafehtml-next",
-  "version": "0.1.0",
+﻿{
+  "name": "moneytree",
+  "version": "0.1.0",`n  "description": "An advanced, custom-built AI image generation interface.",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -22,3 +22,4 @@
     "typescript": "^5"
   }
 }
+
