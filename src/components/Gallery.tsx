@@ -125,6 +125,8 @@ export default function Gallery() {
           {selectMode ? "DONE" : "SELECT"}
         </button>
 
+        <div className="ctrl-spacer"></div>
+
         <div id="view-wrap" ref={viewRef}>
           <button 
             id="btn-grid-view"
@@ -132,7 +134,15 @@ export default function Gallery() {
             onClick={() => setViewDropdownOpen(!viewDropdownOpen)}
             title="Grid size"
           >
-            GRID
+            {currentView === "small" && (
+              <svg width="16" height="16" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="3" height="3" fill="currentColor"/><rect x="4" y="0" width="3" height="3" fill="currentColor"/><rect x="8" y="0" width="3" height="3" fill="currentColor"/><rect x="12" y="0" width="3" height="3" fill="currentColor"/><rect x="0" y="4" width="3" height="3" fill="currentColor"/><rect x="4" y="4" width="3" height="3" fill="currentColor"/><rect x="8" y="4" width="3" height="3" fill="currentColor"/><rect x="12" y="4" width="3" height="3" fill="currentColor"/><rect x="0" y="8" width="3" height="3" fill="currentColor"/><rect x="4" y="8" width="3" height="3" fill="currentColor"/><rect x="8" y="8" width="3" height="3" fill="currentColor"/><rect x="12" y="8" width="3" height="3" fill="currentColor"/><rect x="0" y="12" width="3" height="3" fill="currentColor"/><rect x="4" y="12" width="3" height="3" fill="currentColor"/><rect x="8" y="12" width="3" height="3" fill="currentColor"/><rect x="12" y="12" width="3" height="3" fill="currentColor"/></svg>
+            )}
+            {currentView === "medium" && (
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="6" height="6" fill="currentColor"/><rect x="7" y="0" width="6" height="6" fill="currentColor"/><rect x="14" y="0" width="6" height="6" fill="currentColor"/><rect x="0" y="7" width="6" height="6" fill="currentColor"/><rect x="7" y="7" width="6" height="6" fill="currentColor"/><rect x="14" y="7" width="6" height="6" fill="currentColor"/><rect x="0" y="14" width="6" height="6" fill="currentColor"/><rect x="7" y="14" width="6" height="6" fill="currentColor"/><rect x="14" y="14" width="6" height="6" fill="currentColor"/></svg>
+            )}
+            {currentView === "large" && (
+              <svg width="16" height="16" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="7" height="7" fill="currentColor"/><rect x="8" y="0" width="7" height="7" fill="currentColor"/><rect x="0" y="8" width="7" height="7" fill="currentColor"/><rect x="8" y="8" width="7" height="7" fill="currentColor"/></svg>
+            )}
           </button>
           <div className={`cmp-menu gallery-view-menu ${viewDropdownOpen ? "open" : ""}`} id="view-dropdown" hidden={!viewDropdownOpen}>
             <div className="cmp-menu-title">GRID SIZE</div>
@@ -154,7 +164,11 @@ export default function Gallery() {
             className={`${isFilterActive ? "has-filter" : ""} ${filterDropdownOpen ? "active" : ""}`} 
             onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
           >
-            SORT
+            <svg width="21" height="12" viewBox="0 0 21 12" fill="none">
+              <rect x="0" y="0" width="21" height="2" fill="#c7c7c7" />
+              <rect x="3" y="5" width="15" height="2" fill="#c7c7c7" />
+              <rect x="6" y="10" width="9" height="2" fill="#c7c7c7" />
+            </svg>
           </button>
           <div className={`cmp-menu gallery-filter-menu ${filterDropdownOpen ? "open" : ""}`} id="filter-dropdown" hidden={!filterDropdownOpen}>
             <div className="cmp-menu-title">SORT</div>
@@ -168,8 +182,6 @@ export default function Gallery() {
             <button className={`filter-chip ${ratioFilter === "square" ? "active" : ""}`} onClick={() => setRatioFilter("square")}>SQUARE</button>
           </div>
         </div>
-
-        <div className="ctrl-spacer"></div>
       </div>
       
       <div id="gallery-scroll" data-view={currentView} data-select={selectMode ? "on" : "off"}>

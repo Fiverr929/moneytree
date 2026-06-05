@@ -2992,17 +2992,17 @@
 
 
 
-    #btn-select,
-    #btn-grid-view,
-    #btn-filter {
+    /* SELECT button */
+    #btn-select {
       font-size: 14px;
       letter-spacing: 0.06em;
       text-transform: uppercase;
       height: 24px;
+      width: 66px;
       border: none;
       border-radius: 0;
-      background: #999997 !important;
-      color: #c7c7c7 !important;
+      background: #999997;
+      color: #c7c7c7;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -3011,22 +3011,64 @@
       outline: none;
     }
 
-    #btn-select {
-      width: 66px;
+    #btn-select.active {
+      background: #ea5823;
+      color: #c7c7c7;
     }
 
-    #btn-grid-view,
+    #btn-grid-view {
+      position: relative;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3px;
+      border: none;
+      border-radius: 0;
+      background: #999997 !important;
+      transition: background 0.15s;
+      outline: none;
+      margin-left: 4px;
+      flex-shrink: 0;
+      color: #c7c7c7 !important;
+    }
+
+    #btn-grid-view svg {
+      display: block;
+    }
+
+    #btn-grid-view.active {
+      background: #ea5823 !important;
+      color: #e8e6e6 !important;
+    }
+
+    /* Filter button */
     #btn-filter {
       position: relative;
-      padding: 0 10px;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3px;
+      border: none;
+      border-radius: 0;
+      background: #999997 !important;
+      transition: background 0.15s;
+      outline: none;
       margin-left: 4px;
+      flex-shrink: 0;
+      color: #c7c7c7 !important;
     }
 
-    #btn-select.active,
-    #btn-grid-view.active,
+    #btn-filter svg {
+      display: block;
+    }
+
     #btn-filter.active {
       background: #ea5823 !important;
-      color: #c7c7c7 !important;
+      color: #e8e6e6 !important;
     }
 
     #btn-filter.has-filter::after {
@@ -3060,27 +3102,27 @@
     }
 
     .gallery-filter-menu {
-      left: 0 !important;
-      right: auto !important;
+      right: 0 !important;
+      left: auto !important;
       top: calc(100% + 6px);
       width: 160px;
     }
 
     .gallery-filter-menu::before {
-      left: 10px !important;
-      right: auto !important;
+      right: 8px !important;
+      left: auto !important;
     }
 
     .gallery-view-menu {
-      left: 0 !important;
-      right: auto !important;
+      right: 38px !important;
+      left: auto !important;
       top: calc(100% + 6px);
       width: 160px;
     }
 
     .gallery-view-menu::before {
-      left: 10px !important;
-      right: auto !important;
+      right: 8px !important;
+      left: auto !important;
     }
 
     .gallery-filter-menu .cmp-menu-title:not(:first-child),
