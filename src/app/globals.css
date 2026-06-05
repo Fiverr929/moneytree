@@ -2982,68 +2982,6 @@
     }
 
     /* Filter button */
-    /* View wrapper */
-    #view-wrap {
-      position: relative !important;
-      align-self: stretch;
-      display: flex;
-      align-items: center;
-    }
-
-
-
-    /* SELECT button */
-    #btn-select {
-      font-size: 14px;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      height: 24px;
-      width: 66px;
-      border: none;
-      border-radius: 0;
-      background: #999997;
-      color: #c7c7c7;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      transition: background 0.15s, color 0.15s;
-      outline: none;
-    }
-
-    #btn-select.active {
-      background: #ea5823;
-      color: #c7c7c7;
-    }
-
-    #btn-grid-view {
-      position: relative;
-      width: 28px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 3px;
-      border: none;
-      border-radius: 0;
-      background: #999997 !important;
-      transition: background 0.15s;
-      outline: none;
-      margin-left: 4px;
-      flex-shrink: 0;
-      color: #c7c7c7 !important;
-    }
-
-    #btn-grid-view svg {
-      display: block;
-    }
-
-    #btn-grid-view.active {
-      background: #ea5823 !important;
-      color: #e8e6e6 !important;
-    }
-
-    /* Filter button */
     #btn-filter {
       position: relative;
       width: 28px;
@@ -3054,12 +2992,11 @@
       padding: 3px;
       border: none;
       border-radius: 0;
-      background: #999997 !important;
+      background: #999997;
       transition: background 0.15s;
       outline: none;
       margin-left: 4px;
       flex-shrink: 0;
-      color: #c7c7c7 !important;
     }
 
     #btn-filter svg {
@@ -3067,8 +3004,7 @@
     }
 
     #btn-filter.active {
-      background: #ea5823 !important;
-      color: #e8e6e6 !important;
+      background: #ea5823;
     }
 
     #btn-filter.has-filter::after {
@@ -3096,37 +3032,17 @@
     }
 
     .gallery-action-menu[hidden],
-    .gallery-filter-menu[hidden],
-    .gallery-view-menu[hidden] {
+    .gallery-filter-menu[hidden] {
       display: none;
     }
 
     .gallery-filter-menu {
-      right: 0 !important;
-      left: auto !important;
+      right: 0;
       top: calc(100% + 6px);
       width: 160px;
     }
 
-    .gallery-filter-menu::before {
-      right: 8px !important;
-      left: auto !important;
-    }
-
-    .gallery-view-menu {
-      right: 38px !important;
-      left: auto !important;
-      top: calc(100% + 6px);
-      width: 160px;
-    }
-
-    .gallery-view-menu::before {
-      right: 8px !important;
-      left: auto !important;
-    }
-
-    .gallery-filter-menu .cmp-menu-title:not(:first-child),
-    .gallery-view-menu .cmp-menu-title:not(:first-child) {
+    .gallery-filter-menu .cmp-menu-title:not(:first-child) {
       border-top: 0.756px solid rgba(234,88,35,0.45);
       margin-top: 2px;
     }
@@ -3144,8 +3060,7 @@
       outline: none;
     }
 
-    .gallery-filter-menu .filter-chip,
-    .gallery-view-menu .filter-chip {
+    .gallery-filter-menu .filter-chip {
       width: 100%;
       height: 23px;
       padding: 0 10px;
@@ -3161,8 +3076,7 @@
       justify-content: space-between;
     }
 
-    .gallery-filter-menu .filter-chip:last-child,
-    .gallery-view-menu .filter-chip:last-child {
+    .gallery-filter-menu .filter-chip:last-child {
       border-bottom: 0;
     }
 
@@ -3171,8 +3085,7 @@
       color: #ea5823;
     }
 
-    .gallery-filter-menu .filter-chip.active,
-    .gallery-view-menu .filter-chip.active {
+    .gallery-filter-menu .filter-chip.active {
       background: #5271ff;
       color: #e8e6e6;
       border-bottom-color: rgba(234,88,35,0.55);
@@ -3182,14 +3095,12 @@
       background: rgba(0, 0, 0, 0.08);
     }
 
-    .gallery-filter-menu .filter-chip:hover,
-    .gallery-view-menu .filter-chip:hover {
+    .gallery-filter-menu .filter-chip:hover {
       background: #c7c7c7;
       color: #ea5823;
     }
 
-    .gallery-filter-menu .filter-chip.active:hover,
-    .gallery-view-menu .filter-chip.active:hover {
+    .gallery-filter-menu .filter-chip.active:hover {
       background: #ea5823;
       color: #e8e6e6;
     }

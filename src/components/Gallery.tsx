@@ -17,11 +17,9 @@ export default function Gallery() {
 
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [threeDotDropdownOpen, setThreeDotDropdownOpen] = useState(false);
-  const [viewDropdownOpen, setViewDropdownOpen] = useState(false);
 
   const filterRef = useRef<HTMLDivElement>(null);
   const threeDotRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<HTMLDivElement>(null);
 
   // Close dropdowns on click outside
   useEffect(() => {
@@ -31,9 +29,6 @@ export default function Gallery() {
       }
       if (threeDotRef.current && !threeDotRef.current.contains(e.target as Node)) {
         setThreeDotDropdownOpen(false);
-      }
-      if (viewRef.current && !viewRef.current.contains(e.target as Node)) {
-        setViewDropdownOpen(false);
       }
     };
     document.addEventListener("click", handleClickOutside);
@@ -127,36 +122,19 @@ export default function Gallery() {
 
         <div className="ctrl-spacer"></div>
 
-        <div id="view-wrap" ref={viewRef}>
-          <button 
-            id="btn-grid-view"
-            className={viewDropdownOpen ? "active" : ""} 
-            onClick={() => setViewDropdownOpen(!viewDropdownOpen)}
-            title="Grid size"
-          >
-            {currentView === "small" && (
-              <svg width="16" height="16" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="3" height="3" fill="currentColor"/><rect x="4" y="0" width="3" height="3" fill="currentColor"/><rect x="8" y="0" width="3" height="3" fill="currentColor"/><rect x="12" y="0" width="3" height="3" fill="currentColor"/><rect x="0" y="4" width="3" height="3" fill="currentColor"/><rect x="4" y="4" width="3" height="3" fill="currentColor"/><rect x="8" y="4" width="3" height="3" fill="currentColor"/><rect x="12" y="4" width="3" height="3" fill="currentColor"/><rect x="0" y="8" width="3" height="3" fill="currentColor"/><rect x="4" y="8" width="3" height="3" fill="currentColor"/><rect x="8" y="8" width="3" height="3" fill="currentColor"/><rect x="12" y="8" width="3" height="3" fill="currentColor"/><rect x="0" y="12" width="3" height="3" fill="currentColor"/><rect x="4" y="12" width="3" height="3" fill="currentColor"/><rect x="8" y="12" width="3" height="3" fill="currentColor"/><rect x="12" y="12" width="3" height="3" fill="currentColor"/></svg>
-            )}
-            {currentView === "medium" && (
-              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="6" height="6" fill="currentColor"/><rect x="7" y="0" width="6" height="6" fill="currentColor"/><rect x="14" y="0" width="6" height="6" fill="currentColor"/><rect x="0" y="7" width="6" height="6" fill="currentColor"/><rect x="7" y="7" width="6" height="6" fill="currentColor"/><rect x="14" y="7" width="6" height="6" fill="currentColor"/><rect x="0" y="14" width="6" height="6" fill="currentColor"/><rect x="7" y="14" width="6" height="6" fill="currentColor"/><rect x="14" y="14" width="6" height="6" fill="currentColor"/></svg>
-            )}
-            {currentView === "large" && (
-              <svg width="16" height="16" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="7" height="7" fill="currentColor"/><rect x="8" y="0" width="7" height="7" fill="currentColor"/><rect x="0" y="8" width="7" height="7" fill="currentColor"/><rect x="8" y="8" width="7" height="7" fill="currentColor"/></svg>
-            )}
+        <div className="view-toggles">
+          <button className={`btn-view ${currentView === "small" ? "active" : ""}`} data-view-target="small" onClick={() => setCurrentView("small")}>
+            <svg width="18" height="18" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="3" height="3" fill="currentColor"/><rect x="4" y="0" width="3" height="3" fill="currentColor"/><rect x="8" y="0" width="3" height="3" fill="currentColor"/><rect x="12" y="0" width="3" height="3" fill="currentColor"/><rect x="0" y="4" width="3" height="3" fill="currentColor"/><rect x="4" y="4" width="3" height="3" fill="currentColor"/><rect x="8" y="4" width="3" height="3" fill="currentColor"/><rect x="12" y="4" width="3" height="3" fill="currentColor"/><rect x="0" y="8" width="3" height="3" fill="currentColor"/><rect x="4" y="8" width="3" height="3" fill="currentColor"/><rect x="8" y="8" width="3" height="3" fill="currentColor"/><rect x="12" y="8" width="3" height="3" fill="currentColor"/><rect x="0" y="12" width="3" height="3" fill="currentColor"/><rect x="4" y="12" width="3" height="3" fill="currentColor"/><rect x="8" y="12" width="3" height="3" fill="currentColor"/><rect x="12" y="12" width="3" height="3" fill="currentColor"/></svg>
           </button>
-          <div className={`cmp-menu gallery-view-menu ${viewDropdownOpen ? "open" : ""}`} id="view-dropdown" hidden={!viewDropdownOpen}>
-            <div className="cmp-menu-title">GRID SIZE</div>
-            <button className={`filter-chip ${currentView === "small" ? "active" : ""}`} onClick={() => { setCurrentView("small"); setViewDropdownOpen(false); }}>
-              <span>4X4 GRID</span>
-            </button>
-            <button className={`filter-chip ${currentView === "medium" ? "active" : ""}`} onClick={() => { setCurrentView("medium"); setViewDropdownOpen(false); }}>
-              <span>3X3 GRID</span>
-            </button>
-            <button className={`filter-chip ${currentView === "large" ? "active" : ""}`} onClick={() => { setCurrentView("large"); setViewDropdownOpen(false); }}>
-              <span>2X2 GRID</span>
-            </button>
-          </div>
+          <button className={`btn-view ${currentView === "medium" ? "active" : ""}`} data-view-target="medium" onClick={() => setCurrentView("medium")}>
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="6" height="6" fill="currentColor"/><rect x="7" y="0" width="6" height="6" fill="currentColor"/><rect x="14" y="0" width="6" height="6" fill="currentColor"/><rect x="0" y="7" width="6" height="6" fill="currentColor"/><rect x="7" y="7" width="6" height="6" fill="currentColor"/><rect x="14" y="7" width="6" height="6" fill="currentColor"/><rect x="0" y="14" width="6" height="6" fill="currentColor"/><rect x="7" y="14" width="6" height="6" fill="currentColor"/><rect x="14" y="14" width="6" height="6" fill="currentColor"/></svg>
+          </button>
+          <button className={`btn-view ${currentView === "large" ? "active" : ""}`} data-view-target="large" onClick={() => setCurrentView("large")}>
+            <svg width="18" height="18" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="7" height="7" fill="currentColor"/><rect x="8" y="0" width="7" height="7" fill="currentColor"/><rect x="0" y="8" width="7" height="7" fill="currentColor"/><rect x="8" y="8" width="7" height="7" fill="currentColor"/></svg>
+          </button>
         </div>
+
+        <div className="ctrl-spacer"></div>
 
         <div id="filter-wrap" ref={filterRef}>
           <button 
