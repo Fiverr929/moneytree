@@ -53,12 +53,12 @@ export default function StudioModule() {
         const newGroup: StudioGroup = {
           action: pendingUpload.action || 'TRANSFER',
           name: 'REFERENCE',
-          images: [{ uuid, url }]
+          images: [{ uuid, url, visible: true }]
         };
         setGroups([newGroup, ...groups]);
       } else if (pendingUpload.type === 'insert' && pendingUpload.index !== undefined) {
         const next = [...groups];
-        next[pendingUpload.index].images.push({ uuid, url });
+        next[pendingUpload.index].images.push({ uuid, url, visible: true });
         setGroups(next);
       }
       
@@ -91,12 +91,25 @@ export default function StudioModule() {
     }
   };
 
+  const toggleImageVisibility = (groupIdx: number, imgIdx: number) => {
+    const next = groups.map((group, gIdx) => {
+      if (gIdx !== groupIdx) return group;
+      return {
+        ...group,
+        images: group.images.map((img, iIdx) => (
+          iIdx === imgIdx ? { ...img, visible: img.visible === false } : img
+        ))
+      };
+    });
+    setGroups(next);
+  };
+
   return (
     <div className="studio-module-panel">
       <div className="studio-module-header">
         REFERENCE
         <div 
-          className="sm-header-add" 
+          className={`sm-header-add ${headerMenuOpen ? 'active' : ''}`}
           id="sm-header-add"
           onClick={(e) => { e.stopPropagation(); setHeaderMenuOpen(!headerMenuOpen); setActionDrawerId(null); setEditingGroupId(null); }}
         ></div>
@@ -187,8 +200,17 @@ export default function StudioModule() {
                 )}
 
                 <div className="layer-children">
-                  {g.images.map((img, iIdx) => (
-                    <div key={img.uuid} className="clr">
+                  {g.images.map((img, iIdx) => {
+                    const hidden = img.visible === false;
+                    return (
+                    <div key={img.uuid} className={`clr ${hidden ? 'reference-hidden' : ''}`}>
+                      <button
+                        type="button"
+                        className={`clr-toggle ${hidden ? 'off' : ''}`}
+                        title={hidden ? "Include reference" : "Hide reference"}
+                        aria-label={hidden ? "Include reference" : "Hide reference"}
+                        onClick={() => toggleImageVisibility(gIdx, iIdx)}
+                      ></button>
                       {g.images.length > 1 && (
                         <div className="clr-x" onClick={() => removeImage(gIdx, iIdx)}>
                           <img src="assets/icon-trash.svg" alt="remove" />
@@ -198,7 +220,7 @@ export default function StudioModule() {
                         <img src={img.url} style={{width: '100%', height: '100%', objectFit: 'cover'}} alt="image" />
                       </div>
                     </div>
-                  ))}
+                  )})}
                   <div className={`add-child-row ${g.images.length >= MAX_IMAGES ? 'disabled' : ''}`}>
                     <div className="btn-add-child" onClick={() => {
                       if (g.images.length >= MAX_IMAGES) return;

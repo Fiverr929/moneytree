@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, ReactNode, useEffect } from
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 
-export type ModuleImage = { uuid: string, url: string };
+export type ModuleImage = { uuid: string, url: string, visible?: boolean };
 
 export type StudioGroup = {
   action: string;

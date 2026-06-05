@@ -130,7 +130,7 @@ export default function SettingsModal() {
                 <div className="csm-setting-row">
                   <div className="csm-setting-info">
                     <span className="csm-setting-label">Scan Timing</span>
-                    <span className="csm-setting-hint">When to scan unlinked layer images</span>
+                    <span className="csm-setting-hint">When to scan reference images</span>
                   </div>
                   <div className="csm-opts">
                     <button className={`csm-opt ${scanTiming === 'load' ? 'active' : ''}`} onClick={() => setScanTiming('load')}>On Load</button>

@@ -57,14 +57,14 @@ export default function Studio() {
     }
   }, [isOpen, history]);
 
-  const redrawStrokes = useCallback(() => {
+  const redrawStrokeList = useCallback((strokes: Stroke[]) => {
     const layer = drawLayerRef.current;
     if (!layer) return;
     const ctx = layer.getContext('2d');
     if (!ctx) return;
     
     ctx.clearRect(0, 0, layer.width, layer.height);
-    undoStack.forEach(stroke => {
+    strokes.forEach(stroke => {
       if (stroke.points.length < 2) return;
       ctx.beginPath();
       ctx.strokeStyle = stroke.color;
@@ -75,7 +75,11 @@ export default function Studio() {
       stroke.points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
       ctx.stroke();
     });
-  }, [undoStack]);
+  }, []);
+
+  const redrawStrokes = useCallback(() => {
+    redrawStrokeList(undoStack);
+  }, [redrawStrokeList, undoStack]);
 
   const syncDrawLayer = useCallback(() => {
     const layer = drawLayerRef.current;
@@ -149,15 +153,19 @@ export default function Studio() {
   const handleUndo = () => {
     if (!undoStack.length) return;
     const last = undoStack[undoStack.length - 1];
-    setUndoStack(prev => prev.slice(0, -1));
+    const nextUndoStack = undoStack.slice(0, -1);
+    setUndoStack(nextUndoStack);
     setRedoStack(prev => [...prev, last]);
+    redrawStrokeList(nextUndoStack);
   };
 
   const handleRedo = () => {
     if (!redoStack.length) return;
     const last = redoStack[redoStack.length - 1];
+    const nextUndoStack = [...undoStack, last];
     setRedoStack(prev => prev.slice(0, -1));
-    setUndoStack(prev => [...prev, last]);
+    setUndoStack(nextUndoStack);
+    redrawStrokeList(nextUndoStack);
   };
 
   // Crop Build
@@ -284,7 +292,7 @@ export default function Studio() {
     (async () => {
       try {
         const references = currentGroups.flatMap(g => 
-          g.images.map(img => ({
+          g.images.filter(img => img.visible !== false).map(img => ({
             action: g.action,
             name: g.name,
             url: img.url
@@ -347,7 +355,6 @@ export default function Studio() {
         
         {/* History column */}
         <div className="studio-history">
-          <div className="studio-history-label">HISTORY</div>
           <div className="studio-history-frames" id="studioHistoryFrames">
             {Array.from({ length: loadingCount }).map((_, i) => (
               <div key={`loading-${i}`} className="history-thumb loading" />

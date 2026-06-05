@@ -32,6 +32,11 @@ export async function fetchJSON(url: string, fetchOptions: RequestInit = {}, opt
       return data;
     } catch (err: any) {
       if (timer) clearTimeout(timer);
+      if (err.name === 'AbortError') {
+        const timeoutError = new Error(`${label} Request timed out after ${timeoutMs}ms`);
+        timeoutError.name = 'AbortError';
+        throw timeoutError;
+      }
       throw err;
     }
   }

@@ -13,7 +13,6 @@ export type ModuleFile = {
   size: string;
   dims: string;
   modified: string;
-  linked: boolean;
   eye: boolean;
   strength: number;
   mode: string;
@@ -28,11 +27,7 @@ export type ModuleFolder = {
   locked?: boolean;
 };
 
-const DEFAULT_FOLDERS: ModuleFolder[] = [
-  { id: "SUBJECT", name: "SUBJECT", accent: "#ea5823" },
-  { id: "STAGE", name: "STAGE", accent: "#ea5823" },
-  { id: "STYLE", name: "STYLE", accent: "#ea5823" },
-];
+const DEFAULT_FOLDERS: ModuleFolder[] = [];
 
 export type PendingUpload = {
   url: string;
@@ -96,7 +91,7 @@ const ModuleContext = createContext<ModuleContextType | undefined>(undefined);
 export function ModuleProvider({ children }: { children: ReactNode }) {
   const [files, setFiles] = useState<ModuleFile[]>([]);
   const [folders, setFolders] = useState<ModuleFolder[]>(DEFAULT_FOLDERS);
-  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set(["SUBJECT", "STAGE", "STYLE"]));
+  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   
   const [view, setView] = useState<"root" | "file">("root");
   const [activeFileId, setActiveFileId] = useState<number | null>(null);

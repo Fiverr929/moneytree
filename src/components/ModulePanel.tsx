@@ -7,14 +7,14 @@ import { useApp } from "@/context/AppContext";
 import { useSettings } from "@/context/SettingsContext";
 import DB from "@/lib/db";
 
-const C = { orange: '#ea5823', blue: '#5271ff' };
-const ACCENTS = ['#ea5823', '#5271ff', '#5a8a3a', '#7a4a8a', '#c79a2a', '#3a8a7a'];
+const C = { pink: '#ea3a8a', violet: '#a352ff' };
+const ACCENTS = ['#ea3a8a', '#a352ff', '#5a8a3a', '#7a4a8a', '#c79a2a', '#3a8a7a'];
 const MODES = ['SUBJECT', 'STAGE', 'STYLE', 'MOOD', 'ALL'];
 const MODULE_PRESETS = [
-  { id: 'SUBJECT', name: 'SUBJECT', accent: C.orange },
-  { id: 'STAGE', name: 'STAGE', accent: C.orange },
-  { id: 'STYLE', name: 'STYLE', accent: C.orange },
-  { id: 'MOOD', name: 'MOOD', accent: C.blue }
+  { id: 'SUBJECT', name: 'SUBJECT', accent: '#ea3a8a' },
+  { id: 'STAGE', name: 'STAGE', accent: '#5a8a3a' },
+  { id: 'STYLE', name: 'STYLE', accent: '#c79a2a' },
+  { id: 'MOOD', name: 'MOOD', accent: '#a352ff' }
 ];
 
 export default function ModulePanel() {
@@ -37,9 +37,12 @@ export default function ModulePanel() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  
+  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
+  const [draggedFileId, setDraggedFileId] = useState<number | null>(null);
 
   const [folderFormName, setFolderFormName] = useState("");
-  const [folderFormAccent, setFolderFormAccent] = useState(C.orange);
+  const [folderFormAccent, setFolderFormAccent] = useState(() => ACCENTS[Math.floor(Math.random() * ACCENTS.length)]);
   const [folderPresetOpen, setFolderPresetOpen] = useState(false);
 
   // Sync collapsed state to body for gallery expansion
@@ -79,7 +82,7 @@ export default function ModulePanel() {
   useEffect(() => {
     if (addingFolder) {
       setFolderFormName("");
-      setFolderFormAccent(C.orange);
+      setFolderFormAccent(ACCENTS[Math.floor(Math.random() * ACCENTS.length)]);
       setFolderPresetOpen(false);
     } else if (editingFolder) {
       const folder = folders.find(f => f.id === editingFolder);
@@ -113,7 +116,7 @@ export default function ModulePanel() {
   const assignFile = (fileId: number, folderId: string) => {
     const preset = MODULE_PRESETS.find(p => p.id === folderId);
     const mode = preset ? (preset.id === 'MOOD' ? 'MOOD' : preset.id === 'STYLE' ? 'STYLE' : preset.id === 'STAGE' ? 'STAGE' : 'SUBJECT') : 'SUBJECT';
-    updateFile(fileId, { folder: folderId, linked: true, mode });
+    updateFile(fileId, { folder: folderId, mode });
     setOpenFolders(prev => new Set(prev).add(folderId));
   };
 
@@ -186,7 +189,6 @@ export default function ModulePanel() {
       size: Math.round(pendingUpload.file.size / 1024) + " KB",
       dims: "IMAGE",
       modified: new Date().toLocaleTimeString(),
-      linked: false,
       eye: true,
       strength: 50,
       mode: "SUBJECT",
@@ -242,14 +244,94 @@ export default function ModulePanel() {
   };
 
   // Drag and Drop
-  const handleDragStart = (e: React.DragEvent, id: number) => e.dataTransfer.setData('text/plain', id.toString());
-  const handleDragOver = (e: React.DragEvent, folderId: string) => { e.preventDefault(); setDragOver(folderId); };
-  const handleDragLeave = () => setDragOver(null);
-  const handleDrop = (e: React.DragEvent, folderId: string) => {
+  const handleFolderDragStart = (e: React.DragEvent, folderId: string) => {
+    setDraggedFolderId(folderId);
+    setDraggedFileId(null);
+    e.dataTransfer.setData('text/plain', folderId);
+  };
+
+  const handleFileDragStart = (e: React.DragEvent, fileId: number) => {
+    setDraggedFileId(fileId);
+    setDraggedFolderId(null);
+    e.dataTransfer.setData('text/plain', fileId.toString());
+  };
+
+  const handleFolderDragOver = (e: React.DragEvent, folderId: string) => {
     e.preventDefault();
-    const fileId = parseInt(e.dataTransfer.getData('text/plain'), 10);
-    if (!isNaN(fileId)) assignFile(fileId, folderId);
+    setDragOver(folderId);
+  };
+
+  const handleFolderDrop = (e: React.DragEvent, targetFolderId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (draggedFolderId) {
+      if (draggedFolderId !== targetFolderId) {
+        const draggedIdx = folders.findIndex(f => f.id === draggedFolderId);
+        const targetIdx = folders.findIndex(f => f.id === targetFolderId);
+        if (draggedIdx !== -1 && targetIdx !== -1) {
+          const nextFolders = [...folders];
+          const [moved] = nextFolders.splice(draggedIdx, 1);
+          nextFolders.splice(targetIdx, 0, moved);
+          setFolders(nextFolders);
+        }
+      }
+    } else if (draggedFileId !== null) {
+      assignFile(draggedFileId, targetFolderId);
+    }
+    
+    setDraggedFolderId(null);
+    setDraggedFileId(null);
     setDragOver(null);
+  };
+
+  const handleFolderDragLeave = () => setDragOver(null);
+
+  const handleFileDrop = (e: React.DragEvent, targetFileId: number, targetFolderId: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (draggedFileId !== null && draggedFileId !== targetFileId) {
+      const draggedFile = files.find(f => f.id === draggedFileId);
+      if (!draggedFile) return;
+
+      const preset = targetFolderId ? MODULE_PRESETS.find(p => p.id === targetFolderId) : null;
+      const newMode = preset ? preset.id : draggedFile.mode;
+
+      setFiles(prev => {
+        const tempFiles = prev.map(f => f.id === draggedFileId ? { ...f, folder: targetFolderId, mode: newMode } : f);
+
+        const groupFiles = tempFiles
+          .filter(f => f.folder === targetFolderId)
+          .sort((a, b) => b.modified.localeCompare(a.modified));
+
+        const draggedIdx = groupFiles.findIndex(f => f.id === draggedFileId);
+        const targetIdx = groupFiles.findIndex(f => f.id === targetFileId);
+
+        if (draggedIdx !== -1 && targetIdx !== -1) {
+          const reorderedGroup = [...groupFiles];
+          const [moved] = reorderedGroup.splice(draggedIdx, 1);
+          reorderedGroup.splice(targetIdx, 0, moved);
+
+          const now = Date.now();
+          const next = tempFiles.map(f => {
+            if (f.folder === targetFolderId) {
+              const idxInGroup = reorderedGroup.findIndex(x => x.id === f.id);
+              const newModified = new Date(now - idxInGroup * 1000).toISOString();
+              const updatedFile = { ...f, modified: newModified };
+              if (activeProjectId) DB.references.put({ ...updatedFile, project_id: activeProjectId });
+              return updatedFile;
+            }
+            return f;
+          });
+          return next;
+        }
+        return prev;
+      });
+    }
+    
+    setDraggedFileId(null);
+    setDraggedFolderId(null);
   };
 
   const renderThumb = (file: ModuleFile) => {
@@ -301,8 +383,20 @@ export default function ModulePanel() {
       <div 
         key={f.id} 
         className={`cmp-image-row ${f.folder === null ? 'loose' : ''} ${selected ? 'selected' : ''} ${!f.eye ? 'hidden' : ''}`}
-        draggable={f.folder === null}
-        onDragStart={(e) => handleDragStart(e, f.id)}
+        draggable={true}
+        onDragStart={(e) => {
+          e.stopPropagation();
+          handleFileDragStart(e, f.id);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          handleFileDrop(e, f.id, f.folder);
+        }}
         onClick={() => {
           if (selectMode) {
             const next = new Set(selectedIds);
@@ -317,7 +411,6 @@ export default function ModulePanel() {
         {selectMode && <span className="cmp-check">{selected ? '\u2713' : ''}</span>}
         <div className="cmp-thumb">
           {renderThumb(f)}
-          {f.linked && <span className="cmp-linked-dot"></span>}
         </div>
         <div className="cmp-row-main">
           {renaming ? (
@@ -370,7 +463,7 @@ export default function ModulePanel() {
       if (folder) {
         setFolders(folders.map(f => f.id === folder.id ? { ...f, id: preset.id, name: preset.name, accent: folderFormAccent } : f));
         if (preset.id !== folder.id) {
-          setFiles(files.map(f => f.folder === folder.id ? { ...f, folder: preset.id, mode: preset.id === 'MOOD' ? 'MOOD' : preset.id === 'STYLE' ? 'STYLE' : preset.id === 'STAGE' ? 'STAGE' : 'SUBJECT', linked: true } : f));
+          setFiles(files.map(f => f.folder === folder.id ? { ...f, folder: preset.id, mode: preset.id } : f));
           setOpenFolders(prev => {
             const next = new Set(prev);
             next.delete(folder.id);
@@ -387,7 +480,7 @@ export default function ModulePanel() {
     };
     
     return (
-      <div className="cmp-folder-form">
+      <div key={isNew ? "new-folder-form" : folder.id} className="cmp-folder-form">
         <div className="cmp-folder-form-head">
           <span>{isNew ? 'NEW BRIEF SLOT' : 'BRIEF SLOT'}</span>
           <b>PRESET</b>
@@ -417,6 +510,7 @@ export default function ModulePanel() {
               {list.length > 0 ? list.map(p => (
                 <button key={p.id} onClick={() => {
                   setFolderFormName(p.id);
+                  setFolderFormAccent(p.accent);
                   setFolderPresetOpen(false);
                 }}>
                   <i style={{background: p.accent}}></i><span>{p.name}</span>
@@ -460,9 +554,11 @@ export default function ModulePanel() {
         key={folder.id} 
         className={`cmp-folder ${dragOver === folder.id ? 'drag-over' : ''} ${list.length === 0 ? 'empty' : ''} ${list.length > 1 ? 'stacked' : ''}`} 
         style={{"--folder-accent": folder.accent} as React.CSSProperties}
-        onDragOver={(e) => handleDragOver(e, folder.id)}
-        onDragLeave={handleDragLeave}
-        onDrop={(e) => handleDrop(e, folder.id)}
+        draggable={true}
+        onDragStart={(e) => handleFolderDragStart(e, folder.id)}
+        onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+        onDragLeave={handleFolderDragLeave}
+        onDrop={(e) => handleFolderDrop(e, folder.id)}
       >
         <div className={`cmp-folder-head ${open ? 'open' : ''}`} style={{background: open ? folder.accent : ''}}>
           <button className="cmp-folder-toggle" onClick={() => {
@@ -488,7 +584,7 @@ export default function ModulePanel() {
               <button className="danger" onClick={(e) => { 
                 e.stopPropagation(); 
                 setFolders(folders.filter(f => f.id !== folder.id));
-                setFiles(files.map(f => f.folder === folder.id ? { ...f, folder: null, linked: false } : f));
+                setFiles(files.map(f => f.folder === folder.id ? { ...f, folder: null } : f));
                 setFolderMenuId(null);
               }}>DELETE</button>
             </div>
@@ -522,29 +618,24 @@ export default function ModulePanel() {
         
         {showUpload ? renderUploadForm() : null}
         
-        <div className="cmp-actions">
-          <div className="cmp-actions-left">
-            <button className="cmp-icon-btn" onClick={() => fileInputRef.current?.click()} title="Load brief image"><span className="cmp-plus-icon"></span></button>
-            <button className="cmp-icon-btn" onClick={() => setAddingFolder(true)} title="New brief slot"><span className="cmp-folder-icon"></span></button>
-          </div>
-          <button className={`cmp-select-btn ${selectMode ? 'active' : ''}`} onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()); }}>
-            {selectMode ? 'DONE' : 'SELECT'}
-          </button>
-        </div>
-
-        {selectMode && selectedIds.size > 0 && (
-          <div className="cmp-bulk">
-            <span>{selectedIds.size} SELECTED</span>
-            <div>
-              <button onClick={() => { setFiles(files.map(f => selectedIds.has(f.id) ? { ...f, linked: true } : f)); setSelectMode(false); setSelectedIds(new Set()); }}>LINK</button>
-              <button onClick={() => { setFiles(files.map(f => selectedIds.has(f.id) ? { ...f, linked: false } : f)); setSelectMode(false); setSelectedIds(new Set()); }}>UNLINK</button>
-              <button onClick={() => { setFiles(files.map(f => selectedIds.has(f.id) ? { ...f, eye: false } : f)); setSelectMode(false); setSelectedIds(new Set()); }}>HIDE</button>
-              <button onClick={() => { setFiles(files.filter(f => !selectedIds.has(f.id))); setSelectMode(false); setSelectedIds(new Set()); }}>DELETE</button>
-            </div>
-          </div>
-        )}
-
-        <div className="cmp-scroll">
+        <div 
+          className="cmp-scroll"
+          onDragOver={(e) => {
+            e.preventDefault();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const fileId = parseInt(e.dataTransfer.getData('text/plain'), 10);
+            if (!isNaN(fileId) && draggedFileId === fileId) {
+              const draggedFile = files.find(f => f.id === fileId);
+              if (draggedFile && draggedFile.folder !== null) {
+                updateFile(fileId, { folder: null });
+              }
+            }
+            setDraggedFileId(null);
+            setDraggedFolderId(null);
+          }}
+        >
           {q ? (
             <>
               <div className="cmp-results-head"><span>RESULTS</span><b>{results.length} OF {assigned.length}</b></div>
@@ -558,8 +649,28 @@ export default function ModulePanel() {
             </>
           )}
         </div>
+
+        {selectMode && selectedIds.size > 0 && (
+          <div className="cmp-bulk">
+            <span>{selectedIds.size} SELECTED</span>
+            <div>
+              <button onClick={() => { setFiles(files.map(f => selectedIds.has(f.id) ? { ...f, eye: false } : f)); setSelectMode(false); setSelectedIds(new Set()); }}>HIDE</button>
+              <button onClick={() => { setFiles(files.filter(f => !selectedIds.has(f.id))); setSelectMode(false); setSelectedIds(new Set()); }}>DELETE</button>
+            </div>
+          </div>
+        )}
         
-        <div className="cmp-status">
+        <div className="cmp-actions">
+          <div className="cmp-actions-left">
+            <button className="cmp-icon-btn" onClick={() => fileInputRef.current?.click()} title="Load brief image"><span className="cmp-plus-icon"></span></button>
+            <button className="cmp-icon-btn" onClick={() => setAddingFolder(true)} title="New brief slot"><span className="cmp-folder-icon"></span></button>
+          </div>
+          <button className={`cmp-select-btn ${selectMode ? 'active' : ''}`} onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()); }}>
+            {selectMode ? 'DONE' : 'SELECT'}
+          </button>
+        </div>
+        
+        <div className="cmp-status cmp-root-status">
           <span>{folders.length} SLOT &middot; {assigned.length} FILES</span>
           <span>{rootFiles.length} UNASSIGNED</span>
         </div>
@@ -645,9 +756,6 @@ export default function ModulePanel() {
           
           <div className="cmp-detail-section">
             <h4>STATE</h4>
-            <button className={`cmp-toggle ${f.linked ? 'on' : ''}`} onClick={() => updateFile(f.id, { linked: !f.linked })}>
-              <span>LINKED</span><b>{f.linked ? 'ON' : 'OFF'}</b>
-            </button>
             <button className={`cmp-toggle ${f.eye ? 'on' : ''}`} onClick={() => updateFile(f.id, { eye: !f.eye })}>
               <span>VISIBLE</span><b>{f.eye ? 'ON' : 'OFF'}</b>
             </button>
