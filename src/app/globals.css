@@ -2884,7 +2884,29 @@
       z-index: 100;
     }
 
-    /* ─── SELECT button ── */
+    /* SELECT button */
+    #btn-select {
+      font-size: 14px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      height: 24px;
+      width: 66px;
+      border: none;
+      border-radius: 0;
+      background: #999997;
+      color: #c7c7c7;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s, color 0.15s;
+      outline: none;
+    }
+
+    #btn-select.active {
+      background: #ea5823;
+      color: #c7c7c7;
+    }
 
 
     /* ─── 3-dot wrapper — slides in, pushes SELECT right ── */
