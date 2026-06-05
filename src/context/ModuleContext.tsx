@@ -132,14 +132,13 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
             try {
               const img = await DB.images.get(f.uuid);
               if (img && img.dataUrl) return { ...f, url: img.dataUrl };
-            } catch(e) {}
+            } catch {}
           }
           return f;
         }));
         setFiles(withUrls);
       }).catch(console.error);
     } else {
-      // eslint-disable-next-line react-hooks/exhaustive-deps
       setFiles([]);
     }
   }, [activeProjectId]);

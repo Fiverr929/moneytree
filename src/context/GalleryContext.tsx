@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
+import type { ModuleFile } from "@/context/ModuleContext";
 export type GalleryCell = {
   id: number;
   uuid?: string;
@@ -17,7 +18,7 @@ export type GalleryCell = {
   dims?: string;
   generated?: boolean;
   mode?: string;
-  moduleSnapshot?: { files: any[] };
+  moduleSnapshot?: { files: ModuleFile[] };
   usedImages?: {imgUrl: string}[];
   // Internal state for pending loads
   loadingId?: string;
@@ -86,14 +87,13 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
             try {
               const img = await DB.images.get(c.uuid);
               if (img && img.dataUrl) return { ...c, imgUrl: img.dataUrl };
-            } catch(e) {}
+            } catch {}
           }
           return c;
         }));
         setCells(withUrls.reverse());
       }).catch(console.error);
     } else {
-      // eslint-disable-next-line react-hooks/exhaustive-deps
       setCells([]);
     }
   }, [activeProjectId]);

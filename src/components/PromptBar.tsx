@@ -9,7 +9,7 @@ import { generate } from "@/lib/pipeline/api";
 import { collectPayload } from "@/lib/pipeline/prompt-builder";
 
 export default function PromptBar() {
-  const { generationState, setGenerationState } = useApp();
+  const { generationState, setGenerationState, setSettingsOpen } = useApp();
   const settings = useSettings();
   const gallery = useGallery();
   const moduleContext = useModule();
@@ -67,6 +67,12 @@ export default function PromptBar() {
 
   const handleGenerate = async () => {
     if (isGenerating) return;
+    if (!settings.googleApiKey.trim()) {
+      setSettingsOpen(true);
+      setDropdownOpen(false);
+      return;
+    }
+
     const trimmed = promptText.trim();
     if (trimmed && promptHistory[0] !== trimmed) {
       setPromptHistory([trimmed, ...promptHistory]);
@@ -205,10 +211,10 @@ export default function PromptBar() {
               onClick={(e) => {
                 e.stopPropagation();
                 if (generationState === "FRAME") {
-                  let v = parseInt(frameVar.toString(), 10);
+                  const v = parseInt(frameVar.toString(), 10);
                   if (v > 1) setFrameVar(v - 1);
                 } else {
-                  let v = parseInt(frameCount.toString(), 10);
+                  const v = parseInt(frameCount.toString(), 10);
                   if (v > 1) setFrameCount(v - 1);
                 }
               }}
@@ -219,10 +225,10 @@ export default function PromptBar() {
               onClick={(e) => {
                 e.stopPropagation();
                 if (generationState === "FRAME") {
-                  let v = parseInt(frameVar.toString(), 10);
+                  const v = parseInt(frameVar.toString(), 10);
                   if (v < 10) setFrameVar(v + 1);
                 } else {
-                  let v = parseInt(frameCount.toString(), 10);
+                  const v = parseInt(frameCount.toString(), 10);
                   if (v < 99) setFrameCount(v + 1);
                 }
               }}

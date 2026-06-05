@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { GenerationSettings, GenerationPayload } from './api';
+import { GenerationSettings } from './api';
 import { ModuleFile } from "@/context/ModuleContext";
 
 export function collectPayload(

@@ -65,7 +65,16 @@ export default function ModulePanel() {
     };
     document.addEventListener('mousedown', handleDocClick);
     return () => document.removeEventListener('mousedown', handleDocClick);
-  }, [menuFileId, moveFileId, folderMenuId, inspectorMenuOpen]);
+  }, [
+    menuFileId,
+    moveFileId,
+    folderMenuId,
+    inspectorMenuOpen,
+    setFolderMenuId,
+    setInspectorMenuOpen,
+    setMenuFileId,
+    setMoveFileId,
+  ]);
 
   useEffect(() => {
     if (addingFolder) {
@@ -243,7 +252,7 @@ export default function ModulePanel() {
     setDragOver(null);
   };
 
-  const renderThumb = (file: ModuleFile, big = false) => {
+  const renderThumb = (file: ModuleFile) => {
     if (file.url) return <img className="cmp-thumb-img" src={file.url} alt="" />;
     return (
       <svg viewBox="0 0 100 100" className="cmp-thumb-svg">
@@ -297,7 +306,8 @@ export default function ModulePanel() {
         onClick={() => {
           if (selectMode) {
             const next = new Set(selectedIds);
-            next.has(f.id) ? next.delete(f.id) : next.add(f.id);
+            if (next.has(f.id)) next.delete(f.id);
+            else next.add(f.id);
             setSelectedIds(next);
           } else {
             setView('file'); setActiveFileId(f.id); setShowInfo(false); setLabelEditOpen(false);
@@ -457,7 +467,8 @@ export default function ModulePanel() {
         <div className={`cmp-folder-head ${open ? 'open' : ''}`} style={{background: open ? folder.accent : ''}}>
           <button className="cmp-folder-toggle" onClick={() => {
             const next = new Set(openFolders);
-            next.has(folder.id) ? next.delete(folder.id) : next.add(folder.id);
+            if (next.has(folder.id)) next.delete(folder.id);
+            else next.add(folder.id);
             setOpenFolders(next);
           }}>
             <span className="cmp-chevron"></span>
@@ -598,7 +609,7 @@ export default function ModulePanel() {
         <div className="cmp-detail-body">
           <div className="cmp-image-card-stack">
             <div className="cmp-big-thumb" title="Open in Studio" onClick={() => openStudio({ uuid: f.uuid, imgUrl: f.url })}>
-              {renderThumb(f, true)}
+              {renderThumb(f)}
               <span>{f.dims}</span>
               <b className={`mode-${f.mode}`}>{f.mode}</b>
             </div>

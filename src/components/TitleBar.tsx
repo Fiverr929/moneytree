@@ -2,13 +2,17 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useApp } from "@/context/AppContext";
+import { usePathname, useRouter } from "next/navigation";
 
 export default function TitleBar() {
   const { setProjectsOpen, setSettingsOpen } = useApp();
   
   const [menuOpen, setMenuOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"image" | "video">("image");
   const menuRef = useRef<HTMLDivElement>(null);
+  
+  const pathname = usePathname();
+  const router = useRouter();
+  const activeTab = pathname === "/video" ? "video" : "image";
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -47,8 +51,8 @@ export default function TitleBar() {
             <button className="menu-item" type="button"><span>EXPORT</span></button>
           </div>
         </div>
-        <div className={`tab ${activeTab === 'image' ? 'active' : 'inactive'}`} onClick={() => setActiveTab('image')}>IMAGE</div>
-        <div className={`tab ${activeTab === 'video' ? 'active' : 'inactive'}`} onClick={() => setActiveTab('video')}>VIDEO</div>
+        <div className={`tab ${activeTab === 'image' ? 'active' : 'inactive'}`} onClick={() => router.push("/")}>IMAGE</div>
+        <div className={`tab ${activeTab === 'video' ? 'active' : 'inactive'}`} onClick={() => router.push("/video")}>VIDEO</div>
       </div>
     </div>
   );

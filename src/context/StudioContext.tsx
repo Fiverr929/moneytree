@@ -127,7 +127,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             layers: { groups }
           };
           await DB.studioState.save(activeProjectId, saved);
-        } catch (_err: unknown) {}
+        } catch {}
       }, 1000);
       return () => clearTimeout(timer);
     }

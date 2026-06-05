@@ -21,14 +21,21 @@ Current scope: Image generation (FRAME mode). Video, Audio, Timeline are future 
 
 ## Stack
 
-Next.js (App Router) / React / TypeScript / CSS Modules.
-Legacy inline scripts have been ported to React Context providers and functional components.
+Current implementation is a Next.js / React app in `src/`.
 
-Main entry: `src/app/page.tsx`
-Styles: `src/app/globals.css` (imported globally), inline `style` props.
-Logic files: `src/context/` (GalleryContext, ModuleContext, StudioContext, SettingsContext)
-API logic: `src/lib/` (api.ts, composition.ts, enhancer.ts, net.ts, vision.ts, db.ts)
-Components: `src/components/` (HUD.tsx, Studio.tsx, PromptBar.tsx, etc.)
+Legacy docs below still reference the original plain HTML / CSS / JS build (`CafeHTML-v2.html`, `style.css`, and `logic/*.js`). Treat those sections as product and architecture history unless they have a Next.js equivalent listed here.
+
+Current files:
+- App shell: `src/app/page.tsx`, `src/app/layout.tsx`, `src/app/globals.css`
+- Components: `src/components/*`
+- State: `src/context/*`
+- Pipeline: `src/lib/pipeline/*`
+- Storage: `src/lib/db.ts`
+
+Legacy files:
+Main file: `CafeHTML-v2.html`
+Styles: `style.css`
+Logic files: `logic/net.js`, `logic/api.js`, `logic/prompt-builder.js`, `logic/enhancer.js`, `logic/vision.js`, `logic/registry.js`, `logic/settings.js`, `logic/workspace.js`, `logic/storage.js`, `logic/debug-logger.js`, `logic/prompt-bar.js`, `logic/module-panel.js`, `logic/gallery.js`, `logic/sequence-bar.js`, `logic/studio.js`, `logic/studio-module.js`
 Docs: `docs/` folder
 
 ---
@@ -56,9 +63,9 @@ There is no single-request multi-image parameter for the Gemini image models, so
 
 ## VisionScan Pipeline
 
-VisionScan (`src/lib/vision.ts`) describes individual images using `gemini-2.5-flash`. Its output feeds the enhancer so the enhancer call becomes text-only for described images — faster and cheaper than sending everything inline.
+VisionScan (`vision.js`) describes individual images using `gemini-2.5-flash`. Its output feeds the enhancer so the enhancer call becomes text-only for described images — faster and cheaper than sending everything inline.
 
-All caching is handled by **DescriptionRegistry** (`src/lib/db.ts`) — VisionScan functions call Gemini directly, no internal cache.
+All caching is handled by **DescriptionRegistry** (`registry.js`) — VisionScan functions call Gemini directly, no internal cache.
 
 ### Scan Timing Setting
 
@@ -81,7 +88,7 @@ All caching is handled by **DescriptionRegistry** (`src/lib/db.ts`) — VisionSc
 
 **Keep OFF** — Always fresh.
 - Registry descriptions are used for the current generation
-- `Registry.clear()` is called after successful generation (`src/lib/api.ts`)
+- `Registry.clear()` is called after successful generation (`api.js`)
 - Enhancer brief cache is never written
 - On Load: catch-up scan can refill missing descriptions before enhancement
 - On Generate: inline images go directly to PromptEnhancer; no description catch-up scan
@@ -92,12 +99,12 @@ If VisionScan fails for any image (429, timeout, network error), that image's `d
 
 ### Retry Behavior
 
-All Google calls share one helper — `CafeNet.fetchJSON` (`src/lib/net.ts`) — which handles 429 retry/backoff plus an optional per-attempt timeout (used by VisionScan's AbortController path):
+All Google calls share one helper — `CafeNet.fetchJSON` (`logic/net.js`) — which handles 429 retry/backoff plus an optional per-attempt timeout (used by VisionScan's AbortController path):
 - Attempt 1: wait 5 seconds, retry
 - Attempt 2: wait 10 seconds, retry
 - After 2 retries: hard fail (VisionScan → image goes inline; enhancer → pipeline aborts; generation → that one variation is dropped, the rest of the batch still resolves)
 
-`src/lib/api.ts`, `src/lib/enhancer.ts`, and `src/lib/vision.ts` all route through it; each keeps its own response parsing and logging.
+`api.js`, `enhancer.js`, and `vision.js` all route through it; each keeps its own response parsing and logging.
 
 ---
 
@@ -105,9 +112,9 @@ All Google calls share one helper — `CafeNet.fetchJSON` (`src/lib/net.ts`) —
 
 The visible Module Panel is now the S-C reference manager: a 264px sidebar for image references, loose uploads, named modules/folders, per-image AI-use controls, and image inspection.
 
-### Current Module Panel (`src/components/ModulePanel.tsx`)
+### Current Module Panel (`logic/module-panel.js`)
 
-Primary state is `ModuleContext state.cafeModule`:
+Primary state is `window.ModuleState.cafeModule`:
 
 ```js
 {
@@ -139,7 +146,7 @@ Primary state is `ModuleContext state.cafeModule`:
 
 ### Legacy Generation Bridge
 
-PromptBuilder still reads `ModuleContext state.subject/stage/style` HTML snapshots. The new panel keeps that contract alive by generating hidden compatible snapshots from `cafeModule`.
+PromptBuilder still reads `window.ModuleState.subject/stage/style` HTML snapshots. The new panel keeps that contract alive by generating hidden compatible snapshots from `cafeModule`.
 
 Mode-to-section mapping for custom-folder files:
 
@@ -166,7 +173,7 @@ STAGE / STYLE
 
 - Multiple slots = independent sets (not the same thing from multiple angles)
 - Multiple image children in the same layer = multiple views of the same thing
-- `ModuleContext state = { subject, stage, style, cafeModule }` — live state
+- `window.ModuleState = { subject, stage, style, cafeModule }` — live state
 
 ---
 
@@ -186,7 +193,7 @@ Each child slot (`.clr`) has a `T` badge:
 The prompt-bar `+` button is a module intake shortcut only.
 
 - Button id: `#moduleQuickUpload`
-- Action: calls `ModuleContext.openUpload()`
+- Action: calls `window.ModulePanel.openUpload()`
 - Result: opens existing module upload form; uploaded images go into module panel flow (loose/module files)
 - No separate global reference lane, no R1-R5 manifest path
 
@@ -198,7 +205,7 @@ Loose uploads now enter `PromptBuilder.collect().refs` as the Reference layer. T
 
 Studio is the current image editing workspace for Gallery images and Module image layers.
 
-- **Entry points** — Gallery HUD pencil and Module image row / Image Inspector `...` menu `STUDIO` both call `StudioContext.open({ imgUrl, uuid, ratio, caller, onDone })`
+- **Entry points** — Gallery HUD pencil and Module image row / Image Inspector `...` menu `STUDIO` both call `window.Studio.open({ imgUrl, uuid, ratio, caller, onDone })`
 - **History is image-specific** — saved under `DB.studioState.histories[uuid]`, not shared globally
 - **Active history image** — clicking a history thumbnail updates `activeUrl`; Back returns that selected active image to the caller
 - **Gallery return** — replaces the original Gallery image in place with the selected active Studio image
@@ -222,12 +229,12 @@ Purpose-built panel — does not use `ModulePanel.makeSection`. Owns its own ren
 
 ## Projects Panel
 
-The Projects modal is owned by `src/components/PromptBar.tsx`; persistence lives in `src/lib/workspace.ts` and `src/lib/db.ts`.
+The Projects modal is owned by `logic/prompt-bar.js`; persistence lives in `logic/workspace.js` and `logic/storage.js`.
 
-- **New** â€” creates `Project N` directly, loads it with `skipSave=true`, and closes the modal
-- **Delete** â€” visible `×` button removes the project and cascades its related DB records
-- **Delete final project** â€” clears the workspace and leaves the Projects list empty; it does not auto-create a replacement project
-- **Storage cascade** â€” project/settings/module/studio/reference/gallery/sequence records delete first, then image/description records clean up by project
+- **New** - creates `Project N` directly, loads it with `skipSave=true`, and closes the modal
+- **Delete** - visible `×` button removes the project and cascades its related DB records
+- **Delete final project** - clears the workspace and leaves the Projects list empty; it does not auto-create a replacement project
+- **Storage cascade** - project/settings/module/studio/reference/gallery/sequence records delete first, then image/description records clean up by project
 
 ---
 
@@ -251,17 +258,28 @@ Google AI Platform only (`aiplatform.googleapis.com`). fal.ai has been removed e
 
 ---
 
-## Window Globals (Legacy vs React Contexts)
+## Window Globals
 
-In the original vanilla JS app, state was managed via `*`.
-In the Next.js rewrite, these have been replaced by React Contexts:
+```
+window.CafeAPI          — generation pipeline (api.js)
+window.PromptBuilder    — payload collector (prompt-builder.js)
+window.PromptEnhancer   — brief writer / manifest builder (enhancer.js)
+window.DescriptionRegistry — centralized description store (registry.js)
+window.VisionScan       — image description agent (vision.js)
+window.CafeSettings     — settings state + modal (settings.js)
+window.Workspace        — project persistence (workspace.js)
+window.DB               — IndexedDB abstraction (storage.js)
+window.CafeDebug        — generation run logger (debug-logger.js)
+window.Gallery          — gallery UI (gallery.js)
+window.ModuleState      — live module state (module-panel.js)
+window.ModulePanel      — module panel facade { getState, render, openUpload, setVisionDesc, clearVisionDescriptions } (module-panel.js)
+window.Studio           — studio overlay (studio.js)
+window.StudioModule     — studio reference panel (studio-module.js)
+window.StudioModuleState — live studio module state (studio-module.js)
+window.refState         — empty compatibility shim { FRAME: [], SCENE: [] }
+```
 
-- `GalleryContext` -> `GalleryContext` (`useGallery`)
-- `ModuleContext state` / `ModuleContext` -> `ModuleContext` (`useModule`)
-- `StudioContext` / `StudioContextModule` -> `StudioContext` (`useStudio`)
-- `SettingsContext` -> `SettingsContext` (`useSettings`)
-- `api.ts functions`, `PromptBuilder`, etc -> Pure functions in `src/lib/api.ts`
-- `DB` -> IndexedDB wrapper in `src/lib/db.ts`
+No `CafeEntities` registry — direct window globals only.
 
 ---
 
@@ -286,10 +304,10 @@ In the Next.js rewrite, these have been replaced by React Contexts:
 
 ## Component Build Process
 
-1. Build components as isolated React components first. in `C:\Users\This PC\Gravity`
+1. Build every component as a standalone HTML file first in `C:\Users\This PC\Gravity`
 2. User reviews and approves the standalone version
-3. Only then integrate into `src/app/page.tsx`
-4. When syncing — do NOT launch explore agents. Ensure functional components are cleanly integrated with their respective contexts.
+3. Only then integrate into `CafeHTML-v2.html`
+4. When syncing — do NOT launch explore agents. Grep/Read the target file at insertion points and edit directly.
 
 ---
 
@@ -299,7 +317,7 @@ In the Next.js rewrite, these have been replaced by React Contexts:
 - Font: Times New Roman, all-caps labels
 - No extra comments, no docstrings, no unnecessary abstractions
 - Don't add features beyond what was asked
-- Match existing patterns in `src/app/page.tsx`
+- Match existing patterns in `CafeHTML-v2.html`
 
 ---
 
@@ -447,7 +465,7 @@ Controls which subject slot (A, B, C…) is active and ON/OFF.
 
 ### Edit (Pencil) Button
 
-`.clr-edit` — opens the Studio overlay for image editing (`StudioContext.open`).
+`.clr-edit` — opens the Studio overlay for image editing (`window.Studio.open`).
 
 ### Link / Unlink Button
 
@@ -479,12 +497,12 @@ Orange = active, expanded. `.collapsed` rotates arrow −90°. Collapsing hides 
 
 | Component | File | Status |
 |---|---|---|
-| Prompt Bar + Ref Chips + Projects | `src/components/PromptBar.tsx` | Done |
-| Module Panel (SUBJECT/STAGE/STYLE) | `src/components/ModulePanel.tsx` | Done |
-| Gallery + Image HUD | `src/components/Gallery.tsx` | Done |
-| Sequence Bar | `src/components/SequenceBar.tsx` | Done |
-| Studio Overlay | `src/components/Studio.tsx` | Done |
-| Studio Reference Panel | `src/components/StudioModule.tsx` | Done |
+| Prompt Bar + Ref Chips + Projects | `logic/prompt-bar.js` | Done |
+| Module Panel (SUBJECT/STAGE/STYLE) | `logic/module-panel.js` | Done |
+| Gallery + Image HUD | `logic/gallery.js` | Done |
+| Sequence Bar | `logic/sequence-bar.js` | Done |
+| Studio Overlay | `logic/studio.js` | Done |
+| Studio Reference Panel | `logic/studio-module.js` | Done |
 
 ---
 
@@ -503,12 +521,12 @@ Orange = active, expanded. `.collapsed` rotates arrow −90°. Collapsing hides 
 | 2026-05-08 | VisionScan pipeline wired into enhancer | Described images go as text, not inline — faster enhancer calls, less quota |
 | 2026-05-08 | Enhancer brief cache added | Keyed on userMessage + image URLs; gated on Keep Descriptions setting |
 | 2026-05-08 | Retry added to VisionScan and enhancer | 5s/10s on 429; generation model retry shortened from 20s/40s to 5s/10s |
-| 2026-05-11 | Inline JS extracted to 5 logic/ modules | ~2400 lines split into prompt-bar.js, module-panel.js, gallery.js, sequence-bar.js, refine.js. Reduces context cost when editing. Load order is safe — all communication via * globals at click time. |
-| 2026-05-12 | DescriptionRegistry centralized all image description storage | Replaced scattered storage (DOM dataset, VisionScan._cache, refState) with single URL→description map. refState shape changed from `string[]` to `{url, desc}[]`. Catch-up scan added to src/lib/api.ts. Image dispatch fixed — all images now sent to Nano Banana. VisionScan caching layer removed — Registry owns all caching. |
-| 2026-05-18 | On Generate enhancer cache disabled for inline images | `PromptEnhancer` no longer reuses final brief cache when inline module/ref images are present. `Keep Descriptions` remains a description cache, not a stale generated-brief cache. Added UUID assignment for module uploads/generated module images and fingerprint logs in `src/lib/api.ts` / `src/lib/enhancer.ts`. |
-| 2026-05-19 | Modular logic is canonical | The legacy inline behavior block in `src/app/page.tsx` is disabled as inert text. Runtime behavior now loads from `src/components/PromptBar.tsx`, `src/components/ModulePanel.tsx`, `src/components/Gallery.tsx`, `src/components/SequenceBar.tsx`, `src/components/Refine.tsx`, and the generation modules. `src/lib/db.ts` is loaded after `src/lib/vision.ts`. |
-| 2026-05-21 | Inline CSS extracted from HTML | Extracted ~4000 lines of inline styles from `src/app/page.tsx` and prepended them to `src/app/globals.css` to completely remove the single-file inline constraint. |
-| 2026-05-21 | Parallel Generation Restored | Replaced `runSequential` with `Promise.all` in `src/lib/api.ts` to ensure that multiple requested variations are generated concurrently, drastically speeding up generation times. |
+| 2026-05-11 | Inline JS extracted to 5 logic/ modules | ~2400 lines split into prompt-bar.js, module-panel.js, gallery.js, sequence-bar.js, refine.js. Reduces context cost when editing. Load order is safe — all communication via window.* globals at click time. |
+| 2026-05-12 | DescriptionRegistry centralized all image description storage | Replaced scattered storage (DOM dataset, VisionScan._cache, refState) with single URL→description map. refState shape changed from `string[]` to `{url, desc}[]`. Catch-up scan added to api.js. Image dispatch fixed — all images now sent to Nano Banana. VisionScan caching layer removed — Registry owns all caching. |
+| 2026-05-18 | On Generate enhancer cache disabled for inline images | `PromptEnhancer` no longer reuses final brief cache when inline module/ref images are present. `Keep Descriptions` remains a description cache, not a stale generated-brief cache. Added UUID assignment for module uploads/generated module images and fingerprint logs in `api.js` / `enhancer.js`. |
+| 2026-05-19 | Modular logic is canonical | The legacy inline behavior block in `CafeHTML-v2.html` is disabled as inert text. Runtime behavior now loads from `logic/prompt-bar.js`, `logic/module-panel.js`, `logic/gallery.js`, `logic/sequence-bar.js`, `logic/refine.js`, and the generation modules. `logic/registry.js` is loaded after `vision.js`. |
+| 2026-05-21 | Inline CSS extracted from HTML | Extracted ~4000 lines of inline styles from `CafeHTML-v2.html` and prepended them to `style.css` to completely remove the single-file inline constraint. |
+| 2026-05-21 | Parallel Generation Restored | Replaced `runSequential` with `Promise.all` in `api.js` to ensure that multiple requested variations are generated concurrently, drastically speeding up generation times. |
 | 2026-05-25 | UUID image storage — all stores use UUID pointers | `DB.images` is the single source of truth for all image data. moduleState HTML, references, and gallery cells hold UUID keys. Base64 lives in DB.images only. Project delete and per-image-delete cascade properly. Export resolves UUIDs back to base64 for self-contained `.cafe` files. |
 | 2026-05-25 | DB version detection is dynamic | Instead of hardcoded `DB_VERSION`, storage.js opens the DB, checks which stores are missing, and bumps version only when needed. Safe across future store additions. |
 | 2026-05-25 | Studio module LOAD slot auto-prompts rename | After loading an image via the LOAD slot, `.plr-name` is immediately focused with text selected. Blur commits and saves to DB. Consistent with the `+` header ref-card naming flow. |
@@ -520,20 +538,21 @@ Orange = active, expanded. `.collapsed` rotates arrow −90°. Collapsing hides 
 | 2026-05-26 | Studio references carry ACTION intent | Each reference group has an action tag (INSERT / SWAP / TRANSFER / REMOVE / PRESERVE). The API prompt includes `action` + `intent` per reference so the model knows how to apply each image. Default action is TRANSFER. |
 | 2026-05-26 | action-drawer-open separate from drawer-open | Action button active state only triggers on `.action-drawer-open`, not `.drawer-open`, so opening the name editor no longer falsely activates the action button. |
 | 2026-05-27 | Seed control removed | Gemini image models (`gemini-2.5-flash-image`, `gemini-3.1-flash-image-preview`, `gemini-3-pro-image-preview`) do not support a `seed` parameter — documented only for Imagen, silently ignored here. Removed `generationConfig.seed`, the seed-lock UI, `data-seed` state, and dead CSS. Old projects ignore stored `seed`/`seedLocked` fields on load. |
-| 2026-05-27 | Refine overlay removed | `src/components/Refine.tsx` (`RefineArea`) and `#refine-overlay` were dead — superseded by Studio, never invoked. Deleted the module, script tag, and markup. Shared `.refine-*` CSS classes kept (Studio reuses them). |
-| 2026-05-27 | Shared `CafeNet.fetchJSON` helper | Extracted the duplicated fetch + 429 retry/backoff from `src/lib/api.ts`, `src/lib/enhancer.ts`, `src/lib/vision.ts` into `src/lib/net.ts`. Supports a per-attempt timeout (VisionScan) and a log label. |
+| 2026-05-27 | Refine overlay removed | `logic/refine.js` (`RefineArea`) and `#refine-overlay` were dead — superseded by Studio, never invoked. Deleted the module, script tag, and markup. Shared `.refine-*` CSS classes kept (Studio reuses them). |
+| 2026-05-27 | Shared `CafeNet.fetchJSON` helper | Extracted the duplicated fetch + 429 retry/backoff from `api.js`, `enhancer.js`, `vision.js` into `logic/net.js`. Supports a per-attempt timeout (VisionScan) and a log label. |
 | 2026-05-27 | Gallery uses incremental DOM updates | Generation, duplicate, delete (single + multi), and project-load insert/remove a single cell instead of rebuilding the whole grid. Filter/sort changes and `clearGenerated` still full-rebuild. `cellIndexMap`/`rebuildIndexMap` dropped; a `visibleCells` array tracks the displayed list for HUD navigation. |
 | 2026-05-27 | A project always exists at startup | Init creates a project when none exist, so `activeProjectId` is set before any upload. Prevents first-action uploads from being stored with `project_id: null` and then wiped by `runOrphanCleanup` on reload. |
 | 2026-05-27 | Multi-variation calls run in parallel (again) | `googleGenerate` fires N variation calls concurrently via `Promise.allSettled` instead of a sequential chain. Restores the 2026-05-21 intent after the code had drifted back to sequential. No single-request multi-image param exists, so N images require N calls. |
 | 2026-05-27 | A failed variation no longer discards the batch | `allSettled` keeps the images that succeeded; a rejected call is dropped. The batch only throws when zero images come back, surfacing the underlying error if every call failed. |
-| 2026-05-27 | NB2 thinking level is user-selectable | NANO BANANA 2 exposes `minimal`/`high` via a Thinking control on the settings API page; `src/lib/api.ts` reads `CafeSettings.getActiveThinkingLevel()`. NB and Pro return null (thinkingConfig omitted). Values lowercased to match the docs. |
+| 2026-05-27 | NB2 thinking level is user-selectable | NANO BANANA 2 exposes `minimal`/`high` via a Thinking control on the settings API page; `api.js` reads `CafeSettings.getActiveThinkingLevel()`. NB and Pro return null (thinkingConfig omitted). Values lowercased to match the docs. |
 | 2026-05-27 | Gallery resolves variations one by one as each finishes | `googleGenerate` fires N calls in parallel; each resolves its own loading cell via `onVariationReady(dataUrl, idx)` callback as it completes. Results appear incrementally instead of all at once after `allSettled`. |
 | 2026-05-27 | Failed variations show a RETRY cell | Rejected calls (network/429) fire `onVariationFailed(idx)` → `Gallery.failLoading()`. Cell stays in place, orange RETRY label. Click converts back to loading and retries one generation call using the same captured `finalPrompt`/`imageRefs` — no enhancer re-run. Retry failure loops back to RETRY cell. |
-| 2026-05-27 | `DIMS`, `dimsFromRatio`, and `var dims` removed from `src/lib/api.ts` | Dead code — pixel dimensions were never used in the API call. Generation uses `aspectRatio` and `imageSize` strings, not explicit width/height values. |
+| 2026-05-27 | `DIMS`, `dimsFromRatio`, and `var dims` removed from `api.js` | Dead code — pixel dimensions were never used in the API call. Generation uses `aspectRatio` and `imageSize` strings, not explicit width/height values. |
 | 2026-05-27 | Blocked variations show a BLOCKED cell | `promptFeedback.blockReason` (prompt-level) and `candidate.finishReason !== 'STOP'` (all non-success finish reasons) route to `onVariationBlocked(idx)` → `Gallery.blockLoading()`. Gray cell, gray BLOCKED label, click to dismiss. Not retryable — same prompt gets same result. |
 
 | 2026-05-28 | Module Panel S-C redesign | Visible module UI is now the image-reference manager with loose images, preset folders, per-image mode/strength/state, Image Inspector, row/inspector `...` action menus, and `cafeModule` persistence. Legacy `subject/stage/style` snapshots are generated as a PromptBuilder compatibility bridge. |
+| 2026-06-05 | Next.js migration baseline | Current implementation now lives in `src/` as a Next.js / React app. Legacy HTML docs remain useful for product architecture, but file paths and `window.*` implementation contracts are historical unless mirrored in `src/components`, `src/context`, or `src/lib/pipeline`. |
 
 ---
 
-*Last updated: 2026-06-04*
+*Last updated: 2026-05-28*

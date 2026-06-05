@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { useGallery, GalleryCell } from "@/context/GalleryContext";
+import React, { useCallback, useState, useEffect, useRef } from "react";
+import { useGallery } from "@/context/GalleryContext";
 import { useStudio } from "@/context/StudioContext";
 import { useModule } from "@/context/ModuleContext";
 import DB from "@/lib/db";
@@ -21,19 +21,28 @@ export default function HUD() {
   const [threeDotOpen, setThreeDotOpen] = useState(false);
   const [setupPopupOpen, setSetupPopupOpen] = useState(false);
   
-  const hudRef = useRef<HTMLDivElement>(null);
   const threeDotRef = useRef<HTMLDivElement>(null);
 
   // Derive visible cells same as Gallery
-  let visibleCells = cells.filter(cell => {
+  const filteredCells = cells.filter(cell => {
     if (ratioFilter === 'landscape') return ['16:9', '21:9', '4:3'].includes(cell.ratio);
     if (ratioFilter === 'portrait')  return ['9:16', '3:4'].includes(cell.ratio);
     if (ratioFilter === 'square')    return cell.ratio === '1:1';
     return true;
   });
-  if (sortOrder === "oldest") visibleCells.reverse();
+  const visibleCells = sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
 
   const activeCell = visibleCells[hudIndex];
+
+  const handleNext = useCallback(() => {
+    if (!visibleCells.length) return;
+    setHudIndex((hudIndex + 1) % visibleCells.length);
+  }, [hudIndex, setHudIndex, visibleCells.length]);
+
+  const handlePrev = useCallback(() => {
+    if (!visibleCells.length) return;
+    setHudIndex((hudIndex - 1 + visibleCells.length) % visibleCells.length);
+  }, [hudIndex, setHudIndex, visibleCells.length]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -48,7 +57,7 @@ export default function HUD() {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [hudOpen, hudIndex, visibleCells.length, infoPanelOpen]);
+  }, [handleNext, handlePrev, hudOpen, infoPanelOpen, setHudOpen, setInfoPanelOpen]);
 
   // Click outside dropdowns
   useEffect(() => {
@@ -63,16 +72,6 @@ export default function HUD() {
 
   if (!activeCell) return null; // Wait until active cell is available
 
-  const handleNext = () => {
-    if (!visibleCells.length) return;
-    setHudIndex((hudIndex + 1) % visibleCells.length);
-  };
-
-  const handlePrev = () => {
-    if (!visibleCells.length) return;
-    setHudIndex((hudIndex - 1 + visibleCells.length) % visibleCells.length);
-  };
-
   const handleDelete = () => {
     if (activeCell?.id) DB.gallery.delete(activeCell.id);
     setCells(prev => prev.filter(c => c.id !== activeCell.id));
@@ -80,7 +79,7 @@ export default function HUD() {
   };
 
   const handleDuplicate = () => {
-    const newCell = { ...activeCell, id: Date.now() + Math.random(), uuid: crypto.randomUUID(), _imgUuid: undefined, _dbId: undefined };
+    const newCell = { ...activeCell, id: crypto.getRandomValues(new Uint32Array(1))[0], uuid: crypto.randomUUID(), _imgUuid: undefined, _dbId: undefined };
     setCells(prev => [newCell, ...prev]);
     setThreeDotOpen(false);
   };
@@ -160,10 +159,10 @@ export default function HUD() {
             <path d="M0 13.1289V11.5305L1.16648 10.3707C4.97904 6.57996 8.40899 3.18909 8.44436 3.17571C8.46326 3.16815 9.72577 4.40376 11.0113 5.68169L11.6502 6.31671L7.45474 10.5219L3.25927 14.7272H1.62965H0V13.1289ZM11.1262 3.66073L9.55907 2.09352L10.6058 1.04673L11.6526 0L13.2258 1.57315L14.7989 3.14624L13.7582 4.18715C13.1859 4.75963 12.7121 5.22799 12.7054 5.22799C12.6979 5.22799 11.9881 4.52272 11.1262 3.66073Z" fill="currentColor" />
           </svg>
         </button>
-        <button className={`hud-icon-btn ${infoPanelOpen ? "active" : ""}`} id="hud-info" title="Image Info" onClick={() => setInfoPanelOpen(!infoPanelOpen)}>ℹ</button>
+        <button className={`hud-icon-btn ${infoPanelOpen ? "active" : ""}`} id="hud-info" title="Image Info" onClick={() => setInfoPanelOpen(!infoPanelOpen)}>i</button>
 
         <div id="hud-threedot-wrap" style={{position:'relative'}} ref={threeDotRef}>
-          <button className={`hud-icon-btn ${threeDotOpen ? "active open" : ""}`} id="hud-threedot" title="More" onClick={() => setThreeDotOpen(!threeDotOpen)}>⋯</button>
+          <button className={`hud-icon-btn ${threeDotOpen ? "active open" : ""}`} id="hud-threedot" title="More" onClick={() => setThreeDotOpen(!threeDotOpen)}>&#8943;</button>
           <div className="cmp-menu hud-image-menu" id="hud-threedot-dropdown" hidden={!threeDotOpen}>
             <div className="cmp-menu-title">IMAGE</div>
             <button className="primary" id="hud-drop-reuse" type="button" onClick={handleReusePrompt}>REUSE</button>
@@ -211,7 +210,7 @@ export default function HUD() {
 
         {/* Info panel */}
         <div id="hud-info-panel" className={infoPanelOpen ? 'open' : ''} style={{ display: infoPanelOpen ? 'flex' : 'none' }}>
-          <button className="info-close" id="hud-info-close" onClick={() => setInfoPanelOpen(false)}>×</button>
+          <button className="info-close" id="hud-info-close" onClick={() => setInfoPanelOpen(false)}>&times;</button>
 
           <div className="info-section-header">
             <span className="info-section-title">USED IN THIS FRAME</span>
@@ -232,15 +231,15 @@ export default function HUD() {
           <div className="info-row">
             <div className="info-item">
               <span className="info-item-label">Date</span>
-              <span className="info-item-value" id="info-date">{activeCell.date || '—'}</span>
+              <span className="info-item-value" id="info-date">{activeCell.date || '-'}</span>
             </div>
             <div className="info-item">
               <span className="info-item-label">Type</span>
-              <span className="info-item-value" id="info-type">{activeCell.type || '—'}</span>
+              <span className="info-item-value" id="info-type">{activeCell.type || '-'}</span>
             </div>
             <div className="info-item">
               <span className="info-item-label">Dimensions</span>
-              <span className="info-item-value" id="info-dims">{activeCell.dims || '—'}</span>
+              <span className="info-item-value" id="info-dims">{activeCell.dims || '-'}</span>
             </div>
           </div>
 
@@ -250,7 +249,7 @@ export default function HUD() {
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
           </div>
-          <div className="prompt-text" id="info-prompt">{activeCell.prompt || '—'}</div>
+          <div className="prompt-text" id="info-prompt">{activeCell.prompt || '-'}</div>
         </div>
       </div>
 

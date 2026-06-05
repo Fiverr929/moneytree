@@ -78,7 +78,6 @@ export async function googleGenerate(opts: GenerateOptions) {
         body: JSON.stringify(body)
       }, { label: '[CafeAPI]' });
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let prediction: any = null;
       let blocked = !!(result.promptFeedback && result.promptFeedback.blockReason);
       
@@ -138,10 +137,10 @@ export async function googleGenerate(opts: GenerateOptions) {
   if (!predictions.length) {
     if (firstError) throw firstError;
     const reason = blockReason
-      ? `Prompt blocked — ${blockReason}`
+      ? `Prompt blocked - ${blockReason}`
       : finishReasons.length
-        ? `Generation stopped — ${finishReasons.join(', ')}`
-        : 'Model returned no images — check console for raw response';
+        ? `Generation stopped - ${finishReasons.join(', ')}`
+        : 'Model returned no images - check console for raw response';
     throw new Error(reason);
   }
 
@@ -175,7 +174,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
   const hasImages = composition.some(i => i.kind === 'image');
 
   if (!rawPrompt && !hasImages) {
-    callbacks.onError(new Error('No prompt and no images — type something or add module layers.'));
+    callbacks.onError(new Error('No prompt and no images - type something or add module layers.'));
     return;
   }
 
@@ -215,7 +214,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
         imgUrl: dataUrl,
         date: new Date().toISOString(), // format properly later
         type: 'Image',
-        dims: '—', // calculated on image load
+        dims: '-', // calculated on image load
         prompt: finalPrompt,
         manifest,
         model: model?.label || 'any',
@@ -323,8 +322,7 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
     body: JSON.stringify(body)
   }, { label: '[CafeAPI Studio]' });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let prediction: any = null;
+  let prediction: any = null;
   (result.candidates || []).forEach((candidate: any) => {
     if (prediction) return;
     (candidate.content?.parts || []).forEach((part: any) => {
@@ -338,7 +336,7 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
 
   if (!prediction) {
     const block = result.promptFeedback?.blockReason;
-    if (block) throw new Error(`Prompt blocked — ${block}`);
+    if (block) throw new Error(`Prompt blocked - ${block}`);
     throw new Error('Model returned no image for studio refine');
   }
 

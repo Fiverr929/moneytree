@@ -36,16 +36,14 @@ export default function Gallery() {
   }, []);
 
   // Filter and Sort Cells
-  const visibleCells = cells.filter(cell => {
+  const filteredCells = cells.filter(cell => {
     if (ratioFilter === 'landscape') return ['16:9', '21:9', '4:3'].includes(cell.ratio);
     if (ratioFilter === 'portrait')  return ['9:16', '3:4'].includes(cell.ratio);
     if (ratioFilter === 'square')    return cell.ratio === '1:1';
     return true;
   });
 
-  if (sortOrder === "oldest") {
-    visibleCells.reverse();
-  }
+  const visibleCells = sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
 
   const handleCellClick = (cellId: number) => {
     if (selectMode) {
@@ -67,7 +65,7 @@ export default function Gallery() {
     selectedIds.forEach(id => {
       const cell = cells.find(c => c.id === id);
       if (cell) {
-        newCells.push({ ...cell, id: Date.now() + Math.random(), uuid: crypto.randomUUID(), _imgUuid: undefined, _dbId: undefined });
+        newCells.push({ ...cell, id: crypto.getRandomValues(new Uint32Array(1))[0], uuid: crypto.randomUUID(), _imgUuid: undefined, _dbId: undefined });
       }
     });
     setCells(prev => [...newCells, ...prev]);

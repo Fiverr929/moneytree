@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { useSettings, MODELS } from "@/context/SettingsContext";
 
@@ -10,7 +10,7 @@ export default function SettingsModal() {
     googleApiKey, setGoogleApiKey,
     activeModelKey, setActiveModelKey,
     activeResolution, setActiveResolution,
-    thinkingLevel, setThinkingLevel,
+    setThinkingLevel,
     scanTiming, setScanTiming,
     keepDescriptions, setKeepDescriptions,
     scanTimeout, setScanTimeout,
@@ -19,6 +19,12 @@ export default function SettingsModal() {
 
   const [activePage, setActivePage] = useState<"api" | "image">("api");
   const [apiKeyInput, setApiKeyInput] = useState("");
+
+  useEffect(() => {
+    if (settingsOpen && !googleApiKey) {
+      setActivePage("api");
+    }
+  }, [googleApiKey, settingsOpen]);
 
   const handleSaveKey = () => {
     setGoogleApiKey(apiKeyInput.trim());
@@ -58,7 +64,7 @@ export default function SettingsModal() {
                   <input 
                     type="password" 
                     className="csm-google-input" 
-                    placeholder={googleApiKey ? '••••••••••••••••' : 'Enter Vertex AI API key...'} 
+                    placeholder={googleApiKey ? '****************' : 'Enter Vertex AI API key...'} 
                     autoComplete="new-password"
                     value={apiKeyInput}
                     onChange={(e) => setApiKeyInput(e.target.value)}
@@ -89,7 +95,7 @@ export default function SettingsModal() {
                 <div className="csm-resolution-list">
                   {activeModel.resolutions.map(res => (
                     <div key={res} className={`csm-resolution-row ${res === activeResolution ? 'active' : ''}`} onClick={() => setActiveResolution(res)}>
-                      {res === activeResolution && <span className="csm-resolution-check">✓</span>}
+                      {res === activeResolution && <span className="csm-resolution-check">&#10003;</span>}
                       {res}
                     </div>
                   ))}
@@ -102,7 +108,7 @@ export default function SettingsModal() {
                   <div className="csm-thinking-list">
                     {activeModel.thinkingLevels.map(level => (
                       <div key={level} className={`csm-resolution-row ${level === activeThinkingLevel ? 'active' : ''}`} onClick={() => setThinkingLevel(level)}>
-                        {level === activeThinkingLevel && <span className="csm-resolution-check">✓</span>}
+                        {level === activeThinkingLevel && <span className="csm-resolution-check">&#10003;</span>}
                         {level.charAt(0).toUpperCase() + level.slice(1)}
                       </div>
                     ))}

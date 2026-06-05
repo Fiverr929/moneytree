@@ -4,9 +4,16 @@ import React, { useState, useEffect } from "react";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
 
+type ProjectListItem = {
+  id: number;
+  name?: string;
+  thumbnail?: string;
+  date_modified: string;
+};
+
 export default function ProjectsModal() {
   const { projectsOpen, setProjectsOpen, activeProjectId, setActiveProjectId } = useApp();
-  const [projects, setProjects] = useState<any[]>([]);
+  const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadProjects = () => {
@@ -104,9 +111,9 @@ export default function ProjectsModal() {
 
         <div className="pm-footer">
           <button className="pm-foot-btn" onClick={handleCreate}>New</button>
-          <span className="pm-foot-divider">·</span>
+          <span className="pm-foot-divider">&middot;</span>
           <button className="pm-foot-btn" onClick={() => alert("Export not implemented")}>Export</button>
-          <span className="pm-foot-divider">·</span>
+          <span className="pm-foot-divider">&middot;</span>
           <button className="pm-foot-btn" onClick={() => alert("Import not implemented")}>Import</button>
         </div>
       </div>

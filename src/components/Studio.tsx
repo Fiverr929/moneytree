@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useRef, useEffect, useState } from "react";
-import { StudioGroup, StudioConfig, useStudio } from "@/context/StudioContext";
+import React, { useCallback, useRef, useEffect, useState } from "react";
+import { useStudio } from "@/context/StudioContext";
 import { useSettings } from "@/context/SettingsContext";
 import { useGallery } from "@/context/GalleryContext";
+import { useApp } from "@/context/AppContext";
 import { studioGenerate } from "@/lib/pipeline/api";
 import StudioModule from "./StudioModule";
 
@@ -12,7 +13,7 @@ type Stroke = { color: string, size: number, points: Point[] };
 
 export default function Studio() {
   const { 
-    isOpen, activeImage, closeStudio, 
+    isOpen, closeStudio, 
     history, setHistory, 
     activeTool, setActiveTool,
     strokeSize, setStrokeSize,
@@ -23,12 +24,12 @@ export default function Studio() {
   
   const { addCell } = useGallery();
   const { googleApiKey, activeModel } = useSettings();
+  const { setSettingsOpen } = useApp();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const drawLayerRef = useRef<HTMLCanvasElement>(null);
   const cropOverlayRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [activeUrl, setActiveUrl] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -56,29 +57,7 @@ export default function Studio() {
     }
   }, [isOpen, history]);
 
-  const syncDrawLayer = () => {
-    const layer = drawLayerRef.current;
-    const container = canvasRef.current;
-    if (!layer || !container) return;
-    layer.width = container.offsetWidth;
-    layer.height = container.offsetHeight;
-    redrawStrokes();
-  };
-
-  useEffect(() => {
-    if (isOpen && activeUrl) {
-      const img = new Image();
-      img.onload = () => {
-        if (canvasRef.current) {
-          canvasRef.current.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
-        }
-        syncDrawLayer();
-      };
-      img.src = activeUrl;
-    }
-  }, [activeUrl, isOpen]);
-
-  const redrawStrokes = () => {
+  const redrawStrokes = useCallback(() => {
     const layer = drawLayerRef.current;
     if (!layer) return;
     const ctx = layer.getContext('2d');
@@ -96,9 +75,31 @@ export default function Studio() {
       stroke.points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
       ctx.stroke();
     });
-  };
+  }, [undoStack]);
 
-  useEffect(() => { redrawStrokes(); }, [undoStack]);
+  const syncDrawLayer = useCallback(() => {
+    const layer = drawLayerRef.current;
+    const container = canvasRef.current;
+    if (!layer || !container) return;
+    layer.width = container.offsetWidth;
+    layer.height = container.offsetHeight;
+    redrawStrokes();
+  }, [redrawStrokes]);
+
+  useEffect(() => {
+    if (isOpen && activeUrl) {
+      const img = new Image();
+      img.onload = () => {
+        if (canvasRef.current) {
+          canvasRef.current.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+        }
+        syncDrawLayer();
+      };
+      img.src = activeUrl;
+    }
+  }, [activeUrl, isOpen, syncDrawLayer]);
+
+  useEffect(() => { redrawStrokes(); }, [redrawStrokes]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (activeTool !== 'pencil' || !drawLayerRef.current) return;
@@ -254,7 +255,11 @@ export default function Studio() {
   useEffect(() => { undoLengthRef.current = undoStack.length; }, [undoStack]);
 
   const handleRefine = () => {
-    if (!activeUrl || !googleApiKey || !activeModel) return;
+    if (!activeUrl || !activeModel) return;
+    if (!googleApiKey.trim()) {
+      setSettingsOpen(true);
+      return;
+    }
     
     // Capture state
     const currentPrompt = prompt;
@@ -321,8 +326,9 @@ export default function Studio() {
           setActiveUrl(generatedUrl);
         }
 
-      } catch (err: any) {
-        alert(`Generation failed: ${err.message || 'Unknown error'}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        alert(`Generation failed: ${message}`);
       } finally {
         setLoadingCount(c => c - 1);
       }

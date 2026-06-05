@@ -186,7 +186,8 @@ function buildUserMessage(userIntent: string, imageContext: CompositionItem[]) {
   return lines.join('\n');
 }
 
-export async function enhancePrompt(payload: any, apiKey: string, useCache: boolean = true) {
+export async function enhancePrompt(payload: any, apiKey: string, _useCache: boolean = true) {
+  void _useCache;
   if (!apiKey) throw new Error('[PromptEnhancer] No Google API key');
 
   const t0 = Date.now();

@@ -90,7 +90,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
-        // eslint-disable-next-line
         if (saved.googleApiKey) setGoogleApiKey(saved.googleApiKey);
         if (saved.activeModel && MODELS[saved.activeModel]) setActiveModelKey(saved.activeModel);
         if (saved.activeResolution) setActiveResolution(saved.activeResolution);
@@ -99,7 +98,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (typeof saved.keepDescriptions === 'boolean') setKeepDescriptions(saved.keepDescriptions);
         if (typeof saved.scanTimeout === 'number') setScanTimeout(saved.scanTimeout);
       }
-    } catch (e) {}
+    } catch {}
     setMounted(true);
   }, []);
 
@@ -115,7 +114,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         keepDescriptions,
         scanTimeout
       }));
-    } catch (e) {}
+    } catch {}
   }, [googleApiKey, activeModelKey, activeResolution, thinkingLevel, scanTiming, keepDescriptions, scanTimeout, mounted]);
 
   const activeModel = MODELS[activeModelKey];
