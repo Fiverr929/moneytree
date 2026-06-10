@@ -9,12 +9,14 @@ interface AppContextType {
   setMenuOpen: (val: boolean) => void;
   projectsOpen: boolean;
   setProjectsOpen: (val: boolean) => void;
+  projectCreateOpen: boolean;
+  setProjectCreateOpen: (val: boolean) => void;
   settingsOpen: boolean;
   setSettingsOpen: (val: boolean) => void;
   
   // Prompt Bar State
-  generationState: "FRAME" | "SCENE";
-  setGenerationState: (val: "FRAME" | "SCENE") => void;
+  generationState: "FRAME" | "STAGE";
+  setGenerationState: (val: "FRAME" | "STAGE") => void;
   promptSettingsOpen: boolean;
   setPromptSettingsOpen: (val: boolean) => void;
   
@@ -28,9 +30,10 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   
-  const [generationState, setGenerationState] = useState<"FRAME" | "SCENE">("FRAME");
+  const [generationState, setGenerationState] = useState<"FRAME" | "STAGE">("FRAME");
   const [promptSettingsOpen, setPromptSettingsOpen] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
 
@@ -54,6 +57,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setMenuOpen,
         projectsOpen,
         setProjectsOpen,
+        projectCreateOpen,
+        setProjectCreateOpen,
         settingsOpen,
         setSettingsOpen,
         generationState,

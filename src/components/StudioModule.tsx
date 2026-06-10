@@ -210,7 +210,12 @@ export default function StudioModule() {
                         title={hidden ? "Include reference" : "Hide reference"}
                         aria-label={hidden ? "Include reference" : "Hide reference"}
                         onClick={() => toggleImageVisibility(gIdx, iIdx)}
-                      ></button>
+                      >
+                        <img
+                          src={hidden ? "assets/icon-eye-off.svg" : "assets/icon-eye-on.svg"}
+                          alt={hidden ? "hidden" : "visible"}
+                        />
+                      </button>
                       {g.images.length > 1 && (
                         <div className="clr-x" onClick={() => removeImage(gIdx, iIdx)}>
                           <img src="assets/icon-trash.svg" alt="remove" />

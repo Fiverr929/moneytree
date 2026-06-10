@@ -12,9 +12,17 @@ type ProjectListItem = {
 };
 
 export default function ProjectsModal() {
-  const { projectsOpen, setProjectsOpen, activeProjectId, setActiveProjectId } = useApp();
+  const {
+    projectsOpen,
+    setProjectsOpen,
+    projectCreateOpen,
+    setProjectCreateOpen,
+    activeProjectId,
+    setActiveProjectId,
+  } = useApp();
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [newProjectName, setNewProjectName] = useState("New Project");
 
   const loadProjects = () => {
     setLoading(true);
@@ -46,13 +54,19 @@ export default function ProjectsModal() {
   }, [projectsOpen, setProjectsOpen]);
 
   const handleCreate = () => {
-    const name = prompt("Enter project name:", "New Project");
-    if (!name) return;
+    const name = newProjectName.trim() || "New Project";
     DB.projects.create({ name }).then((newId) => {
       loadProjects();
       setActiveProjectId(newId as number);
+      setProjectCreateOpen(false);
+      setNewProjectName("New Project");
       setProjectsOpen(false);
     });
+  };
+
+  const openCreate = () => {
+    setNewProjectName("New Project");
+    setProjectCreateOpen(true);
   };
 
   const handleDelete = (id: number, e: React.MouseEvent) => {
@@ -110,11 +124,27 @@ export default function ProjectsModal() {
         </div>
 
         <div className="pm-footer">
-          <button className="pm-foot-btn" onClick={handleCreate}>New</button>
-          <span className="pm-foot-divider">&middot;</span>
-          <button className="pm-foot-btn" onClick={() => alert("Export not implemented")}>Export</button>
-          <span className="pm-foot-divider">&middot;</span>
-          <button className="pm-foot-btn" onClick={() => alert("Import not implemented")}>Import</button>
+          {projectCreateOpen ? (
+            <form className="pm-create-form" onSubmit={(e) => { e.preventDefault(); handleCreate(); }}>
+              <input
+                className="pm-create-input"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                autoFocus
+                aria-label="Project name"
+              />
+              <button className="pm-foot-btn" type="submit">Create</button>
+              <button className="pm-foot-btn" type="button" onClick={() => setProjectCreateOpen(false)}>Cancel</button>
+            </form>
+          ) : (
+            <>
+              <button className="pm-foot-btn" onClick={openCreate}>New</button>
+              <span className="pm-foot-divider">&middot;</span>
+              <button className="pm-foot-btn" onClick={() => console.info("Export not implemented")}>Export</button>
+              <span className="pm-foot-divider">&middot;</span>
+              <button className="pm-foot-btn" onClick={() => console.info("Import not implemented")}>Import</button>
+            </>
+          )}
         </div>
       </div>
     </div>

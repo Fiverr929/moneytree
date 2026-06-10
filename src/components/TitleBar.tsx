@@ -5,7 +5,7 @@ import { useApp } from "@/context/AppContext";
 import { usePathname, useRouter } from "next/navigation";
 
 export default function TitleBar() {
-  const { setProjectsOpen, setSettingsOpen } = useApp();
+  const { setProjectsOpen, setProjectCreateOpen, setSettingsOpen } = useApp();
   
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -13,6 +13,17 @@ export default function TitleBar() {
   const pathname = usePathname();
   const router = useRouter();
   const activeTab = pathname === "/video" ? "video" : "image";
+
+  const handleNewProject = () => {
+    setProjectCreateOpen(true);
+    setProjectsOpen(true);
+    setMenuOpen(false);
+  };
+
+  const handleExport = () => {
+    setProjectsOpen(true);
+    setMenuOpen(false);
+  };
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -47,8 +58,8 @@ export default function TitleBar() {
             <button className="menu-item" type="button" onClick={() => { setSettingsOpen(true); setMenuOpen(false); }}><span>SETTINGS</span><b>&gt;</b></button>
             <button className="menu-item" type="button"><span>HELP</span></button>
             <div className="cafe-menu-divider"></div>
-            <button className="menu-item" type="button"><span>NEW PROJECT</span></button>
-            <button className="menu-item" type="button"><span>EXPORT</span></button>
+            <button className="menu-item" type="button" onClick={handleNewProject}><span>NEW PROJECT</span></button>
+            <button className="menu-item" type="button" onClick={handleExport}><span>EXPORT</span></button>
           </div>
         </div>
         <div className={`tab ${activeTab === 'image' ? 'active' : 'inactive'}`} onClick={() => router.push("/")}>IMAGE</div>

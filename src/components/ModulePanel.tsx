@@ -4,10 +4,8 @@ import React, { useRef, ChangeEvent, useEffect, useState } from "react";
 import { useModule, ModuleFile, ModuleFolder } from "@/context/ModuleContext";
 import { useStudio } from "@/context/StudioContext";
 import { useApp } from "@/context/AppContext";
-import { useSettings } from "@/context/SettingsContext";
 import DB from "@/lib/db";
 
-const C = { pink: "#ea3a8a", violet: "#a352ff" };
 const ACCENTS = [
   "#ea3a8a",
   "#a352ff",
@@ -16,16 +14,19 @@ const ACCENTS = [
   "#c79a2a",
   "#3a8a7a",
 ];
-const MODES = ["SUBJECT", "STAGE", "STYLE", "MOOD", "ALL"];
+const MODES = ["SUBJECT", "SCENE", "STYLE"];
 const MODULE_PRESETS = [
-  { id: "SUBJECT", name: "SUBJECT", accent: "#ea3a8a" },
-  { id: "STAGE", name: "STAGE", accent: "#5a8a3a" },
-  { id: "STYLE", name: "STYLE", accent: "#c79a2a" },
   { id: "MOOD", name: "MOOD", accent: "#a352ff" },
+  { id: "LOOKBOOK", name: "LOOKBOOK", accent: "#ea3a8a" },
+  { id: "WORLD", name: "WORLD", accent: "#3a8a7a" },
 ];
 
+const moduleRole = (mode: string) => {
+  const role = String(mode || "").trim().toUpperCase();
+  return MODES.includes(role) ? role : "UNASSIGNED";
+};
+
 export default function ModulePanel() {
-  const settings = useSettings();
   const {
     files,
     setFiles,
@@ -157,6 +158,24 @@ export default function ModulePanel() {
     });
   };
 
+  const setFileRole = (id: number, mode: string) => {
+    setFiles((prev) => {
+      const current = prev.find((f) => f.id === id);
+      const nextMode = moduleRole(current?.mode || "") === mode ? "REFERENCE" : mode;
+      const next = prev.map((f) => {
+        if (f.id === id) return { ...f, mode: nextMode };
+        if (nextMode === mode && moduleRole(f.mode) === mode) return { ...f, mode: "REFERENCE" };
+        return f;
+      });
+      if (activeProjectId) {
+        next
+          .filter((f) => f.id === id || prev.some((old) => old.id === f.id && old.mode !== f.mode))
+          .forEach((f) => DB.references.put({ ...f, project_id: activeProjectId }));
+      }
+      return next;
+    });
+  };
+
   const removeFile = (id: number) => {
     setFiles((prev) => prev.filter((f) => f.id !== id));
     setSelectedIds((prev) => {
@@ -172,17 +191,7 @@ export default function ModulePanel() {
   };
 
   const assignFile = (fileId: number, folderId: string) => {
-    const preset = MODULE_PRESETS.find((p) => p.id === folderId);
-    const mode = preset
-      ? preset.id === "MOOD"
-        ? "MOOD"
-        : preset.id === "STYLE"
-          ? "STYLE"
-          : preset.id === "STAGE"
-            ? "STAGE"
-            : "SUBJECT"
-      : "SUBJECT";
-    updateFile(fileId, { folder: folderId, mode });
+    updateFile(fileId, { folder: folderId, mode: "REFERENCE" });
     setOpenFolders((prev) => new Set(prev).add(folderId));
   };
 
@@ -192,6 +201,7 @@ export default function ModulePanel() {
       id: Date.now(),
       label: `${file.label} COPY`,
       uuid: crypto.randomUUID(),
+      mode: "REFERENCE",
     };
     if (activeProjectId)
       DB.references.put({ ...copy, project_id: activeProjectId });
@@ -228,7 +238,6 @@ export default function ModulePanel() {
           name: upload.file.name,
           size: Math.round(upload.file.size / 1024) + " KB",
           uuid: crypto.randomUUID(),
-          visionDesc: "",
         });
       } else {
         const queue = [...uploads];
@@ -237,6 +246,7 @@ export default function ModulePanel() {
         setPendingUpload(next);
         setView("root");
         setActiveFileId(null);
+        setCollapsed(false);
         setShowUpload(!!next);
         setMenuFileId(null);
         setMoveFileId(null);
@@ -255,16 +265,19 @@ export default function ModulePanel() {
     setShowUpload(!!next);
   };
 
-  const handleUploadConfirm = () => {
+  const handleUploadConfirm = (collapseAfter = false) => {
     if (!pendingUpload) return;
     const labelInput = document.getElementById(
       "cmp-upload-label",
     ) as HTMLInputElement;
     const label = (labelInput?.value || "UNLABELED").trim();
 
+    const uuid = crypto.randomUUID();
+    const id = parseInt(uuid.replace(/-/g, "").slice(0, 12), 16);
+
     const newFile: ModuleFile = {
-      id: Date.now(),
-      uuid: crypto.randomUUID(),
+      id,
+      uuid,
       folder: null,
       kind: "IMG",
       label: label.toUpperCase(),
@@ -274,9 +287,8 @@ export default function ModulePanel() {
       modified: new Date().toLocaleTimeString(),
       eye: true,
       strength: 50,
-      mode: "SUBJECT",
+      mode: "REFERENCE",
       url: pendingUpload.url,
-      visionDesc: "",
     };
 
     if (activeProjectId) {
@@ -286,21 +298,13 @@ export default function ModulePanel() {
     }
 
     setFiles((prev) => [newFile, ...prev]);
-    showNextPendingUpload();
-
-    if (settings.googleApiKey) {
-      import("@/lib/pipeline/vision").then((vision) => {
-        vision
-          .describe(
-            newFile.url,
-            newFile.label,
-            "subject",
-            settings.googleApiKey,
-          )
-          .then((desc) => updateFile(newFile.id, { visionDesc: desc }))
-          .catch(console.error);
-      });
+    if (collapseAfter) {
+      setPendingUpload(null);
+      setShowUpload(false);
+      setCollapsed(true);
+      return;
     }
+    showNextPendingUpload();
   };
 
   const renderUploadForm = () => {
@@ -392,15 +396,10 @@ export default function ModulePanel() {
       const draggedFile = files.find((f) => f.id === draggedFileId);
       if (!draggedFile) return;
 
-      const preset = targetFolderId
-        ? MODULE_PRESETS.find((p) => p.id === targetFolderId)
-        : null;
-      const newMode = preset ? preset.id : draggedFile.mode;
-
       setFiles((prev) => {
         const tempFiles = prev.map((f) =>
           f.id === draggedFileId
-            ? { ...f, folder: targetFolderId, mode: newMode }
+            ? { ...f, folder: targetFolderId, mode: targetFolderId ? "REFERENCE" : f.mode }
             : f,
         );
 
@@ -565,6 +564,8 @@ export default function ModulePanel() {
           handleFileDrop(e, f.id, f.folder);
         }}
         onClick={() => {
+          if (collapsed) return;
+
           if (selectMode) {
             const next = new Set(selectedIds);
             if (next.has(f.id)) next.delete(f.id);
@@ -576,6 +577,15 @@ export default function ModulePanel() {
             setShowInfo(false);
             setLabelEditOpen(false);
           }
+        }}
+        onDoubleClick={() => {
+          if (!collapsed) return;
+
+          setCollapsed(false);
+          setView("file");
+          setActiveFileId(f.id);
+          setShowInfo(false);
+          setLabelEditOpen(false);
         }}
       >
         {selectMode && (
@@ -608,7 +618,9 @@ export default function ModulePanel() {
           )}
           <div className="cmp-row-meta">
             {f.folder === null && (
-              <span className="cmp-loose-tag">UNASSIGNED</span>
+              <span className="cmp-loose-tag">
+                {moduleRole(f.mode)}
+              </span>
             )}
             <span>{f.dims}</span>
             {!f.eye && <span>HIDDEN</span>}
@@ -670,7 +682,7 @@ export default function ModulePanel() {
           setFiles(
             files.map((f) =>
               f.folder === folder.id
-                ? { ...f, folder: preset.id, mode: preset.id }
+                ? { ...f, folder: preset.id }
                 : f,
             ),
           );
@@ -698,8 +710,8 @@ export default function ModulePanel() {
         className="cmp-folder-form"
       >
         <div className="cmp-folder-form-head">
-          <span>{isNew ? "NEW BRIEF SLOT" : "BRIEF SLOT"}</span>
-          <b>PRESET</b>
+              <span>{isNew ? "NEW BRIEF SLOT" : "BRIEF SLOT"}</span>
+          <b>MOOD BOARD</b>
         </div>
         <div className="cmp-field-block">
           <label>CANVAS SLOT</label>
@@ -711,7 +723,7 @@ export default function ModulePanel() {
                 setFolderFormName(val);
                 setFolderPresetOpen(true);
               }}
-              placeholder="SUBJECT / STAGE / STYLE"
+              placeholder="MOOD"
               readOnly={lockName}
             />
             <button
@@ -885,6 +897,7 @@ export default function ModulePanel() {
     const rootFiles = files
       .filter((f) => f.folder === null)
       .sort((a, b) => b.modified.localeCompare(a.modified));
+    const roleFiles = files.filter((f) => moduleRole(f.mode) !== "UNASSIGNED");
     const assigned = files.filter((f) => f.folder !== null);
     const results = q
       ? assigned.filter((f) => {
@@ -901,7 +914,13 @@ export default function ModulePanel() {
         <div className="cmp-header">
           <button
             className="cmp-header-collapse"
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={() => {
+              if (showUpload) {
+                handleUploadConfirm(true);
+                return;
+              }
+              setCollapsed(!collapsed);
+            }}
             title="Collapse brief"
           ></button>
           <span>MODULE</span>
@@ -1017,7 +1036,7 @@ export default function ModulePanel() {
 
         <div className="cmp-status cmp-root-status">
           <span>
-            {folders.length} SLOT &middot; {assigned.length} FILES
+            {roleFiles.length}/3 MODULE &middot; {assigned.length} MOOD FILES
           </span>
           <span>{rootFiles.length} UNASSIGNED</span>
         </div>
@@ -1043,11 +1062,8 @@ export default function ModulePanel() {
     const modeHelp = (mode: string) => {
       const msgs: Record<string, string> = {
         SUBJECT: "use as the main person, product, object, or wardrobe",
-        STAGE: "use as the scene, set, props, lighting, or layout",
+        SCENE: "use as the scene, set, props, lighting, or layout",
         STYLE: "use only the look, not content",
-        MOOD: "use as mood board inspiration for palette, atmosphere, materials, and taste",
-        COMP: "legacy stage/layout role",
-        ALL: "apply as a full visual brief source",
       };
       return msgs[mode] || "";
     };
@@ -1064,48 +1080,9 @@ export default function ModulePanel() {
             &lsaquo;
           </button>
           <span>
-            {folder ? folder.name : "ROOT"} &rsaquo;{" "}
+            <em>{folder ? folder.name : "ROOT"}</em> &rsaquo;{" "}
             <b>{f.label || "UNLABELED"}</b>
           </span>
-          <div className="cmp-inspector-menu-wrap">
-            <button
-              className={`cmp-dot ${inspectorMenuOpen ? "open" : ""}`}
-              onClick={() => setInspectorMenuOpen(!inspectorMenuOpen)}
-            >
-              &#8943;
-            </button>
-            {inspectorMenuOpen && (
-              <div className="cmp-menu cmp-inspector-menu">
-                <div className="cmp-menu-title">{f.label || "UNLABELED"}</div>
-                <button
-                  className="primary"
-                  onClick={() => {
-                    openStudio({ uuid: f.uuid, imgUrl: f.url });
-                    setInspectorMenuOpen(false);
-                  }}
-                >
-                  STUDIO
-                </button>
-                <button
-                  onClick={() => {
-                    setInspectorMenuOpen(false);
-                    fileInputRef.current?.click();
-                  }}
-                >
-                  REPLACE
-                </button>
-                <button
-                  className="danger"
-                  onClick={() => {
-                    setInspectorMenuOpen(false);
-                    removeFile(f.id);
-                  }}
-                >
-                  REMOVE
-                </button>
-              </div>
-            )}
-          </div>
         </div>
         <div className="cmp-detail-body">
           <div className="cmp-detail-section">
@@ -1114,8 +1091,8 @@ export default function ModulePanel() {
               {MODES.map((m) => (
                 <button
                   key={m}
-                  className={f.mode === m ? "active" : ""}
-                  onClick={() => updateFile(f.id, { mode: m })}
+                  className={moduleRole(f.mode) === m ? "active" : ""}
+                  onClick={() => setFileRole(f.id, m)}
                 >
                   {m}
                 </button>
@@ -1127,7 +1104,6 @@ export default function ModulePanel() {
           <div className="cmp-detail-section">
             <h4>STRENGTH</h4>
             <div className="cmp-strength-head">
-              <span></span>
               <b>{f.strength}%</b>
             </div>
             <div className="cmp-strength" onClick={handleStrengthChange}>
@@ -1143,18 +1119,59 @@ export default function ModulePanel() {
             </div>
           </div>
 
-          <div className="cmp-detail-section">
-            <h4>STATE</h4>
-            <button
-              className={`cmp-toggle ${f.eye ? "on" : ""}`}
-              onClick={() => updateFile(f.id, { eye: !f.eye })}
-            >
-              <span>VISIBLE</span>
-              <b>{f.eye ? "ON" : "OFF"}</b>
-            </button>
-          </div>
-
           <div className="cmp-image-card-stack">
+            <div className="cmp-image-card-actions">
+              <div className="cmp-inspector-menu-wrap">
+                <button
+                  className={`cmp-dot ${inspectorMenuOpen ? "open" : ""}`}
+                  onClick={() => setInspectorMenuOpen(!inspectorMenuOpen)}
+                  title="Image actions"
+                >
+                  &#8943;
+                </button>
+                {inspectorMenuOpen && (
+                  <div className="cmp-menu cmp-inspector-menu">
+                    <div className="cmp-menu-title">{f.label || "UNLABELED"}</div>
+                    <button
+                      className="primary"
+                      onClick={() => {
+                        openStudio({ uuid: f.uuid, imgUrl: f.url });
+                        setInspectorMenuOpen(false);
+                      }}
+                    >
+                      STUDIO
+                    </button>
+                    <button
+                      onClick={() => {
+                        setInspectorMenuOpen(false);
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      REPLACE
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="cmp-image-card-actions-right">
+                <button
+                  className={`cmp-image-eye ${!f.eye ? "off" : ""}`}
+                  title={f.eye ? "Hide image" : "Show image"}
+                  onClick={() => updateFile(f.id, { eye: !f.eye })}
+                >
+                  <img
+                    src={f.eye ? "assets/icon-eye-on.svg" : "assets/icon-eye-off.svg"}
+                    alt={f.eye ? "visible" : "hidden"}
+                  />
+                </button>
+                <button
+                  className="cmp-image-remove"
+                  title="Remove image"
+                  onClick={() => removeFile(f.id)}
+                >
+                  <img src="assets/icon-trash.svg" alt="remove" />
+                </button>
+              </div>
+            </div>
             <div
               className="cmp-big-thumb"
               title="Open in Studio"
@@ -1162,7 +1179,7 @@ export default function ModulePanel() {
             >
               {renderThumb(f)}
               <span>{f.dims}</span>
-              <b className={`mode-${f.mode}`}>{f.mode}</b>
+              <b className={`mode-${moduleRole(f.mode)}`}>{moduleRole(f.mode)}</b>
             </div>
             <div className="cmp-label-card">
               <input
@@ -1199,12 +1216,12 @@ export default function ModulePanel() {
             <b>{f.dims}</b>
           </div>
         )}
-        <div className="cmp-status">
+        <div className="cmp-status cmp-detail-status">
           <button onClick={() => setShowInfo(!showInfo)}>
             INFO {showInfo ? "\u25b2" : "\u25bc"}
           </button>
           <span>
-            {f.strength}% &middot; {f.mode}
+            {f.strength}% &middot; {moduleRole(f.mode)}
           </span>
         </div>
       </div>
