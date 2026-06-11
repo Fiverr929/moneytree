@@ -5,7 +5,7 @@ import { useApp } from "@/context/AppContext";
 import { useSettings } from "@/context/SettingsContext";
 import { useGallery, GalleryCell } from "@/context/GalleryContext";
 import { useModule } from "@/context/ModuleContext";
-import { generate } from "@/lib/pipeline/api";
+import { generate, storeGenerationDebug } from "@/lib/pipeline/api";
 import { collectPayload } from "@/lib/pipeline/prompt-builder";
 
 export default function PromptBar() {
@@ -51,6 +51,14 @@ export default function PromptBar() {
     };
     window.addEventListener("set-prompt", handleSetPrompt);
     return () => window.removeEventListener("set-prompt", handleSetPrompt);
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.removeItem("__cafeLastGenerationDebug");
+    } catch {
+      // Ignore storage access issues in embedded browsers.
+    }
   }, []);
 
   // Sync React state back to DOM for contentEditable without jumping cursor
@@ -113,8 +121,7 @@ export default function PromptBar() {
         hasImage: !!url,
       })),
     };
-    window.__cafeLastGenerationDebug = promptBarDebug;
-    window.sessionStorage.setItem('__cafeLastGenerationDebug', JSON.stringify(promptBarDebug));
+    storeGenerationDebug(promptBarDebug);
 
     setIsGenerating(true);
     await generate(payload, fullSettings, settings.googleApiKey, {
@@ -130,6 +137,9 @@ export default function PromptBar() {
       },
       onVariationFailed: (lid, retryFn) => {
         gallery.failLoading(lid, retryFn);
+      },
+      onGenerationError: (ids) => {
+        ids.forEach((id) => gallery.removeLoading(id));
       },
       onComplete: () => {
         setIsGenerating(false);

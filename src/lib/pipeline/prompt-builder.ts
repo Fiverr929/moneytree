@@ -14,7 +14,12 @@ export function collectPayload(
     moduleSnapshot: { files },
     usedImages: files
       .filter(f => f.eye !== false && f.url && !f.folder && ['SUBJECT', 'SCENE', 'STYLE'].includes(String(f.mode || '').toUpperCase()))
-      .map(f => ({ imgUrl: f.url }))
+      .map(f => ({
+        uuid: f.uuid,
+        imgUrl: f.url,
+        role: String(f.mode || '').toUpperCase(),
+        label: f.label,
+      }))
   };
 }
 

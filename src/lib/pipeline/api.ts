@@ -78,7 +78,7 @@ export async function googleGenerate(opts: GenerateOptions) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
-      }, { label: '[CafeAPI]' });
+      }, { label: '[CafeAPI]', timeoutMs: 90000 });
 
       let prediction: any = null;
       let blocked = !!(result.promptFeedback && result.promptFeedback.blockReason);
@@ -155,6 +155,7 @@ export type GenerationCallbacks = {
   onVariationReady: (dataUrl: string, lid: string, cellData: Record<string, any>) => void;
   onVariationBlocked: (lid: string) => void;
   onVariationFailed: (lid: string, retryFn: (newLid: string) => void) => void;
+  onGenerationError?: (ids: string[]) => void;
   onComplete: () => void;
   onError: (err: Error) => void;
 };
@@ -168,23 +169,42 @@ declare global {
   }
 }
 
-function setGenerationDebug(data: Record<string, any>) {
+function truncateDebugValue(value: any): any {
+  if (typeof value === 'string') {
+    if (value.startsWith('data:')) {
+      return `${value.slice(0, 96)}...[trimmed ${Math.max(0, value.length - 96)} chars]`;
+    }
+    if (value.length > 2000) {
+      return `${value.slice(0, 2000)}...[trimmed ${value.length - 2000} chars]`;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(truncateDebugValue);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, truncateDebugValue(entry)])
+    );
+  }
+  return value;
+}
+
+export function storeGenerationDebug(data: Record<string, any>) {
   if (typeof window === 'undefined') return;
-  window.__cafeLastGenerationDebug = data;
-  sessionStorage.setItem('__cafeLastGenerationDebug', JSON.stringify(data));
+  window.__cafeLastGenerationDebug = truncateDebugValue(data);
 }
 
 function patchGenerationDebug(patch: Record<string, any>) {
   if (typeof window === 'undefined') return;
-  const current = window.__cafeLastGenerationDebug || JSON.parse(sessionStorage.getItem('__cafeLastGenerationDebug') || 'null');
+  const current = window.__cafeLastGenerationDebug;
   if (!current) return;
   const next = {
     ...current,
     ...patch,
     updatedAt: new Date().toISOString()
   };
-  window.__cafeLastGenerationDebug = next;
-  sessionStorage.setItem('__cafeLastGenerationDebug', JSON.stringify(next));
+  storeGenerationDebug(next);
 }
 
 function getVisibleImageFiles(files?: Record<string, any>[]) {
@@ -259,7 +279,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
     const thinkingLevel = settings.activeThinkingLevel;
     const startedAt = new Date().toISOString();
 
-    setGenerationDebug({
+    storeGenerationDebug({
       status: 'started',
       startedAt,
       updatedAt: startedAt,
@@ -279,13 +299,17 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
     });
 
     function buildCellData(dataUrl: string) {
+      const createdAt = new Date().toISOString();
       return {
         id: Date.now() + Math.random(),
         uuid: crypto.randomUUID(),
         ratio,
         imgUrl: dataUrl,
-        date: new Date().toISOString(), // format properly later
-        type: 'Image',
+        date: createdAt,
+        type: 'Generation',
+        kind: 'image',
+        origin: 'generation',
+        createdAt,
         dims: '-', // calculated on image load
         prompt: finalPrompt,
         manifest,
@@ -365,6 +389,12 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
     callbacks.onComplete();
 
   } catch (err: any) {
+    if (typeof callbacks.onGenerationError === 'function') {
+      const loadingIds = Array.isArray(window.__cafeLastGenerationDebug?.loadingIds)
+        ? window.__cafeLastGenerationDebug!.loadingIds as string[]
+        : [];
+      callbacks.onGenerationError(loadingIds);
+    }
     patchGenerationDebug({
       status: 'error',
       error: err instanceof Error ? err.message : String(err)
@@ -430,7 +460,7 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
-  }, { label: '[CafeAPI Studio]' });
+  }, { label: '[CafeAPI Studio]', timeoutMs: 90000 });
 
   let prediction: any = null;
   (result.candidates || []).forEach((candidate: any) => {

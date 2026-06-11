@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, ReactNode, useEffect } from
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 import type { ModuleFile } from "@/context/ModuleContext";
+export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string };
 export type GalleryCell = {
   id: number;
   uuid?: string;
@@ -15,11 +16,16 @@ export type GalleryCell = {
   prompt?: string;
   date?: string;
   type?: string;
+  kind?: "image";
+  origin?: "generation" | "studio-edit" | "duplicate";
+  createdAt?: string;
+  updatedAt?: string;
+  sourceUuid?: string;
   dims?: string;
   generated?: boolean;
   mode?: string;
   moduleSnapshot?: { files: ModuleFile[] };
-  usedImages?: {imgUrl: string}[];
+  usedImages?: GalleryImageUse[];
   // Internal state for pending loads
   loadingId?: string;
   blocked?: boolean;
@@ -78,6 +84,27 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
 
   const { activeProjectId } = useApp();
 
+  const normalizeCell = (cell: GalleryCell): GalleryCell => {
+    const createdAt = cell.createdAt || (cell.date && cell.date.includes("T") ? cell.date : undefined);
+    const updatedAt = cell.updatedAt || (!createdAt ? cell.date : undefined);
+    const origin =
+      cell.origin ||
+      (cell.mode === "STUDIO REFINE" ? "studio-edit" : "generation");
+    const type =
+      cell.type ||
+      (origin === "studio-edit" ? "Studio Edit" : origin === "duplicate" ? "Duplicate" : "Generation");
+
+    return {
+      ...cell,
+      kind: cell.kind || "image",
+      origin,
+      type,
+      createdAt: createdAt || new Date().toISOString(),
+      updatedAt,
+      usedImages: (cell.usedImages || []).map((img) => ({ imgUrl: img.imgUrl, uuid: img.uuid, role: img.role, label: img.label })),
+    };
+  };
+
   useEffect(() => {
     if (activeProjectId) {
       DB.gallery.getByProject(activeProjectId).then(async data => {
@@ -89,7 +116,7 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
               if (img && img.dataUrl) return { ...c, imgUrl: img.dataUrl };
             } catch {}
           }
-          return c;
+          return normalizeCell(c);
         }));
         setCells(withUrls.reverse());
       }).catch(console.error);
@@ -104,19 +131,23 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
       loadingId: id,
       ratio,
       mode,
-      type: 'Image',
+      kind: "image",
+      origin: "generation",
+      type: "Generation",
+      createdAt: new Date().toISOString(),
       generated: true,
       phClass: 'loading'
     }, ...prev]);
   };
 
   const resolveLoading = (id: string, cell: GalleryCell) => {
-    setCells(prev => prev.map(c => c.loadingId === id ? { ...cell, loadingId: undefined } : c));
-    if (activeProjectId && cell.uuid && cell.imgUrl) {
-      const dbCell = { ...cell, project_id: activeProjectId, loadingId: undefined };
-      DB.images.put(cell.uuid, cell.imgUrl, activeProjectId);
+    const normalized = normalizeCell(cell);
+    setCells(prev => prev.map(c => c.loadingId === id ? { ...normalized, loadingId: undefined } : c));
+    if (activeProjectId && normalized.uuid && normalized.imgUrl) {
+      const dbCell = { ...normalized, project_id: activeProjectId, loadingId: undefined };
+      DB.images.put(normalized.uuid, normalized.imgUrl, activeProjectId);
       DB.gallery.put(dbCell);
-      DB.projects.update(activeProjectId, { thumbnail: cell.imgUrl }).catch(console.error);
+      DB.projects.update(activeProjectId, { thumbnail: normalized.imgUrl }).catch(console.error);
     }
   };
 
@@ -133,12 +164,13 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
   };
 
   const addCell = (cell: GalleryCell) => {
-    setCells(prev => [cell, ...prev]);
-    if (activeProjectId && cell.uuid && cell.imgUrl) {
-      const dbCell = { ...cell, project_id: activeProjectId, loadingId: undefined };
-      DB.images.put(cell.uuid, cell.imgUrl, activeProjectId);
+    const normalized = normalizeCell(cell);
+    setCells(prev => [normalized, ...prev]);
+    if (activeProjectId && normalized.uuid && normalized.imgUrl) {
+      const dbCell = { ...normalized, project_id: activeProjectId, loadingId: undefined };
+      DB.images.put(normalized.uuid, normalized.imgUrl, activeProjectId);
       DB.gallery.put(dbCell);
-      DB.projects.update(activeProjectId, { thumbnail: cell.imgUrl }).catch(console.error);
+      DB.projects.update(activeProjectId, { thumbnail: normalized.imgUrl }).catch(console.error);
     }
   };
 

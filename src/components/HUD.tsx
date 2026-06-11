@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useState, useEffect, useRef } from "react";
-import { useGallery } from "@/context/GalleryContext";
+import { useGallery, type GalleryCell } from "@/context/GalleryContext";
 import { useStudio } from "@/context/StudioContext";
 import { useModule } from "@/context/ModuleContext";
 import { useApp } from "@/context/AppContext";
@@ -23,16 +23,58 @@ export default function HUD() {
 
   const [threeDotOpen, setThreeDotOpen] = useState(false);
   const [setupPopupOpen, setSetupPopupOpen] = useState(false);
+  const [copyPromptTitle, setCopyPromptTitle] = useState("Copy prompt");
   
   const threeDotRef = useRef<HTMLDivElement>(null);
+  type ActiveHudCell = GalleryCell | undefined;
 
-  const persistGalleryCell = useCallback((cell: typeof activeCell) => {
+  // Derive visible cells before callbacks so selected cell state is initialized
+  // before any closure setup that may reference it.
+  const filteredCells = cells.filter(cell => {
+    if (ratioFilter === 'landscape') return ['16:9', '21:9', '4:3'].includes(cell.ratio);
+    if (ratioFilter === 'portrait')  return ['9:16', '3:4'].includes(cell.ratio);
+    if (ratioFilter === 'square')    return cell.ratio === '1:1';
+    return true;
+  });
+  const visibleCells = sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
+  const activeCell = visibleCells[hudIndex];
+
+  const persistGalleryCell = useCallback((cell: ActiveHudCell) => {
     if (!activeProjectId || !cell?.uuid || !cell.imgUrl) return;
     DB.images.put(cell.uuid, cell.imgUrl, activeProjectId);
     DB.gallery.put({ ...cell, project_id: activeProjectId, loadingId: undefined, retryFn: undefined });
   }, [activeProjectId]);
 
-  const applyGalleryStudioResult = useCallback((cell: typeof activeCell, url: string) => {
+  const formatInfoDate = useCallback((value?: string) => {
+    if (!value) return "-";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(parsed);
+  }, []);
+
+  const formatInfoType = useCallback((cell: ActiveHudCell) => {
+    if (!cell) return "-";
+    if (cell.type) return cell.type;
+    if (cell.origin === "studio-edit") return "Studio Edit";
+    if (cell.origin === "duplicate") return "Duplicate";
+    if (cell.origin === "generation") return "Generation";
+    return "-";
+  }, []);
+
+  const provenanceText = useCallback((cell: ActiveHudCell) => {
+    if (!cell) return null;
+    if (cell.origin === "studio-edit") return "Updated from an earlier gallery image.";
+    if (cell.origin === "duplicate") return "Copied from another gallery image.";
+    return null;
+  }, []);
+
+  const applyGalleryStudioResult = useCallback((cell: ActiveHudCell, url: string) => {
+    const updatedAt = new Date().toISOString();
     loadImageMetadata(url)
       .then((meta) => {
         const updatedCell = {
@@ -40,8 +82,12 @@ export default function HUD() {
           imgUrl: url,
           dims: meta.dims,
           ratio: meta.ratio,
-          date: new Date().toLocaleTimeString(),
-          type: cell?.type || "Image",
+          date: updatedAt,
+          type: "Studio Edit",
+          kind: "image" as const,
+          origin: "studio-edit" as const,
+          updatedAt,
+          sourceUuid: cell?.sourceUuid || cell?.uuid,
         };
         setCells((prev) => prev.map((entry) => entry.id === cell?.id ? updatedCell : entry));
         persistGalleryCell(updatedCell);
@@ -50,15 +96,19 @@ export default function HUD() {
         const updatedCell = {
           ...cell,
           imgUrl: url,
-          date: new Date().toLocaleTimeString(),
-          type: cell?.type || "Image",
+          date: updatedAt,
+          type: "Studio Edit",
+          kind: "image" as const,
+          origin: "studio-edit" as const,
+          updatedAt,
+          sourceUuid: cell?.sourceUuid || cell?.uuid,
         };
         setCells((prev) => prev.map((entry) => entry.id === cell?.id ? updatedCell : entry));
         persistGalleryCell(updatedCell);
       });
   }, [persistGalleryCell, setCells]);
 
-  const syncGalleryImageMeta = useCallback((cell: typeof activeCell, img: HTMLImageElement) => {
+  const syncGalleryImageMeta = useCallback((cell: ActiveHudCell, img: HTMLImageElement) => {
     const dims = `${img.naturalWidth}x${img.naturalHeight}`;
     const ratio = dimensionsToRatio(img.naturalWidth, img.naturalHeight);
     if (cell?.dims === dims && cell?.ratio === ratio) return;
@@ -67,22 +117,11 @@ export default function HUD() {
       ...cell,
       dims,
       ratio,
-      type: cell?.type || "Image",
+      type: cell?.type || "Generation",
     };
     setCells((prev) => prev.map((entry) => entry.id === cell?.id ? updatedCell : entry));
     persistGalleryCell(updatedCell);
   }, [persistGalleryCell, setCells]);
-
-  // Derive visible cells same as Gallery
-  const filteredCells = cells.filter(cell => {
-    if (ratioFilter === 'landscape') return ['16:9', '21:9', '4:3'].includes(cell.ratio);
-    if (ratioFilter === 'portrait')  return ['9:16', '3:4'].includes(cell.ratio);
-    if (ratioFilter === 'square')    return cell.ratio === '1:1';
-    return true;
-  });
-  const visibleCells = sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
-
-  const activeCell = visibleCells[hudIndex];
 
   const handleNext = useCallback(() => {
     if (!visibleCells.length) return;
@@ -134,6 +173,12 @@ export default function HUD() {
       ...activeCell,
       id: crypto.getRandomValues(new Uint32Array(1))[0],
       uuid: crypto.randomUUID(),
+      type: "Duplicate",
+      kind: "image" as const,
+      origin: "duplicate" as const,
+      sourceUuid: activeCell.uuid,
+      updatedAt: new Date().toISOString(),
+      date: new Date().toISOString(),
       _imgUuid: undefined,
       _dbId: undefined,
       loadingId: undefined,
@@ -182,9 +227,45 @@ export default function HUD() {
     setHudOpen(false);
   };
 
-  const handleCopyPrompt = () => {
-    if (!activeCell.prompt || !navigator.clipboard) return;
-    navigator.clipboard.writeText(activeCell.prompt);
+  const handleCopyPrompt = async () => {
+    if (!activeCell.prompt) return;
+
+    const markCopyResult = (title: string) => {
+      setCopyPromptTitle(title);
+      window.setTimeout(() => setCopyPromptTitle("Copy prompt"), 1200);
+    };
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(activeCell.prompt);
+        markCopyResult("Copied");
+        return;
+      }
+    } catch {
+      // Fall through to legacy copy path for embedded browsers.
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = activeCell.prompt;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    try {
+      if (document.execCommand("copy")) {
+        markCopyResult("Copied");
+      } else {
+        markCopyResult("Copy failed");
+      }
+    } catch {
+      markCopyResult("Copy failed");
+    } finally {
+      textarea.remove();
+    }
   };
 
   const handleLoadSetup = () => {
@@ -308,11 +389,11 @@ export default function HUD() {
           <div className="info-row">
             <div className="info-item">
               <span className="info-item-label">Date</span>
-              <span className="info-item-value" id="info-date">{activeCell.date || '-'}</span>
+                <span className="info-item-value" id="info-date">{formatInfoDate(activeCell.updatedAt || activeCell.createdAt || activeCell.date)}</span>
             </div>
             <div className="info-item">
               <span className="info-item-label">Type</span>
-              <span className="info-item-value" id="info-type">{activeCell.type || '-'}</span>
+                <span className="info-item-value" id="info-type">{formatInfoType(activeCell)}</span>
             </div>
             <div className="info-item">
               <span className="info-item-label">Dimensions</span>
@@ -320,9 +401,16 @@ export default function HUD() {
             </div>
           </div>
 
+          {provenanceText(activeCell) && (
+            <div className="info-provenance">
+              <span className="info-provenance-label">Source</span>
+              <span className="info-provenance-value">{provenanceText(activeCell)}</span>
+            </div>
+          )}
+
           <div className="info-section-header">
             <span className="info-section-title">Prompt</span>
-            <button className="info-icon-btn" id="btn-copy-prompt" title="Copy prompt" onClick={handleCopyPrompt}>
+            <button className="info-icon-btn" id="btn-copy-prompt" title={copyPromptTitle} onClick={handleCopyPrompt}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
           </div>

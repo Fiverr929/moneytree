@@ -311,21 +311,27 @@ export default function Studio() {
         setHistory(prev => [generatedUrl, ...prev]);
         
         const newUuid = crypto.randomUUID();
-        const usedImages = [{ imgUrl: currentActiveUrl }];
+        const usedImages = [{ imgUrl: currentActiveUrl, uuid: undefined, role: "BASE" }];
         currentGroups.forEach(g => {
-          g.images.forEach(img => usedImages.push({ imgUrl: img.url }));
+          g.images.forEach(img => usedImages.push({ imgUrl: img.url, uuid: img.uuid, role: g.action, label: g.name }));
         });
 
+        const createdAt = new Date().toISOString();
         addCell({
           id: Date.now(),
           uuid: newUuid,
           ratio: "1:1",
           mode: "STUDIO REFINE",
-          type: "Image",
+          type: "Studio Edit",
+          kind: "image",
+          origin: "studio-edit",
+          createdAt,
+          updatedAt: createdAt,
+          sourceUuid: undefined,
           generated: true,
           imgUrl: generatedUrl,
           prompt: currentPrompt,
-          date: new Date().toLocaleTimeString(),
+          date: createdAt,
           usedImages
         });
 
@@ -492,7 +498,7 @@ export default function Studio() {
                 onChange={e => setPrompt(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') handleRefine(); }}
               />
-              <button className={`prompt-refine-btn ${loadingCount > 0 ? 'loading' : ''}`} id="studioRefineBtn" onClick={handleRefine}>REFINE</button>
+              <button className="prompt-refine-btn" id="studioRefineBtn" onClick={handleRefine}>REFINE</button>
             </div>
           </div>
         </div>
