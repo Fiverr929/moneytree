@@ -18,9 +18,17 @@ type GenerateOptions = {
   imageSize?: string;
   thinkingLevel?: string;
   onVariationReady?: (dataUrl: string, idx: number) => void;
-  onVariationFailed?: (idx: number) => void;
-  onVariationBlocked?: (idx: number) => void;
+  onVariationFailed?: (idx: number, statusLabel?: string) => void;
+  onVariationBlocked?: (idx: number, statusLabel?: string) => void;
 };
+
+function classifyGenerationError(err: unknown): "BLOCKED" | "QUOTA" | "TIMEOUT" | "FAILED" {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes("IMAGE_PROHIBITED_CONTENT") || message.includes("Prompt blocked")) return "BLOCKED";
+  if (message.includes("RESOURCE_EXHAUSTED") || message.includes("[CafeAPI] 429") || message.includes(" 429:")) return "QUOTA";
+  if ((err instanceof Error && err.name === "AbortError") || message.includes("timed out")) return "TIMEOUT";
+  return "FAILED";
+}
 
 export async function googleGenerate(opts: GenerateOptions) {
   const { modelId, apiKey, prompt, numImages, aspectRatio, imageRefs, imageSize, thinkingLevel, onVariationReady, onVariationFailed, onVariationBlocked } = opts;
@@ -98,11 +106,11 @@ export async function googleGenerate(opts: GenerateOptions) {
       if (prediction && onVariationReady) {
         onVariationReady(`data:${prediction.mimeType};base64,${prediction.bytesBase64Encoded}`, idx);
       } else if (blocked && onVariationBlocked) {
-        onVariationBlocked(idx);
+        onVariationBlocked(idx, 'BLOCKED');
       }
       return result;
     } catch (err) {
-      if (onVariationFailed) onVariationFailed(idx);
+      if (onVariationFailed) onVariationFailed(idx, classifyGenerationError(err));
       throw err;
     }
   });
@@ -153,9 +161,9 @@ export type GenerationCallbacks = {
   onStart: (count: number) => void;
   onLoadingIds: (ids: string[]) => void;
   onVariationReady: (dataUrl: string, lid: string, cellData: Record<string, any>) => void;
-  onVariationBlocked: (lid: string) => void;
-  onVariationFailed: (lid: string, retryFn: (newLid: string) => void) => void;
-  onGenerationError?: (ids: string[]) => void;
+  onVariationBlocked: (lid: string, statusLabel?: string) => void;
+  onVariationFailed: (lid: string, retryFn?: (newLid: string) => void, statusLabel?: string) => void;
+  onGenerationError?: (ids: string[], statusLabel: string) => void;
   onComplete: () => void;
   onError: (err: Error) => void;
 };
@@ -342,26 +350,26 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
         });
         callbacks.onVariationReady(dataUrl, lid, buildCellData(dataUrl));
       },
-      onVariationBlocked: (idx) => {
+      onVariationBlocked: (idx, statusLabel) => {
         const lid = loadingIds[idx];
         const previousResults = window.__cafeLastGenerationDebug?.results || [];
         patchGenerationDebug({
           status: 'running',
           results: [
             ...previousResults,
-            { idx, loadingId: lid, status: 'blocked' }
+            { idx, loadingId: lid, status: statusLabel || 'blocked' }
           ]
         });
-        callbacks.onVariationBlocked(lid);
+        callbacks.onVariationBlocked(lid, statusLabel);
       },
-      onVariationFailed: (idx) => {
+      onVariationFailed: (idx, statusLabel) => {
         const lid = loadingIds[idx];
         const previousResults = window.__cafeLastGenerationDebug?.results || [];
         patchGenerationDebug({
           status: 'running',
           results: [
             ...previousResults,
-            { idx, loadingId: lid, status: 'failed' }
+            { idx, loadingId: lid, status: statusLabel || 'failed' }
           ]
         });
         callbacks.onVariationFailed(lid, (newLid) => {
@@ -378,10 +386,10 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
               });
               callbacks.onVariationReady(dataUrl, newLid, buildCellData(dataUrl));
             },
-            onVariationFailed: () => callbacks.onVariationFailed(newLid, () => {}),
-            onVariationBlocked: () => callbacks.onVariationBlocked(newLid)
+            onVariationFailed: (_retryIdx, retryStatusLabel) => callbacks.onVariationFailed(newLid, undefined, retryStatusLabel),
+            onVariationBlocked: (_retryIdx, retryStatusLabel) => callbacks.onVariationBlocked(newLid, retryStatusLabel)
           });
-        });
+        }, statusLabel);
       }
     });
 
@@ -393,7 +401,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
       const loadingIds = Array.isArray(window.__cafeLastGenerationDebug?.loadingIds)
         ? window.__cafeLastGenerationDebug!.loadingIds as string[]
         : [];
-      callbacks.onGenerationError(loadingIds);
+      callbacks.onGenerationError(loadingIds, classifyGenerationError(err));
     }
     patchGenerationDebug({
       status: 'error',

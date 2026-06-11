@@ -30,6 +30,7 @@ export type GalleryCell = {
   loadingId?: string;
   blocked?: boolean;
   error?: boolean;
+  statusLabel?: string;
   retryFn?: (newId: string) => void;
 };
 
@@ -61,8 +62,8 @@ interface GalleryContextType {
   // Mutations
   addLoading: (id: string, ratio: string, mode: string) => void;
   resolveLoading: (id: string, cell: GalleryCell) => void;
-  failLoading: (id: string, retryFn: (newId: string) => void) => void;
-  blockLoading: (id: string) => void;
+  failLoading: (id: string, retryFn?: (newId: string) => void, statusLabel?: string) => void;
+  blockLoading: (id: string, statusLabel?: string) => void;
   removeLoading: (id: string) => void;
   addCell: (cell: GalleryCell) => void;
 }
@@ -151,12 +152,12 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const failLoading = (id: string, retryFn: (newId: string) => void) => {
-    setCells(prev => prev.map(c => c.loadingId === id ? { ...c, error: true, retryFn } : c));
+  const failLoading = (id: string, retryFn?: (newId: string) => void, statusLabel = "FAILED") => {
+    setCells(prev => prev.map(c => c.loadingId === id ? { ...c, error: true, blocked: false, retryFn, statusLabel } : c));
   };
 
-  const blockLoading = (id: string) => {
-    setCells(prev => prev.map(c => c.loadingId === id ? { ...c, blocked: true } : c));
+  const blockLoading = (id: string, statusLabel = "BLOCKED") => {
+    setCells(prev => prev.map(c => c.loadingId === id ? { ...c, blocked: true, error: false, retryFn: undefined, statusLabel } : c));
   };
 
   const removeLoading = (id: string) => {

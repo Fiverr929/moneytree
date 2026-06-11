@@ -132,14 +132,17 @@ export default function PromptBar() {
       onVariationReady: (dataUrl, lid, cellData) => {
         gallery.resolveLoading(lid, cellData as GalleryCell);
       },
-      onVariationBlocked: (lid) => {
-        gallery.blockLoading(lid);
+      onVariationBlocked: (lid, statusLabel) => {
+        gallery.blockLoading(lid, statusLabel);
       },
-      onVariationFailed: (lid, retryFn) => {
-        gallery.failLoading(lid, retryFn);
+      onVariationFailed: (lid, retryFn, statusLabel) => {
+        gallery.failLoading(lid, retryFn, statusLabel);
       },
-      onGenerationError: (ids) => {
-        ids.forEach((id) => gallery.removeLoading(id));
+      onGenerationError: (ids, statusLabel) => {
+        ids.forEach((id) => {
+          if (statusLabel === "BLOCKED") gallery.blockLoading(id, statusLabel);
+          else gallery.failLoading(id, undefined, statusLabel);
+        });
       },
       onComplete: () => {
         setIsGenerating(false);

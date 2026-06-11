@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useGallery, GalleryCell } from "@/context/GalleryContext";
+import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
 
 export default function Gallery() {
@@ -14,6 +15,7 @@ export default function Gallery() {
     ratioFilter, setRatioFilter,
     setHudOpen, setHudIndex
   } = useGallery();
+  const { activeProjectId } = useApp();
 
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [threeDotDropdownOpen, setThreeDotDropdownOpen] = useState(false);
@@ -210,15 +212,15 @@ export default function Gallery() {
                   backgroundPosition: 'center'
                 }}
               >
-                {cell.blocked && <span className="cell-blocked-label">BLOCKED</span>}
+                {cell.blocked && <span className="cell-blocked-label">{cell.statusLabel || "BLOCKED"}</span>}
                 {cell.error && (
                   <span className="cell-error-label" onClick={(e) => {
                     e.stopPropagation();
                     if (cell.retryFn && cell.loadingId) {
                       cell.retryFn(cell.loadingId);
                     }
-                  }}>
-                    RETRY
+                  }} style={{ cursor: cell.retryFn ? 'pointer' : 'default' }}>
+                    {cell.statusLabel || "FAILED"}
                   </span>
                 )}
               </div>
