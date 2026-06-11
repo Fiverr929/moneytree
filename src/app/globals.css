@@ -3304,14 +3304,19 @@
     }
 
     /* ── Loading cell ── */
-    @keyframes cafe-pulse {
-      0%   { opacity: 1; }
-      50%  { opacity: 0.35; }
-      100% { opacity: 1; }
+    .cell-inner.cafe-loading {
+      position: relative;
+      overflow: hidden;
     }
 
-    .cell-inner.cafe-loading {
-      animation: cafe-pulse 1.4s ease-in-out infinite;
+    .cell-inner.cafe-loading::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%);
+      background-size: 200% 100%;
+      animation: refine-shimmer 1.2s infinite;
+      pointer-events: none;
     }
 
     /* ── Error cell ── */

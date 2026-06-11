@@ -30,6 +30,10 @@ function classifyGenerationError(err: unknown): "BLOCKED" | "QUOTA" | "TIMEOUT" 
   return "FAILED";
 }
 
+function isRetryMeaningful(statusLabel?: string): boolean {
+  return statusLabel === "TIMEOUT" || statusLabel === "FAILED";
+}
+
 export async function googleGenerate(opts: GenerateOptions) {
   const { modelId, apiKey, prompt, numImages, aspectRatio, imageRefs, imageSize, thinkingLevel, onVariationReady, onVariationFailed, onVariationBlocked } = opts;
   
@@ -372,7 +376,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
             { idx, loadingId: lid, status: statusLabel || 'failed' }
           ]
         });
-        callbacks.onVariationFailed(lid, (newLid) => {
+        const retryFn = isRetryMeaningful(statusLabel) ? (newLid: string) => {
           googleGenerate({
             modelId: model!.id, apiKey, prompt: finalPrompt, numImages: 1, aspectRatio: ratio, imageRefs, imageSize, thinkingLevel: thinkingLevel || undefined,
             onVariationReady: (dataUrl) => {
@@ -389,7 +393,8 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
             onVariationFailed: (_retryIdx, retryStatusLabel) => callbacks.onVariationFailed(newLid, undefined, retryStatusLabel),
             onVariationBlocked: (_retryIdx, retryStatusLabel) => callbacks.onVariationBlocked(newLid, retryStatusLabel)
           });
-        }, statusLabel);
+        } : undefined;
+        callbacks.onVariationFailed(lid, retryFn, statusLabel);
       }
     });
 

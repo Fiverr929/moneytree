@@ -204,7 +204,7 @@ export default function Gallery() {
               onClick={() => !cell.loadingId && handleCellClick(cell.id)}
             >
               <div 
-                className={`cell-inner ${cell.phClass || ""} ${cell.loadingId ? "cafe-loading" : ""} ${cell.blocked ? "cell-blocked" : ""} ${cell.error ? "cell-error" : ""}`}
+                className={`cell-inner ${cell.phClass || ""} ${cell.loadingId && !cell.blocked && !cell.error ? "cafe-loading" : ""} ${cell.blocked ? "cell-blocked" : ""} ${cell.error ? "cell-error" : ""}`}
                 style={{
                   backgroundColor: cell.loadingId ? (cell.mode === "STAGE" ? "#5271ff" : "#ea5823") : undefined,
                   backgroundImage: cell.imgUrl ? `url('${cell.imgUrl}')` : undefined,
@@ -220,7 +220,7 @@ export default function Gallery() {
                       cell.retryFn(cell.loadingId);
                     }
                   }} style={{ cursor: cell.retryFn ? 'pointer' : 'default' }}>
-                    {cell.statusLabel || "FAILED"}
+                    {cell.retryFn ? "RETRY" : (cell.statusLabel || "FAILED")}
                   </span>
                 )}
               </div>
