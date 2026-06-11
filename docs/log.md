@@ -14,6 +14,40 @@ Track component work, decisions, and session continuations here.
 
 ## Sessions
 
+### 2026-06-11 - Gallery/HUD/Studio Stabilization + Error-State Polish
+
+**Status:** COMPLETED
+
+**What Was Done:**
+- Stabilized the Next.js gallery, HUD, and Studio flows after the earlier metadata/provenance pass.
+- Removed the unreliable `OPEN SOURCE IMAGE` control from HUD and kept provenance as read-only text.
+- Fixed the generation-debug regression by removing `sessionStorage` persistence from the debug path; debug now stays in `window.__cafeLastGenerationDebug` only.
+- Added generation request timeouts (`90s`) so hung API calls stop cleanly instead of leaving endless loading tiles.
+- Added top-level loading cleanup so failed generations do not leave orphaned gallery placeholders behind.
+- Hardened HUD prompt copy behavior with a fallback copy path for embedded browsers where `navigator.clipboard.writeText()` is denied.
+- Kept the Studio `REFINE` button active during in-flight Studio generations instead of visually disabling it.
+- Added richer gallery cell metadata normalization: `kind`, `origin`, `createdAt`, `updatedAt`, `sourceUuid`, and structured `usedImages`.
+- Added explicit gallery generation failure labels:
+  - `BLOCKED`
+  - `QUOTA`
+  - `TIMEOUT`
+  - `FAILED`
+- Retry is now shown only when it is meaningful (`TIMEOUT` and generic `FAILED`).
+- Blocked and failed tiles no longer keep the old loading glow.
+- Main gallery loading tiles now use the same shimmer animation style as Studio loading thumbnails.
+
+**Files Touched:**
+- `src/app/globals.css`
+- `src/components/Gallery.tsx`
+- `src/components/HUD.tsx`
+- `src/components/PromptBar.tsx`
+- `src/components/Studio.tsx`
+- `src/context/GalleryContext.tsx`
+- `src/lib/pipeline/api.ts`
+- `src/lib/pipeline/prompt-builder.ts`
+- `docs/log.md`
+- `docs/CafeHTML.md`
+
 ### 2026-06-11 - Studio Active Image Persistence
 
 **Status:** COMPLETED
@@ -35,13 +69,13 @@ Track component work, decisions, and session continuations here.
 
 **What Was Done:**
 - Added a local generation debug trail so the latest prompt payload can be inspected without copying it out manually.
-- The latest run now writes to `window.__cafeLastGenerationDebug` and `sessionStorage.__cafeLastGenerationDebug`.
+- The latest run writes to `window.__cafeLastGenerationDebug`.
 - Added capture points in `src/components/PromptBar.tsx` and `src/lib/pipeline/api.ts` so prompt payload, settings, module files, manifest, and run status can be checked after generation.
 - Confirmed the gallery renders generated images through `GalleryContext.resolveLoading()` into `.cell-inner` background images.
 - Documented the local dev startup issue: `Start-Process npm` is unreliable in this Windows environment because of duplicate `Path` / `PATH` entries, and Next may need an approval-backed launch because of sandbox child-process restrictions.
 
 **Notes:**
-- The debug payload is session-scoped and clears when the tab/session ends.
+- The debug payload is tab-scoped runtime state and clears on refresh/reload.
 - The dev-server launch that works here is `cmd /c npm run dev` via a hidden non-interactive process start.
 
 **Files Touched:**

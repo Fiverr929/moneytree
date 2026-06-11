@@ -36,8 +36,8 @@ Local dev note:
 - The working dev-server launch in this Windows workspace is a hidden non-interactive `cmd /c npm run dev` start. `Start-Process npm` is unreliable here because PowerShell sees duplicate `Path` / `PATH` entries, and Next may need approval-backed startup because the sandbox can block child-process spawning with `spawn EPERM`.
 
 Debug capture:
-- Generation runs write a local debug payload to `window.__cafeLastGenerationDebug` and `sessionStorage.__cafeLastGenerationDebug`.
-- The payload is session-scoped and is meant for checking the latest prompt, settings, module files, manifest, and result status without manual copy/paste.
+- Generation runs write a local debug payload to `window.__cafeLastGenerationDebug`.
+- The payload is runtime-scoped to the current browser tab and is meant for checking the latest prompt, settings, module files, manifest, and result status without manual copy/paste.
 
 Legacy files:
 Main file: `CafeHTML-v2.html`
@@ -60,11 +60,22 @@ Docs: `docs/` folder
                                  calls Gemini 2.5 Flash → returns { prompt, manifest }
 4. googleGenerate()            — sends enhanced prompt + all active module/reference images → returns predictions
                                  N variations = N parallel calls (allSettled — successes survive a failed call)
-5. Gallery.resolveLoading()    — displays result, saves to IndexedDB via Workspace hook
+5. Gallery.resolveLoading()    — displays result, saves to IndexedDB via project-aware gallery storage
 6. Registry.clear()            — if Keep Descriptions OFF, clears all stored descriptions
 ```
 
 There is no single-request multi-image parameter for the Gemini image models, so each variation is a separate `callGoogleAPI`. They run concurrently via `Promise.allSettled`; a failed call (network / 429-after-retries / safety block) is dropped without discarding the variations that succeeded. The batch only errors when *zero* images come back.
+
+Current Next.js gallery generation behavior:
+- Loading tiles resolve per variation.
+- Requests time out after `90s` so hung calls stop cleanly.
+- Non-success outcomes render explicit tile labels:
+  - `BLOCKED`
+  - `QUOTA`
+  - `TIMEOUT`
+  - `FAILED`
+- Retry only appears when retry is meaningful (`TIMEOUT` and generic `FAILED`).
+- Gallery loading tiles use the same shimmer animation style as Studio loading thumbnails.
 
 ---
 
@@ -219,6 +230,7 @@ Studio is the current image editing workspace for Gallery images and Module imag
 - **Module return** — replaces the module image in place and keeps the same module image UUID so Studio history remains attached
 - **References are image-specific** — Studio module/reference layers are stored as `layers` on the same per-UUID Studio session
 - **No automatic Gallery publishing** — Studio outputs do not auto-add new Gallery rows. Future behavior should be an explicit “Save to Gallery” action.
+- **REFINE stays active** — the Studio `REFINE` button is no longer visually disabled during in-flight Studio generations.
 
 ### Studio Reference Panel (`studio-module.js`)
 
@@ -231,6 +243,17 @@ Purpose-built panel — does not use `ModulePanel.makeSection`. Owns its own ren
 - **Name editor** — click the group name label to open an inline input; Enter/Escape/blur commits. Opening name editor closes any open action drawer on the same group.
 - **Serialize** — `serialize()` reads the DOM and returns `{ groups: [{ action, name, images: [{ uuid }] }] }`. Images store UUID only; `resolveMissingImages()` fetches base64 from `DB.images` on load.
 - **Legacy compat** — `parseLegacyLayers()` converts old HTML-snapshot format to new shape on restore.
+
+---
+
+## Gallery HUD
+
+- HUD shows normalized image metadata (`Date`, `Type`, `Dimensions`) from gallery records.
+- Provenance is text-only in the current build:
+  - `Studio Edit` -> "Updated from an earlier gallery image."
+  - `Duplicate` -> "Copied from another gallery image."
+- The earlier `OPEN SOURCE IMAGE` jump control was removed because it was not reliable against filtered or deleted gallery state.
+- Prompt copy in HUD falls back cleanly when the embedded browser denies `navigator.clipboard.writeText()`.
 
 ---
 
