@@ -61,7 +61,7 @@ export default function PromptBar() {
   }, [promptText]);
 
   const toggleState = () => {
-    setGenerationState(generationState === "FRAME" ? "SCENE" : "FRAME");
+    setGenerationState(generationState === "FRAME" ? "STAGE" : "FRAME");
     setDropdownOpen(false);
   };
 
@@ -91,6 +91,30 @@ export default function PromptBar() {
       moduleContext.files,
       fullSettings
     );
+
+    const debugStartedAt = new Date().toISOString();
+    const promptBarDebug = {
+      status: 'promptbar-started',
+      startedAt: debugStartedAt,
+      updatedAt: debugStartedAt,
+      source: 'PromptBar.handleGenerate',
+      rawPrompt: trimmed,
+      payload,
+      settings: {
+        mode: generationState,
+        aspectRatio: fullSettings.aspectRatio,
+        variation: fullSettings.variation,
+        activeModel: fullSettings.activeModel,
+        activeResolution: fullSettings.activeResolution,
+        activeThinkingLevel: fullSettings.activeThinkingLevel,
+      },
+      moduleFiles: moduleContext.files.map(({ url, ...file }) => ({
+        ...file,
+        hasImage: !!url,
+      })),
+    };
+    window.__cafeLastGenerationDebug = promptBarDebug;
+    window.sessionStorage.setItem('__cafeLastGenerationDebug', JSON.stringify(promptBarDebug));
 
     setIsGenerating(true);
     await generate(payload, fullSettings, settings.googleApiKey, {
@@ -146,7 +170,7 @@ export default function PromptBar() {
     }
   };
 
-  const placeholderText = generationState === "SCENE" ? "Are we making a movie?" : "What are we making today?";
+  const placeholderText = generationState === "STAGE" ? "Are we making a movie?" : "What are we making today?";
 
   return (
     <div className="prompt-bar" id="promptBar" data-state={generationState}>
@@ -219,7 +243,7 @@ export default function PromptBar() {
                 }
               }}
             >-</button>
-            <span>{generationState === "FRAME" ? frameVar : frameCount} {generationState === "FRAME" ? "IMAGE" : "FRAME"}{(generationState === "FRAME" && parseInt(frameVar.toString(), 10) !== 1) || (generationState === "SCENE" && parseInt(frameCount.toString(), 10) !== 1) ? "S" : ""}</span>
+            <span>{generationState === "FRAME" ? frameVar : frameCount} {generationState === "FRAME" ? "IMAGE" : "FRAME"}{(generationState === "FRAME" && parseInt(frameVar.toString(), 10) !== 1) || (generationState === "STAGE" && parseInt(frameCount.toString(), 10) !== 1) ? "S" : ""}</span>
             <button 
               style={{ width: '24px', height: '20px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', color: '#c7c7c7' }}
               onClick={(e) => {

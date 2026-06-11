@@ -4,7 +4,9 @@ import React, { useCallback, useState, useEffect, useRef } from "react";
 import { useGallery } from "@/context/GalleryContext";
 import { useStudio } from "@/context/StudioContext";
 import { useModule } from "@/context/ModuleContext";
+import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
+import { dimensionsToRatio, loadImageMetadata } from "@/lib/imageMeta";
 
 export default function HUD() {
   const { 
@@ -17,11 +19,59 @@ export default function HUD() {
 
   const { openStudio } = useStudio();
   const { setFiles } = useModule();
+  const { activeProjectId } = useApp();
 
   const [threeDotOpen, setThreeDotOpen] = useState(false);
   const [setupPopupOpen, setSetupPopupOpen] = useState(false);
   
   const threeDotRef = useRef<HTMLDivElement>(null);
+
+  const persistGalleryCell = useCallback((cell: typeof activeCell) => {
+    if (!activeProjectId || !cell?.uuid || !cell.imgUrl) return;
+    DB.images.put(cell.uuid, cell.imgUrl, activeProjectId);
+    DB.gallery.put({ ...cell, project_id: activeProjectId, loadingId: undefined, retryFn: undefined });
+  }, [activeProjectId]);
+
+  const applyGalleryStudioResult = useCallback((cell: typeof activeCell, url: string) => {
+    loadImageMetadata(url)
+      .then((meta) => {
+        const updatedCell = {
+          ...cell,
+          imgUrl: url,
+          dims: meta.dims,
+          ratio: meta.ratio,
+          date: new Date().toLocaleTimeString(),
+          type: cell?.type || "Image",
+        };
+        setCells((prev) => prev.map((entry) => entry.id === cell?.id ? updatedCell : entry));
+        persistGalleryCell(updatedCell);
+      })
+      .catch(() => {
+        const updatedCell = {
+          ...cell,
+          imgUrl: url,
+          date: new Date().toLocaleTimeString(),
+          type: cell?.type || "Image",
+        };
+        setCells((prev) => prev.map((entry) => entry.id === cell?.id ? updatedCell : entry));
+        persistGalleryCell(updatedCell);
+      });
+  }, [persistGalleryCell, setCells]);
+
+  const syncGalleryImageMeta = useCallback((cell: typeof activeCell, img: HTMLImageElement) => {
+    const dims = `${img.naturalWidth}x${img.naturalHeight}`;
+    const ratio = dimensionsToRatio(img.naturalWidth, img.naturalHeight);
+    if (cell?.dims === dims && cell?.ratio === ratio) return;
+
+    const updatedCell = {
+      ...cell,
+      dims,
+      ratio,
+      type: cell?.type || "Image",
+    };
+    setCells((prev) => prev.map((entry) => entry.id === cell?.id ? updatedCell : entry));
+    persistGalleryCell(updatedCell);
+  }, [persistGalleryCell, setCells]);
 
   // Derive visible cells same as Gallery
   const filteredCells = cells.filter(cell => {
@@ -74,13 +124,25 @@ export default function HUD() {
 
   const handleDelete = () => {
     if (activeCell?.id) DB.gallery.delete(activeCell.id);
+    if (activeCell?.uuid) DB.images.delete(activeCell.uuid);
     setCells(prev => prev.filter(c => c.id !== activeCell.id));
     setHudOpen(false);
   };
 
   const handleDuplicate = () => {
-    const newCell = { ...activeCell, id: crypto.getRandomValues(new Uint32Array(1))[0], uuid: crypto.randomUUID(), _imgUuid: undefined, _dbId: undefined };
+    const newCell = {
+      ...activeCell,
+      id: crypto.getRandomValues(new Uint32Array(1))[0],
+      uuid: crypto.randomUUID(),
+      _imgUuid: undefined,
+      _dbId: undefined,
+      loadingId: undefined,
+      blocked: undefined,
+      error: undefined,
+      retryFn: undefined,
+    };
     setCells(prev => [newCell, ...prev]);
+    persistGalleryCell(newCell);
     setThreeDotOpen(false);
   };
 
@@ -153,7 +215,17 @@ export default function HUD() {
 
         <button className="hud-icon-btn" id="hud-edit" title="Refine Area" onClick={(e) => { 
           e.stopPropagation(); 
-          if (activeCell) openStudio({ uuid: activeCell.uuid, imgUrl: activeCell.imgUrl, caller: 'gallery' });
+          if (activeCell) {
+            openStudio({
+              uuid: activeCell.uuid,
+              imgUrl: activeCell.imgUrl,
+              caller: 'gallery',
+              onDone: (url) => {
+                if (!url) return;
+                applyGalleryStudioResult(activeCell, url);
+              }
+            });
+          }
         }}>
           <svg width="14" height="14" viewBox="0 0 14.7989 14.7272" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M0 13.1289V11.5305L1.16648 10.3707C4.97904 6.57996 8.40899 3.18909 8.44436 3.17571C8.46326 3.16815 9.72577 4.40376 11.0113 5.68169L11.6502 6.31671L7.45474 10.5219L3.25927 14.7272H1.62965H0V13.1289ZM11.1262 3.66073L9.55907 2.09352L10.6058 1.04673L11.6526 0L13.2258 1.57315L14.7989 3.14624L13.7582 4.18715C13.1859 4.75963 12.7121 5.22799 12.7054 5.22799C12.6979 5.22799 11.9881 4.52272 11.1262 3.66073Z" fill="currentColor" />
@@ -182,7 +254,12 @@ export default function HUD() {
               style={{ transform: `translateX(${(i - hudIndex) * 100}%)` }}
             >
               {cell.imgUrl ? (
-                <img className="hud-slide-img" src={cell.imgUrl} alt="Generated" />
+                <img
+                  className="hud-slide-img"
+                  src={cell.imgUrl}
+                  alt="Generated"
+                  onLoad={(e) => syncGalleryImageMeta(cell, e.currentTarget)}
+                />
               ) : (
                 <div 
                   className={`hud-slide-placeholder ${cell.phClass || ""}`} 

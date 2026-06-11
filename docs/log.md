@@ -14,6 +14,42 @@ Track component work, decisions, and session continuations here.
 
 ## Sessions
 
+### 2026-06-11 - Studio Active Image Persistence
+
+**Status:** COMPLETED
+
+**What Was Done:**
+- Fixed Studio so the selected active history image is persisted separately from the history stack.
+- `StudioContext` now stores `activeUrl` alongside `history`, restores it on open, and saves it on close/autosave.
+- `Studio` now reads the shared active URL from context instead of keeping a separate private copy.
+- This prevents the UI from showing one selected thumbnail while returning or restoring a different image later.
+
+**Files Touched:**
+- `src/context/StudioContext.tsx`
+- `src/components/Studio.tsx`
+- `docs/log.md`
+
+### 2026-06-11 - Generation Debug Capture + Dev Startup Notes
+
+**Status:** COMPLETED
+
+**What Was Done:**
+- Added a local generation debug trail so the latest prompt payload can be inspected without copying it out manually.
+- The latest run now writes to `window.__cafeLastGenerationDebug` and `sessionStorage.__cafeLastGenerationDebug`.
+- Added capture points in `src/components/PromptBar.tsx` and `src/lib/pipeline/api.ts` so prompt payload, settings, module files, manifest, and run status can be checked after generation.
+- Confirmed the gallery renders generated images through `GalleryContext.resolveLoading()` into `.cell-inner` background images.
+- Documented the local dev startup issue: `Start-Process npm` is unreliable in this Windows environment because of duplicate `Path` / `PATH` entries, and Next may need an approval-backed launch because of sandbox child-process restrictions.
+
+**Notes:**
+- The debug payload is session-scoped and clears when the tab/session ends.
+- The dev-server launch that works here is `cmd /c npm run dev` via a hidden non-interactive process start.
+
+**Files Touched:**
+- `src/components/PromptBar.tsx`
+- `src/lib/pipeline/api.ts`
+- `docs/CafeHTML.md`
+- `docs/log.md`
+
 ### 2026-06-05 - Next.js Migration Baseline + Repo Hygiene
 
 **Status:** COMPLETED

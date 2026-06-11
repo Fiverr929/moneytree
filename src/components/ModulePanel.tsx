@@ -5,6 +5,7 @@ import { useModule, ModuleFile, ModuleFolder } from "@/context/ModuleContext";
 import { useStudio } from "@/context/StudioContext";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
+import { deriveEditedName, loadImageMetadata } from "@/lib/imageMeta";
 
 const ACCENTS = [
   "#ea3a8a",
@@ -152,10 +153,36 @@ export default function ModulePanel() {
     setFiles((prev) => {
       const next = prev.map((f) => (f.id === id ? { ...f, ...patch } : f));
       const updated = next.find((f) => f.id === id);
-      if (updated && activeProjectId)
+      if (updated && activeProjectId) {
         DB.references.put({ ...updated, project_id: activeProjectId });
+        if (patch.url && updated.uuid) {
+          DB.images.put(updated.uuid, patch.url, activeProjectId);
+        }
+      }
       return next;
     });
+  };
+
+  const applyStudioResult = (file: ModuleFile, url: string) => {
+    loadImageMetadata(url)
+      .then((meta) => {
+        updateFile(file.id, {
+          url,
+          name: deriveEditedName(file.name),
+          size: meta.size,
+          dims: meta.dims,
+          modified: new Date().toLocaleTimeString(),
+        });
+      })
+      .catch(() => {
+        updateFile(file.id, {
+          url,
+          name: deriveEditedName(file.name),
+          size: file.size,
+          dims: file.dims || "IMAGE",
+          modified: new Date().toLocaleTimeString(),
+        });
+      });
   };
 
   const setFileRole = (id: number, mode: string) => {
@@ -177,6 +204,7 @@ export default function ModulePanel() {
   };
 
   const removeFile = (id: number) => {
+    const target = files.find((f) => f.id === id);
     setFiles((prev) => prev.filter((f) => f.id !== id));
     setSelectedIds((prev) => {
       const n = new Set(prev);
@@ -188,6 +216,7 @@ export default function ModulePanel() {
       setActiveFileId(null);
     }
     if (activeProjectId) DB.references.delete(id);
+    if (target?.uuid) DB.images.delete(target.uuid);
   };
 
   const assignFile = (fileId: number, folderId: string) => {
@@ -203,8 +232,12 @@ export default function ModulePanel() {
       uuid: crypto.randomUUID(),
       mode: "REFERENCE",
     };
-    if (activeProjectId)
+    if (activeProjectId) {
+      if (file.url) {
+        DB.images.put(copy.uuid, file.url, activeProjectId);
+      }
       DB.references.put({ ...copy, project_id: activeProjectId });
+    }
     setFiles((prev) => {
       const idx = prev.findIndex((f) => f.id === file.id);
       const next = [...prev];
@@ -493,7 +526,14 @@ export default function ModulePanel() {
           className="primary"
           onClick={(e) => {
             e.stopPropagation();
-            openStudio({ uuid: f.uuid, imgUrl: f.url });
+            openStudio({
+              uuid: f.uuid,
+              imgUrl: f.url,
+              caller: 'module',
+              onDone: (url) => {
+                if (url) applyStudioResult(f, url);
+              }
+            });
             setMenuFileId(null);
           }}
         >
@@ -618,7 +658,7 @@ export default function ModulePanel() {
           )}
           <div className="cmp-row-meta">
             {f.folder === null && (
-              <span className="cmp-loose-tag">
+              <span className={`cmp-loose-tag mode-${moduleRole(f.mode)}`}>
                 {moduleRole(f.mode)}
               </span>
             )}
@@ -982,11 +1022,18 @@ export default function ModulePanel() {
             <div>
               <button
                 onClick={() => {
-                  setFiles(
-                    files.map((f) =>
-                      selectedIds.has(f.id) ? { ...f, eye: false } : f,
-                    ),
-                  );
+                  const hiddenIds = new Set(selectedIds);
+                  setFiles((prev) => {
+                    const next = prev.map((f) =>
+                      hiddenIds.has(f.id) ? { ...f, eye: false } : f,
+                    );
+                    if (activeProjectId) {
+                      next
+                        .filter((f) => hiddenIds.has(f.id))
+                        .forEach((f) => DB.references.put({ ...f, project_id: activeProjectId }));
+                    }
+                    return next;
+                  });
                   setSelectMode(false);
                   setSelectedIds(new Set());
                 }}
@@ -995,7 +1042,15 @@ export default function ModulePanel() {
               </button>
               <button
                 onClick={() => {
-                  setFiles(files.filter((f) => !selectedIds.has(f.id)));
+                  const deleteIds = new Set(selectedIds);
+                  const filesToDelete = files.filter((f) => deleteIds.has(f.id));
+                  setFiles((prev) => prev.filter((f) => !deleteIds.has(f.id)));
+                  if (activeProjectId) {
+                    deleteIds.forEach((id) => DB.references.delete(id));
+                  }
+                  filesToDelete.forEach((f) => {
+                    if (f.uuid) DB.images.delete(f.uuid);
+                  });
                   setSelectMode(false);
                   setSelectedIds(new Set());
                 }}
@@ -1135,7 +1190,14 @@ export default function ModulePanel() {
                     <button
                       className="primary"
                       onClick={() => {
-                        openStudio({ uuid: f.uuid, imgUrl: f.url });
+                        openStudio({
+                          uuid: f.uuid,
+                          imgUrl: f.url,
+                          caller: 'module',
+                          onDone: (url) => {
+                            if (url) applyStudioResult(f, url);
+                          }
+                        });
                         setInspectorMenuOpen(false);
                       }}
                     >
@@ -1175,7 +1237,14 @@ export default function ModulePanel() {
             <div
               className="cmp-big-thumb"
               title="Open in Studio"
-              onClick={() => openStudio({ uuid: f.uuid, imgUrl: f.url })}
+              onClick={() => openStudio({
+                uuid: f.uuid,
+                imgUrl: f.url,
+                caller: 'module',
+                onDone: (url) => {
+                  if (url) applyStudioResult(f, url);
+                }
+              })}
             >
               {renderThumb(f)}
               <span>{f.dims}</span>

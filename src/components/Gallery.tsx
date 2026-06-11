@@ -21,6 +21,12 @@ export default function Gallery() {
   const filterRef = useRef<HTMLDivElement>(null);
   const threeDotRef = useRef<HTMLDivElement>(null);
 
+  const persistCell = (cell: GalleryCell) => {
+    if (!cell.uuid || !cell.imgUrl) return;
+    DB.images.put(cell.uuid, cell.imgUrl, activeProjectId!);
+    DB.gallery.put({ ...cell, project_id: activeProjectId, loadingId: undefined, retryFn: undefined });
+  };
+
   // Close dropdowns on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -65,7 +71,19 @@ export default function Gallery() {
     selectedIds.forEach(id => {
       const cell = cells.find(c => c.id === id);
       if (cell) {
-        newCells.push({ ...cell, id: crypto.getRandomValues(new Uint32Array(1))[0], uuid: crypto.randomUUID(), _imgUuid: undefined, _dbId: undefined });
+        const newCell = {
+          ...cell,
+          id: crypto.getRandomValues(new Uint32Array(1))[0],
+          uuid: crypto.randomUUID(),
+          _imgUuid: undefined,
+          _dbId: undefined,
+          loadingId: undefined,
+          blocked: undefined,
+          error: undefined,
+          retryFn: undefined,
+        };
+        newCells.push(newCell);
+        if (activeProjectId) persistCell(newCell);
       }
     });
     setCells(prev => [...newCells, ...prev]);
@@ -75,7 +93,11 @@ export default function Gallery() {
   };
 
   const handleDeleteSelected = () => {
-    selectedIds.forEach(id => DB.gallery.delete(id));
+    selectedIds.forEach(id => {
+      const cell = cells.find(c => c.id === id);
+      DB.gallery.delete(id);
+      if (cell?.uuid) DB.images.delete(cell.uuid);
+    });
     setCells(prev => prev.filter(c => !selectedIds.has(c.id)));
     setSelectedIds(new Set());
     setSelectMode(false);
@@ -176,7 +198,7 @@ export default function Gallery() {
               <div 
                 className={`cell-inner ${cell.phClass || ""} ${cell.loadingId ? "cafe-loading" : ""} ${cell.blocked ? "cell-blocked" : ""} ${cell.error ? "cell-error" : ""}`}
                 style={{
-                  backgroundColor: cell.loadingId ? (cell.mode === "SCENE" ? "#5271ff" : "#ea5823") : undefined,
+                  backgroundColor: cell.loadingId ? (cell.mode === "STAGE" ? "#5271ff" : "#ea5823") : undefined,
                   backgroundImage: cell.imgUrl ? `url('${cell.imgUrl}')` : undefined,
                   backgroundSize: 'cover',
                   backgroundPosition: 'center'

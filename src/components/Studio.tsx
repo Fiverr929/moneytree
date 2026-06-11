@@ -15,6 +15,7 @@ export default function Studio() {
   const { 
     isOpen, closeStudio, 
     history, setHistory, 
+    activeUrl, setActiveUrl,
     activeTool, setActiveTool,
     strokeSize, setStrokeSize,
     strokeColor, setStrokeColor,
@@ -31,7 +32,6 @@ export default function Studio() {
   const drawLayerRef = useRef<HTMLCanvasElement>(null);
   const cropOverlayRef = useRef<HTMLDivElement>(null);
 
-  const [activeUrl, setActiveUrl] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [loadingCount, setLoadingCount] = useState(0);
 
@@ -47,7 +47,7 @@ export default function Studio() {
   const [cropBox, setCropBox] = useState<{l: number, t: number, w: number, h: number} | null>(null);
 
   useEffect(() => {
-    if (isOpen && history.length > 0) {
+    if (isOpen && history.length > 0 && !activeUrl) {
       // Just loaded
       setActiveUrl(history[0]);
       setUndoStack([]);
@@ -55,7 +55,7 @@ export default function Studio() {
       setPrompt("");
       setCropBox(null);
     }
-  }, [isOpen, history]);
+  }, [isOpen, history, activeUrl, setActiveUrl]);
 
   const redrawStrokeList = useCallback((strokes: Stroke[]) => {
     const layer = drawLayerRef.current;

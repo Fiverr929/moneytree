@@ -1602,8 +1602,7 @@
       border-left: 3px solid #ea5823;
       color: #999997;
     }
-    .cmp-image-row.loose::before {
-      content: "UNASSIGNED";
+    .cmp-image-row.loose .cmp-loose-tag {
       position: absolute;
       top: -1px;
       right: 25px;
@@ -1611,12 +1610,15 @@
       padding: 0 4px;
       display: flex;
       align-items: center;
-      background: #5271ff;
-      color: #c7c7c7;
+      background: #999997;
+      color: #e8e6e6;
       border: 0.378px solid #ea5823;
       font-size: 7.5px;
       letter-spacing: 0.12em;
     }
+    .cmp-image-row.loose .cmp-loose-tag.mode-SUBJECT { background: #ea5823; }
+    .cmp-image-row.loose .cmp-loose-tag.mode-SCENE { background: #5a8a3a; }
+    .cmp-image-row.loose .cmp-loose-tag.mode-STYLE { background: #5271ff; }
     .cmp-check {
       width: 14px;
       height: 14px;
@@ -1696,9 +1698,6 @@
       background: rgba(82,113,255,0.25);
     }
     .cmp-mini-strength i { display: block; height: 100%; background: #ea5823; }
-    .cmp-loose-tag {
-      display: none;
-    }
     .cmp-dot,
     .cmp-folder-dot {
       background: transparent;

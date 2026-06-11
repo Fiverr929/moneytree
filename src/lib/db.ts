@@ -102,6 +102,11 @@ const projects = {
 
 const images = {
   get: (uuid: string) => ready.then(() => wrap(tx(S.IMAGES).objectStore(S.IMAGES).get(uuid))),
+  getByProject: (projectId: number) => ready.then(() =>
+    wrap(tx(S.IMAGES).objectStore(S.IMAGES).getAll()).then((items: any[]) =>
+      items.filter((item) => item.project_id === projectId),
+    )
+  ),
   put: (uuid: string, dataUrl: string, projectId: number) => ready.then(() => 
     wrap(tx(S.IMAGES, 'readwrite').objectStore(S.IMAGES).put({ uuid, dataUrl, project_id: projectId }))
   ),

@@ -57,12 +57,6 @@ interface SettingsContextType {
   setActiveResolution: (val: string) => void;
   thinkingLevel: string;
   setThinkingLevel: (val: string) => void;
-  scanTiming: string;
-  setScanTiming: (val: string) => void;
-  keepDescriptions: boolean;
-  setKeepDescriptions: (val: boolean) => void;
-  scanTimeout: number;
-  setScanTimeout: (val: number) => void;
   
   // Computed helpers
   activeModel: ModelConfig;
@@ -79,9 +73,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [activeModelKey, setActiveModelKey] = useState("google-nano-banana");
   const [activeResolution, setActiveResolution] = useState("1K");
   const [thinkingLevel, setThinkingLevel] = useState("minimal");
-  const [scanTiming, setScanTiming] = useState("generate");
-  const [keepDescriptions, setKeepDescriptions] = useState(true);
-  const [scanTimeout, setScanTimeout] = useState(20);
 
   const [mounted, setMounted] = useState(false);
 
@@ -94,9 +85,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (saved.activeModel && MODELS[saved.activeModel]) setActiveModelKey(saved.activeModel);
         if (saved.activeResolution) setActiveResolution(saved.activeResolution);
         if (saved.thinkingLevel) setThinkingLevel(saved.thinkingLevel);
-        if (saved.scanTiming) setScanTiming(saved.scanTiming);
-        if (typeof saved.keepDescriptions === 'boolean') setKeepDescriptions(saved.keepDescriptions);
-        if (typeof saved.scanTimeout === 'number') setScanTimeout(saved.scanTimeout);
       }
     } catch {}
     setMounted(true);
@@ -109,13 +97,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         googleApiKey,
         activeModel: activeModelKey,
         activeResolution,
-        thinkingLevel,
-        scanTiming,
-        keepDescriptions,
-        scanTimeout
+        thinkingLevel
       }));
     } catch {}
-  }, [googleApiKey, activeModelKey, activeResolution, thinkingLevel, scanTiming, keepDescriptions, scanTimeout, mounted]);
+  }, [googleApiKey, activeModelKey, activeResolution, thinkingLevel, mounted]);
 
   const activeModel = MODELS[activeModelKey];
 
@@ -144,9 +129,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         activeModelKey, setActiveModelKey: handleSetActiveModelKey,
         activeResolution, setActiveResolution,
         thinkingLevel, setThinkingLevel,
-        scanTiming, setScanTiming,
-        keepDescriptions, setKeepDescriptions,
-        scanTimeout, setScanTimeout,
         activeModel,
         activeThinkingLevel,
         costPerImage

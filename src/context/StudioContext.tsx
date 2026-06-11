@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from "react";
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 
@@ -25,6 +25,8 @@ interface StudioContextType {
   activeImage: StudioConfig | null;
   history: string[];
   setHistory: React.Dispatch<React.SetStateAction<string[]>>;
+  activeUrl: string | null;
+  setActiveUrl: React.Dispatch<React.SetStateAction<string | null>>;
   activeTool: 'pencil' | 'crop' | null;
   setActiveTool: (val: 'pencil' | 'crop' | null) => void;
   
@@ -51,28 +53,35 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeImage, setActiveImage] = useState<StudioConfig | null>(null);
   const [history, setHistory] = useState<string[]>([]);
+  const [activeUrl, setActiveUrl] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<'pencil' | 'crop' | null>(null);
   const [groups, setGroups] = useState<StudioGroup[]>([]);
   
   const [strokeSize, setStrokeSize] = useState(3);
   const [strokeColor, setStrokeColor] = useState('#ea5823');
   const [cropRatio, setCropRatio] = useState<number | 'free'>(16 / 9);
+  const openRequestRef = useRef(0);
 
   // Load state when a new image is opened
   const openStudio = async (config: StudioConfig) => {
+    const requestId = ++openRequestRef.current;
     setActiveImage(config);
     setIsOpen(true);
     setActiveTool(null);
     setHistory(config.imgUrl ? [config.imgUrl] : []);
+    setActiveUrl(config.imgUrl || null);
+    setGroups([]);
     
     if (config.uuid && activeProjectId) {
       try {
         const saved = await DB.studioState.get(activeProjectId);
+        if (openRequestRef.current !== requestId) return;
         if (saved && saved.histories && saved.histories[config.uuid]) {
           const entry = saved.histories[config.uuid];
           if (entry.history && entry.history.length > 0) {
             setHistory(entry.history);
           }
+          setActiveUrl(entry.activeUrl || entry.history?.[0] || config.imgUrl || null);
           if (entry.layers && entry.layers.groups) {
             setGroups(entry.layers.groups);
           }
@@ -80,6 +89,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           setGroups([]);
         }
       } catch (_err: unknown) {
+        if (openRequestRef.current !== requestId) return;
         console.error("Failed to load studio state", _err);
       }
     } else {
@@ -88,6 +98,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   };
 
   const closeStudio = async (finalUrl?: string | null) => {
+    openRequestRef.current += 1;
     setIsOpen(false);
     
     if (activeImage && activeImage.uuid && activeProjectId) {
@@ -97,7 +108,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         
         saved.histories[activeImage.uuid] = {
           history,
-          activeUrl: finalUrl || history[0],
+          activeUrl: finalUrl || activeUrl || history[0],
           layers: { groups }
         };
         await DB.studioState.save(activeProjectId, saved);
@@ -107,9 +118,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }
     
     if (activeImage?.onDone) {
-      activeImage.onDone(finalUrl || null);
+      activeImage.onDone(finalUrl || activeUrl || null);
     }
     setActiveImage(null);
+    setActiveUrl(null);
+    setHistory([]);
+    setGroups([]);
   };
 
   // Autosave
@@ -123,7 +137,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           
           saved.histories[uuid] = {
             history,
-            activeUrl: history[0],
+            activeUrl: activeUrl || history[0],
             layers: { groups }
           };
           await DB.studioState.save(activeProjectId, saved);
@@ -131,11 +145,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [groups, history, isOpen, activeImage, activeProjectId]);
+  }, [groups, history, activeUrl, isOpen, activeImage, activeProjectId]);
 
   return (
     <StudioContext.Provider value={{
-      isOpen, activeImage, history, setHistory,
+      isOpen, activeImage, history, setHistory, activeUrl, setActiveUrl,
       activeTool, setActiveTool, groups, setGroups,
       openStudio, closeStudio,
       strokeSize, setStrokeSize, strokeColor, setStrokeColor,

@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
+import { pruneProjectImages } from "@/lib/projectImageGc";
 export type ModuleFile = {
   id: number;
   uuid: string;
@@ -132,6 +133,7 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
           return f;
         }));
         setFiles(withUrls);
+        pruneProjectImages(activeProjectId).catch(console.error);
       }).catch(console.error);
     } else {
       setFiles([]);

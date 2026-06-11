@@ -32,6 +32,13 @@ Current files:
 - Pipeline: `src/lib/pipeline/*`
 - Storage: `src/lib/db.ts`
 
+Local dev note:
+- The working dev-server launch in this Windows workspace is a hidden non-interactive `cmd /c npm run dev` start. `Start-Process npm` is unreliable here because PowerShell sees duplicate `Path` / `PATH` entries, and Next may need approval-backed startup because the sandbox can block child-process spawning with `spawn EPERM`.
+
+Debug capture:
+- Generation runs write a local debug payload to `window.__cafeLastGenerationDebug` and `sessionStorage.__cafeLastGenerationDebug`.
+- The payload is session-scoped and is meant for checking the latest prompt, settings, module files, manifest, and result status without manual copy/paste.
+
 Legacy files:
 Main file: `CafeHTML-v2.html`
 Styles: `style.css`
