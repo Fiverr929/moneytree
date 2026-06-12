@@ -29,7 +29,7 @@
       top: 45px;
       right: 324px;
       display: flex;
-      gap: 9px;
+      gap: 0;
       align-items: center;
     }
 
@@ -250,8 +250,8 @@
     .btn-settings {
       background: #999997;
       border: 1.134px solid var(--accent);
-      width: 43px;
-      height: 46px;
+      width: 47px;
+      height: 47px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -295,6 +295,7 @@
       align-items: center;
       justify-content: space-between;
       overflow: hidden;
+      border: 1.134px solid var(--accent);
     }
 
     .prompt-text-field {
@@ -332,7 +333,8 @@
 
     .btn-frame {
       background: var(--accent);
-      border: 1.89px solid #999997;
+      border: 0;
+      border-left: 1.134px solid var(--accent);
       height: 47px;
       width: 170px;
       display: flex;
