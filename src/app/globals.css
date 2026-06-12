@@ -33,10 +33,6 @@
       align-items: center;
     }
 
-    .prompt-bar[data-state="STAGE"] {
-      --accent: #5271ff;
-    }
-
     .btn-upload-ref {
       background: var(--accent);
       width: 47px;
@@ -281,10 +277,6 @@
     .btn-settings.open img {
       filter: brightness(0) saturate(100%) invert(42%) sepia(84%) saturate(1547%) hue-rotate(345deg) brightness(96%) contrast(94%);
     }
-    #promptBar[data-state="STAGE"] .btn-settings.open img {
-      filter: brightness(0) saturate(100%) invert(41%) sepia(85%) saturate(2335%) hue-rotate(218deg) brightness(101%) contrast(101%);
-    }
-
 
 
     .prompt-input-area {
@@ -351,81 +343,8 @@
       filter: brightness(0.82);
     }
 
-    .btn-prompt-switch {
-      width: 23.371px;
-      height: 47.58px;
-      flex-shrink: 0;
-      position: relative;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .ps-track {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    .ps-active {
-      width: 23.371px;
-      height: 24.58px;
-      flex-shrink: 0;
-      position: relative;
-      border: 1.13px solid #999997;
-    }
-
-    .ps-active::after {
-      content: '';
-      position: absolute;
-      top: 33%;
-      left: 31%;
-      width: 38%;
-      height: 34%;
-      background: #c7c7c7;
-    }
-
-    .ps-inactive {
-      width: 23px;
-      height: 23px;
-      flex-shrink: 0;
-      background: #999997;
-    }
-
-    .btn-prompt-switch[data-state="FRAME"] .ps-track {
-      justify-content: flex-start;
-    }
-
-    .btn-prompt-switch[data-state="FRAME"] .ps-active {
-      order: 1;
-      background: #ea5823;
-    }
-
-    .btn-prompt-switch[data-state="FRAME"] .ps-inactive {
-      order: 2;
-    }
-
-    .btn-prompt-switch[data-state="STAGE"] .ps-track {
-      justify-content: flex-end;
-    }
-
-    .btn-prompt-switch[data-state="STAGE"] .ps-active {
-      order: 2;
-      background: #5271ff;
-    }
-
-    .btn-prompt-switch[data-state="STAGE"] .ps-inactive {
-      order: 1;
-    }
-
-    /* ── STAGE STATE accent propagation ── */
     #promptBar[data-state="FRAME"] {
       --accent: #ea5823;
-    }
-
-    #promptBar[data-state="STAGE"] {
-      --accent: #5271ff;
     }
 
     .info-close {
@@ -1054,13 +973,6 @@
       overflow: hidden;
       transition: height 0.22s ease;
       will-change: height;
-    }
-
-    .module-bg {
-      position: absolute;
-      inset: -0.12% -0.36%;
-      background: #999997;
-      border: 1.89px solid #5271ff;
     }
 
     .module-content {

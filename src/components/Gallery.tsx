@@ -206,7 +206,7 @@ export default function Gallery() {
               <div 
                 className={`cell-inner ${cell.phClass || ""} ${cell.loadingId && !cell.blocked && !cell.error ? "cafe-loading" : ""} ${cell.blocked ? "cell-blocked" : ""} ${cell.error ? "cell-error" : ""}`}
                 style={{
-                  backgroundColor: cell.loadingId ? (cell.mode === "STAGE" ? "#5271ff" : "#ea5823") : undefined,
+                  backgroundColor: cell.loadingId ? "#ea5823" : undefined,
                   backgroundImage: cell.imgUrl ? `url('${cell.imgUrl}')` : undefined,
                   backgroundSize: 'cover',
                   backgroundPosition: 'center'

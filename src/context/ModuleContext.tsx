@@ -18,7 +18,6 @@ export type ModuleFile = {
   strength: number;
   mode: string;
   url: string;
-  visionDesc: string;
 };
 
 export type ModuleFolder = {

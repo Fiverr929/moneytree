@@ -74,10 +74,11 @@ export default function HUD() {
   }, []);
 
   const applyGalleryStudioResult = useCallback((cell: ActiveHudCell, url: string) => {
+    if (!cell) return;
     const updatedAt = new Date().toISOString();
     loadImageMetadata(url)
       .then((meta) => {
-        const updatedCell = {
+        const updatedCell: GalleryCell = {
           ...cell,
           imgUrl: url,
           dims: meta.dims,
@@ -93,7 +94,7 @@ export default function HUD() {
         persistGalleryCell(updatedCell);
       })
       .catch(() => {
-        const updatedCell = {
+        const updatedCell: GalleryCell = {
           ...cell,
           imgUrl: url,
           date: updatedAt,
@@ -109,17 +110,18 @@ export default function HUD() {
   }, [persistGalleryCell, setCells]);
 
   const syncGalleryImageMeta = useCallback((cell: ActiveHudCell, img: HTMLImageElement) => {
+    if (!cell) return;
     const dims = `${img.naturalWidth}x${img.naturalHeight}`;
     const ratio = dimensionsToRatio(img.naturalWidth, img.naturalHeight);
-    if (cell?.dims === dims && cell?.ratio === ratio) return;
+    if (cell.dims === dims && cell.ratio === ratio) return;
 
-    const updatedCell = {
+    const updatedCell: GalleryCell = {
       ...cell,
       dims,
       ratio,
-      type: cell?.type || "Generation",
+      type: cell.type || "Generation",
     };
-    setCells((prev) => prev.map((entry) => entry.id === cell?.id ? updatedCell : entry));
+    setCells((prev) => prev.map((entry) => entry.id === cell.id ? updatedCell : entry));
     persistGalleryCell(updatedCell);
   }, [persistGalleryCell, setCells]);
 
@@ -158,6 +160,12 @@ export default function HUD() {
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!hudOpen && infoPanelOpen) {
+      setInfoPanelOpen(false);
+    }
+  }, [hudOpen, infoPanelOpen, setInfoPanelOpen]);
 
   if (!activeCell) return null; // Wait until active cell is available
 

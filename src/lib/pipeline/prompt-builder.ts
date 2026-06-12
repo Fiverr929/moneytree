@@ -2,13 +2,12 @@ import { GenerationSettings } from './api';
 import { ModuleFile } from "@/context/ModuleContext";
 
 export function collectPayload(
-  mode: string, 
   rawPrompt: string, 
   files: ModuleFile[], 
   settings: GenerationSettings
 ) {
   return {
-    mode,
+    mode: "FRAME",
     prompt: rawPrompt,
     settings,
     moduleSnapshot: { files },

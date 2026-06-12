@@ -366,7 +366,7 @@ export default function ModulePanel() {
           autoFocus
         />
         <div className="cmp-upload-actions">
-          <button onClick={handleUploadConfirm}>ADD</button>
+          <button onClick={() => handleUploadConfirm()}>ADD</button>
           <button onClick={showNextPendingUpload}>CANCEL</button>
         </div>
       </div>

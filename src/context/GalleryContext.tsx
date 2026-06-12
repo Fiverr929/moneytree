@@ -64,7 +64,6 @@ interface GalleryContextType {
   resolveLoading: (id: string, cell: GalleryCell) => void;
   failLoading: (id: string, retryFn?: (newId: string) => void, statusLabel?: string) => void;
   blockLoading: (id: string, statusLabel?: string) => void;
-  removeLoading: (id: string) => void;
   addCell: (cell: GalleryCell) => void;
 }
 
@@ -160,10 +159,6 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
     setCells(prev => prev.map(c => c.loadingId === id ? { ...c, blocked: true, error: false, retryFn: undefined, statusLabel } : c));
   };
 
-  const removeLoading = (id: string) => {
-    setCells(prev => prev.filter(c => c.loadingId !== id));
-  };
-
   const addCell = (cell: GalleryCell) => {
     const normalized = normalizeCell(cell);
     setCells(prev => [normalized, ...prev]);
@@ -187,7 +182,7 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
         hudOpen, setHudOpen,
         hudIndex, setHudIndex,
         infoPanelOpen, setInfoPanelOpen,
-        addLoading, resolveLoading, failLoading, blockLoading, removeLoading, addCell
+        addLoading, resolveLoading, failLoading, blockLoading, addCell
       }}
     >
       {children}

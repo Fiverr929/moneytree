@@ -3,7 +3,7 @@
 import React, { useCallback, useRef, useEffect, useState } from "react";
 import { useStudio } from "@/context/StudioContext";
 import { useSettings } from "@/context/SettingsContext";
-import { useGallery } from "@/context/GalleryContext";
+import { useGallery, type GalleryImageUse } from "@/context/GalleryContext";
 import { useApp } from "@/context/AppContext";
 import { studioGenerate } from "@/lib/pipeline/api";
 import StudioModule from "./StudioModule";
@@ -311,7 +311,7 @@ export default function Studio() {
         setHistory(prev => [generatedUrl, ...prev]);
         
         const newUuid = crypto.randomUUID();
-        const usedImages = [{ imgUrl: currentActiveUrl, uuid: undefined, role: "BASE" }];
+        const usedImages: GalleryImageUse[] = [{ imgUrl: currentActiveUrl, role: "BASE" }];
         currentGroups.forEach(g => {
           g.images.forEach(img => usedImages.push({ imgUrl: img.url, uuid: img.uuid, role: g.action, label: g.name }));
         });

@@ -1,7 +1,7 @@
 {
   "name": "moneytree",
   "version": "0.1.0",
-  "description": "An advanced, custom-built AI image generation interface.",
+  "description": "A local-first AI image generation workspace built with Next.js.",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",

@@ -8,8 +8,10 @@ import { useModule } from "@/context/ModuleContext";
 import { generate, storeGenerationDebug } from "@/lib/pipeline/api";
 import { collectPayload } from "@/lib/pipeline/prompt-builder";
 
+const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
+
 export default function PromptBar() {
-  const { generationState, setGenerationState, setSettingsOpen } = useApp();
+  const { setSettingsOpen } = useApp();
   const settings = useSettings();
   const gallery = useGallery();
   const moduleContext = useModule();
@@ -21,8 +23,6 @@ export default function PromptBar() {
   // Prompt settings state
   const [frameRatio, setFrameRatio] = useState("1:1");
   const [frameVar, setFrameVar] = useState<string | number>("1");
-  const [sceneRatio, setSceneRatio] = useState("9:16");
-  const [frameCount, setFrameCount] = useState<string | number>("2");
   
   // Prompt Input state
   const [promptText, setPromptText] = useState("");
@@ -68,10 +68,24 @@ export default function PromptBar() {
     }
   }, [promptText]);
 
-  const toggleState = () => {
-    setGenerationState(generationState === "FRAME" ? "STAGE" : "FRAME");
-    setDropdownOpen(false);
-  };
+  useEffect(() => {
+    try {
+      const savedDraft = window.localStorage.getItem(PROMPT_DRAFT_STORAGE_KEY);
+      if (savedDraft !== null) {
+        setPromptText(savedDraft);
+      }
+    } catch {
+      // Ignore storage access issues in embedded browsers.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PROMPT_DRAFT_STORAGE_KEY, promptText);
+    } catch {
+      // Ignore storage access issues in embedded browsers.
+    }
+  }, [promptText]);
 
   const handleGenerate = async () => {
     if (isGenerating) return;
@@ -89,12 +103,11 @@ export default function PromptBar() {
 
     const fullSettings = {
       ...settings,
-      aspectRatio: generationState === "FRAME" ? frameRatio : sceneRatio,
-      variation: generationState === "FRAME" ? parseInt(frameVar.toString(), 10) : parseInt(frameCount.toString(), 10)
+      aspectRatio: frameRatio,
+      variation: parseInt(frameVar.toString(), 10)
     };
 
     const payload = collectPayload(
-      generationState,
       trimmed,
       moduleContext.files,
       fullSettings
@@ -109,7 +122,7 @@ export default function PromptBar() {
       rawPrompt: trimmed,
       payload,
       settings: {
-        mode: generationState,
+        mode: "FRAME",
         aspectRatio: fullSettings.aspectRatio,
         variation: fullSettings.variation,
         activeModel: fullSettings.activeModel,
@@ -127,7 +140,7 @@ export default function PromptBar() {
     await generate(payload, fullSettings, settings.googleApiKey, {
       onStart: (count) => console.log('Starting generation of', count, 'images...'),
       onLoadingIds: (ids) => {
-        ids.forEach(id => gallery.addLoading(id, (payload.settings.aspectRatio || '1:1'), generationState));
+        ids.forEach(id => gallery.addLoading(id, (payload.settings.aspectRatio || '1:1'), "FRAME"));
       },
       onVariationReady: (dataUrl, lid, cellData) => {
         gallery.resolveLoading(lid, cellData as GalleryCell);
@@ -183,10 +196,10 @@ export default function PromptBar() {
     }
   };
 
-  const placeholderText = generationState === "STAGE" ? "Are we making a movie?" : "What are we making today?";
+  const placeholderText = "What are we making today?";
 
   return (
-    <div className="prompt-bar" id="promptBar" data-state={generationState}>
+    <div className="prompt-bar" id="promptBar" data-state="FRAME">
       <div 
         className="btn-upload-ref" 
         id="moduleQuickUpload" 
@@ -206,40 +219,23 @@ export default function PromptBar() {
         <div className="cmp-menu settings-dropdown" id="settingsDropdown" hidden={!dropdownOpen}>
           
           <div className="cmp-menu-title">ASPECT RATIO</div>
-          {generationState === "FRAME" ? (
-            <>
-              {["1:1", "16:9", "9:16", "3:4"].map((r) => {
-                const labels: Record<string, string> = { "1:1": "SQUARE", "16:9": "LANDSCAPE", "9:16": "PORTRAIT", "3:4": "PORTRAIT" };
-                return (
-                  <button 
-                    key={r} 
-                    className={frameRatio === r ? "active primary" : ""} 
-                    onClick={() => setFrameRatio(r)}
-                  >
-                    {r} {labels[r]}
-                  </button>
-                );
-              })}
-            </>
-          ) : (
-            <>
-              {["16:9", "9:16"].map((r) => {
-                const labels: Record<string, string> = { "16:9": "LANDSCAPE", "9:16": "PORTRAIT" };
-                return (
-                  <button 
-                    key={r} 
-                    className={sceneRatio === r ? "active primary" : ""} 
-                    onClick={() => setSceneRatio(r)}
-                  >
-                    {r} {labels[r]}
-                  </button>
-                );
-              })}
-            </>
-          )}
+          <>
+            {["1:1", "16:9", "9:16", "3:4"].map((r) => {
+              const labels: Record<string, string> = { "1:1": "SQUARE", "16:9": "LANDSCAPE", "9:16": "PORTRAIT", "3:4": "PORTRAIT" };
+              return (
+                <button
+                  key={r}
+                  className={frameRatio === r ? "active primary" : ""}
+                  onClick={() => setFrameRatio(r)}
+                >
+                  {r} {labels[r]}
+                </button>
+              );
+            })}
+          </>
 
           <div className="cmp-menu-title" style={{ marginTop: 2, borderTop: '0.756px solid rgba(234,88,35,0.45)' }}>
-            {generationState === "FRAME" ? "VARIATIONS" : "FRAME COUNT"}
+            VARIATIONS
           </div>
           
           <div className="cmp-menu-counter" style={{ display: 'flex', alignItems: 'center', padding: '4px 10px', justifyContent: 'space-between', color: '#c7c7c7', fontSize: '9px', letterSpacing: '0.12em' }}>
@@ -247,27 +243,17 @@ export default function PromptBar() {
               style={{ width: '24px', height: '20px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', color: '#c7c7c7' }}
               onClick={(e) => {
                 e.stopPropagation();
-                if (generationState === "FRAME") {
-                  const v = parseInt(frameVar.toString(), 10);
-                  if (v > 1) setFrameVar(v - 1);
-                } else {
-                  const v = parseInt(frameCount.toString(), 10);
-                  if (v > 1) setFrameCount(v - 1);
-                }
+                const v = parseInt(frameVar.toString(), 10);
+                if (v > 1) setFrameVar(v - 1);
               }}
             >-</button>
-            <span>{generationState === "FRAME" ? frameVar : frameCount} {generationState === "FRAME" ? "IMAGE" : "FRAME"}{(generationState === "FRAME" && parseInt(frameVar.toString(), 10) !== 1) || (generationState === "STAGE" && parseInt(frameCount.toString(), 10) !== 1) ? "S" : ""}</span>
+            <span>{frameVar} IMAGE{parseInt(frameVar.toString(), 10) !== 1 ? "S" : ""}</span>
             <button 
               style={{ width: '24px', height: '20px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', color: '#c7c7c7' }}
               onClick={(e) => {
                 e.stopPropagation();
-                if (generationState === "FRAME") {
-                  const v = parseInt(frameVar.toString(), 10);
-                  if (v < 10) setFrameVar(v + 1);
-                } else {
-                  const v = parseInt(frameCount.toString(), 10);
-                  if (v < 99) setFrameCount(v + 1);
-                }
+                const v = parseInt(frameVar.toString(), 10);
+                if (v < 10) setFrameVar(v + 1);
               }}
             >+</button>
           </div>
@@ -286,14 +272,7 @@ export default function PromptBar() {
           suppressContentEditableWarning={true}
         ></div>
         <div className={`btn-frame ${isGenerating ? 'cafe-loading' : ''}`} id="generateBtn" onClick={handleGenerate}>
-          {generationState}
-        </div>
-      </div>
-      
-      <div className="btn-prompt-switch" data-state={generationState} id="promptSwitch" onClick={toggleState}>
-        <div className="ps-track">
-          <div className="ps-active"></div>
-          <div className="ps-inactive"></div>
+          FRAME
         </div>
       </div>
     </div>

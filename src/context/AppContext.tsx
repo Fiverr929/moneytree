@@ -14,9 +14,6 @@ interface AppContextType {
   settingsOpen: boolean;
   setSettingsOpen: (val: boolean) => void;
   
-  // Prompt Bar State
-  generationState: "FRAME" | "STAGE";
-  setGenerationState: (val: "FRAME" | "STAGE") => void;
   promptSettingsOpen: boolean;
   setPromptSettingsOpen: (val: boolean) => void;
   
@@ -33,7 +30,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   
-  const [generationState, setGenerationState] = useState<"FRAME" | "STAGE">("FRAME");
   const [promptSettingsOpen, setPromptSettingsOpen] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
 
@@ -61,8 +57,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setProjectCreateOpen,
         settingsOpen,
         setSettingsOpen,
-        generationState,
-        setGenerationState,
         promptSettingsOpen,
         setPromptSettingsOpen,
         activeProjectId,
