@@ -4,7 +4,8 @@ import React, { createContext, useContext, useState, ReactNode, useEffect } from
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 import type { ModuleFile } from "@/context/ModuleContext";
-export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string };
+import type { StrengthBand } from "@/lib/pipeline/strength";
+export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string; strength?: number; strengthBand?: StrengthBand };
 export type GalleryCell = {
   id: number;
   uuid?: string;
@@ -13,6 +14,8 @@ export type GalleryCell = {
   ratio: string;
   imgUrl?: string;
   phClass?: string;
+  userPrompt?: string;
+  effectivePrompt?: string;
   prompt?: string;
   date?: string;
   type?: string;
@@ -85,6 +88,8 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
   const { activeProjectId } = useApp();
 
   const normalizeCell = (cell: GalleryCell): GalleryCell => {
+    const effectivePrompt = cell.effectivePrompt || cell.prompt;
+    const userPrompt = cell.userPrompt;
     const createdAt = cell.createdAt || (cell.date && cell.date.includes("T") ? cell.date : undefined);
     const updatedAt = cell.updatedAt || (!createdAt ? cell.date : undefined);
     const origin =
@@ -99,9 +104,19 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
       kind: cell.kind || "image",
       origin,
       type,
+      userPrompt,
+      effectivePrompt,
+      prompt: effectivePrompt,
       createdAt: createdAt || new Date().toISOString(),
       updatedAt,
-      usedImages: (cell.usedImages || []).map((img) => ({ imgUrl: img.imgUrl, uuid: img.uuid, role: img.role, label: img.label })),
+      usedImages: (cell.usedImages || []).map((img) => ({
+        imgUrl: img.imgUrl,
+        uuid: img.uuid,
+        role: img.role,
+        label: img.label,
+        strength: img.strength,
+        strengthBand: img.strengthBand
+      })),
     };
   };
 

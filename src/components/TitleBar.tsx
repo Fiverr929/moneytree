@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useApp } from "@/context/AppContext";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 export default function TitleBar() {
   const { setProjectsOpen, setProjectCreateOpen, setSettingsOpen } = useApp();
@@ -11,6 +11,8 @@ export default function TitleBar() {
   const menuRef = useRef<HTMLDivElement>(null);
   
   const router = useRouter();
+  const pathname = usePathname();
+  const isVideo = pathname.startsWith("/video");
 
   const handleNewProject = () => {
     setProjectCreateOpen(true);
@@ -60,7 +62,18 @@ export default function TitleBar() {
             <button className="menu-item" type="button" onClick={handleExport}><span>EXPORT</span></button>
           </div>
         </div>
-        <div className="tab active" onClick={() => router.push("/")}>IMAGE</div>
+        <div
+          className={`tab ${isVideo ? "inactive" : "active"}`}
+          onClick={() => router.push("/")}
+        >
+          IMAGE
+        </div>
+        <div
+          className={`tab ${isVideo ? "active" : "inactive"}`}
+          onClick={() => router.push("/video")}
+        >
+          VIDEO
+        </div>
       </div>
     </div>
   );

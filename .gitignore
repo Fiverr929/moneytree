@@ -45,3 +45,9 @@ next-env.d.ts
 # local bundled tooling
 mingit/
 mingit.zip
+
+# local mask sandbox outputs
+/sandbox/mask-test/input.png
+/sandbox/mask-test/mask.png
+/sandbox/mask-test/output.png
+/sandbox/mask-test/preview-*.png

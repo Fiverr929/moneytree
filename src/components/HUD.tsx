@@ -229,14 +229,16 @@ export default function HUD() {
   };
 
   const handleReusePrompt = () => {
-    if (!activeCell.prompt) return;
-    window.dispatchEvent(new CustomEvent("set-prompt", { detail: activeCell.prompt }));
+    const promptToReuse = activeCell.userPrompt ?? activeCell.prompt;
+    if (!promptToReuse) return;
+    window.dispatchEvent(new CustomEvent("set-prompt", { detail: promptToReuse }));
     setThreeDotOpen(false);
     setHudOpen(false);
   };
 
   const handleCopyPrompt = async () => {
-    if (!activeCell.prompt) return;
+    const promptToCopy = activeCell.effectivePrompt || activeCell.prompt || activeCell.userPrompt;
+    if (!promptToCopy) return;
 
     const markCopyResult = (title: string) => {
       setCopyPromptTitle(title);
@@ -245,7 +247,7 @@ export default function HUD() {
 
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(activeCell.prompt);
+        await navigator.clipboard.writeText(promptToCopy);
         markCopyResult("Copied");
         return;
       }
@@ -254,7 +256,7 @@ export default function HUD() {
     }
 
     const textarea = document.createElement("textarea");
-    textarea.value = activeCell.prompt;
+    textarea.value = promptToCopy;
     textarea.setAttribute("readonly", "");
     textarea.style.position = "fixed";
     textarea.style.opacity = "0";
@@ -280,8 +282,9 @@ export default function HUD() {
     if (activeCell.moduleSnapshot?.files) {
       setFiles(activeCell.moduleSnapshot.files);
     }
-    if (activeCell.prompt) {
-      window.dispatchEvent(new CustomEvent("set-prompt", { detail: activeCell.prompt }));
+    const promptToLoad = activeCell.userPrompt ?? activeCell.prompt;
+    if (promptToLoad) {
+      window.dispatchEvent(new CustomEvent("set-prompt", { detail: promptToLoad }));
     }
     setSetupPopupOpen(false);
   };
@@ -417,12 +420,17 @@ export default function HUD() {
           )}
 
           <div className="info-section-header">
-            <span className="info-section-title">Prompt</span>
+            <span className="info-section-title">User Prompt</span>
+          </div>
+          <div className="prompt-text" id="info-user-prompt">{activeCell.userPrompt || '-'}</div>
+
+          <div className="info-section-header">
+            <span className="info-section-title">Effective Prompt</span>
             <button className="info-icon-btn" id="btn-copy-prompt" title={copyPromptTitle} onClick={handleCopyPrompt}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
           </div>
-          <div className="prompt-text" id="info-prompt">{activeCell.prompt || '-'}</div>
+          <div className="prompt-text" id="info-effective-prompt">{activeCell.effectivePrompt || activeCell.prompt || '-'}</div>
         </div>
       </div>
 

@@ -119,6 +119,7 @@ export default function PromptBar() {
       startedAt: debugStartedAt,
       updatedAt: debugStartedAt,
       source: 'PromptBar.handleGenerate',
+      userPrompt: trimmed,
       rawPrompt: trimmed,
       payload,
       settings: {

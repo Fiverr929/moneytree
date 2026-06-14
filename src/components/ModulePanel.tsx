@@ -6,6 +6,7 @@ import { useStudio } from "@/context/StudioContext";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
 import { deriveEditedName, loadImageMetadata } from "@/lib/imageMeta";
+import { describeReferenceStrength, normalizeStrength, type ReferenceRole } from "@/lib/pipeline/strength";
 
 const ACCENTS = [
   "#ea3a8a",
@@ -1103,15 +1104,44 @@ export default function ModulePanel() {
     const f = activeFile;
     if (!f) return renderRoot();
     const folder = getFolder(f.folder);
+    const activeRole = moduleRole(f.mode) as ReferenceRole;
+    const strengthInfo = describeReferenceStrength(f.strength, activeRole);
 
-    const handleStrengthChange = (e: React.MouseEvent<HTMLDivElement>) => {
-      const r = e.currentTarget.getBoundingClientRect();
+    const updateStrengthFromClientX = (clientX: number, element: HTMLDivElement) => {
+      const r = element.getBoundingClientRect();
       updateFile(f.id, {
-        strength: Math.max(
-          0,
-          Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)),
-        ),
+        strength: normalizeStrength(((clientX - r.left) / r.width) * 100),
       });
+    };
+
+    const handleStrengthPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      updateStrengthFromClientX(e.clientX, e.currentTarget);
+    };
+
+    const handleStrengthPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.buttons !== 1) return;
+      updateStrengthFromClientX(e.clientX, e.currentTarget);
+    };
+
+    const handleStrengthKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const step = e.shiftKey ? 10 : 5;
+      if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+        e.preventDefault();
+        updateFile(f.id, { strength: normalizeStrength(f.strength - step) });
+      }
+      if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+        e.preventDefault();
+        updateFile(f.id, { strength: normalizeStrength(f.strength + step) });
+      }
+      if (e.key === "Home") {
+        e.preventDefault();
+        updateFile(f.id, { strength: 0 });
+      }
+      if (e.key === "End") {
+        e.preventDefault();
+        updateFile(f.id, { strength: 100 });
+      }
     };
 
     const modeHelp = (mode: string) => {
@@ -1159,10 +1189,22 @@ export default function ModulePanel() {
           <div className="cmp-detail-section">
             <h4>STRENGTH</h4>
             <div className="cmp-strength-head">
-              <b>{f.strength}%</b>
+              <b>{strengthInfo.value}% &middot; {strengthInfo.strengthLabel.toUpperCase()}</b>
             </div>
-            <div className="cmp-strength" onClick={handleStrengthChange}>
-              <i style={{ width: `${f.strength}%` }}></i>
+            <div
+              className="cmp-strength"
+              role="slider"
+              tabIndex={0}
+              aria-label="Reference strength"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={strengthInfo.value}
+              aria-valuetext={`${strengthInfo.strengthLabel} ${strengthInfo.value}%`}
+              onPointerDown={handleStrengthPointerDown}
+              onPointerMove={handleStrengthPointerMove}
+              onKeyDown={handleStrengthKeyDown}
+            >
+              <i style={{ width: `${strengthInfo.value}%` }}></i>
               <span style={{ left: "25%" }}></span>
               <span style={{ left: "50%" }}></span>
               <span style={{ left: "75%" }}></span>

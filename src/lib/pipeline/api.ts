@@ -1,5 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { fetchJSON } from './net';
+import {
+  describeReferenceStrength,
+  normalizeStrength,
+  type ReferenceRole
+} from './strength';
 
 function parseDataUrl(dataUrl: string) {
   const base64 = dataUrl.split(',')[1];
@@ -173,7 +178,16 @@ export type GenerationCallbacks = {
 };
 
 export type GenerationSettings = { aspectRatio?: string, variation?: number, activeModel?: { label: string, id: string }, costPerImage?: number, activeResolution?: string, activeThinkingLevel?: string | null, [key: string]: any };
-export type GenerationPayload = { mode?: string, prompt?: string, settings?: GenerationSettings, moduleSnapshot?: any, usedImages?: any[], [key: string]: any };
+export type GenerationPayload = {
+  mode?: string;
+  prompt?: string;
+  userPrompt?: string;
+  effectivePrompt?: string;
+  settings?: GenerationSettings;
+  moduleSnapshot?: any;
+  usedImages?: any[];
+  [key: string]: any;
+};
 
 declare global {
   interface Window {
@@ -226,7 +240,7 @@ function getVisibleImageFiles(files?: Record<string, any>[]) {
   });
 }
 
-function normalizeRole(file: Record<string, any>) {
+function normalizeRole(file: Record<string, any>): ReferenceRole {
   const mode = String(file.mode || '').toUpperCase();
   if (mode === 'SCENE') return 'SCENE';
   if (mode === 'STYLE') return 'STYLE';
@@ -242,10 +256,11 @@ function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, any>[])
     imageFiles.forEach((file, index) => {
       const label = file.label || file.name || 'UNASSIGNED';
       const role = normalizeRole(file);
-      const strength = file.strength == null ? 50 : file.strength;
-      lines.push(`Image ${index + 1}: ${label} / ${role} / strength ${strength}`);
+      const strength = describeReferenceStrength(file.strength, role);
+      lines.push(`Image ${index + 1}: ${label} / ${role} / strength ${strength.value}% (${strength.strengthLabel})`);
+      lines.push(`Influence: ${strength.intent}`);
     });
-    lines.push('', 'Use SUBJECT images for the main person, product, object, or wardrobe. Use SCENE images for the environment, setting, props, lighting, and layout. Use STYLE images only for the visual look, colour, lens, rendering, and mood. Ignore unassigned module images. Do not make a collage. Generate one final coherent image.');
+    lines.push('', 'Strength is a weighting instruction, not an opacity value: lower strength means looser influence, higher strength means closer preservation for that image role. Use SUBJECT images for the main person, product, object, or wardrobe. Use SCENE images for the environment, setting, props, lighting, and layout. Use STYLE images only for the visual look, color, lens, rendering, and mood. Ignore unassigned module images. Do not make a collage. Generate one final coherent image.');
   }
 
   return lines.join('\n');
@@ -260,10 +275,10 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
   const model = settings.activeModel;
   const ratio = payload.settings?.aspectRatio || '1:1';
   const numImages = payload.settings?.variation || 1;
-  const rawPrompt = payload.prompt || '';
+  const userPrompt = payload.userPrompt ?? payload.prompt ?? '';
   const imageFiles = getVisibleImageFiles(files);
 
-  if (!rawPrompt.trim() && !imageFiles.length) {
+  if (!userPrompt.trim() && !imageFiles.length) {
     callbacks.onError(new Error('No prompt and no images - type something or add module layers.'));
     return;
   }
@@ -271,9 +286,10 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
   callbacks.onStart(numImages);
 
   try {
-    const finalPrompt = buildSimplePrompt(rawPrompt, imageFiles);
+    const effectivePrompt = buildSimplePrompt(userPrompt, imageFiles);
     const imageRefs = imageFiles.map(file => file.url as string);
     const manifest = imageFiles.map((file, index) => ({
+      ...describeReferenceStrength(file.strength, normalizeRole(file)),
       kind: 'image',
       position: index + 1,
       imgUrl: file.url,
@@ -281,7 +297,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
       label: file.label || file.name || 'UNASSIGNED',
       folder: file.folder || null,
       role: normalizeRole(file),
-      strength: file.strength == null ? 50 : file.strength
+      strength: normalizeStrength(file.strength)
     }));
 
     const loadingIds = Array.from({ length: numImages }).map((_, i) => `loading-${Date.now()}-${i}`);
@@ -295,8 +311,10 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
       status: 'started',
       startedAt,
       updatedAt: startedAt,
-      rawPrompt,
-      finalPrompt,
+      userPrompt,
+      effectivePrompt,
+      rawPrompt: userPrompt,
+      finalPrompt: effectivePrompt,
       manifest: manifest.map(({ imgUrl, ...item }) => ({
         ...item,
         hasImage: !!imgUrl
@@ -323,7 +341,9 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
         origin: 'generation',
         createdAt,
         dims: '-', // calculated on image load
-        prompt: finalPrompt,
+        userPrompt,
+        effectivePrompt,
+        prompt: effectivePrompt,
         manifest,
         model: model?.label || 'any',
         cost: settings.costPerImage || 0,
@@ -336,7 +356,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
     await googleGenerate({
       modelId: model!.id,
       apiKey,
-      prompt: finalPrompt,
+      prompt: effectivePrompt,
       numImages,
       aspectRatio: ratio,
       imageRefs,
@@ -378,7 +398,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
         });
         const retryFn = isRetryMeaningful(statusLabel) ? (newLid: string) => {
           googleGenerate({
-            modelId: model!.id, apiKey, prompt: finalPrompt, numImages: 1, aspectRatio: ratio, imageRefs, imageSize, thinkingLevel: thinkingLevel || undefined,
+            modelId: model!.id, apiKey, prompt: effectivePrompt, numImages: 1, aspectRatio: ratio, imageRefs, imageSize, thinkingLevel: thinkingLevel || undefined,
             onVariationReady: (dataUrl) => {
               const retryResults = window.__cafeLastGenerationDebug?.results || [];
               patchGenerationDebug({
