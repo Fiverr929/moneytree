@@ -4392,19 +4392,17 @@
   #studio-overlay .crop-handle { position: absolute; width: 10px; height: 10px; background: #c7c7c7; }
 
   #studio-overlay .prompt-wrap { display: flex; flex-direction: column; gap: 6px; width: 100%; }
-  #studio-overlay .refine-prompt { display: flex; align-items: stretch; height: 47px; width: 100%; }
-  #studio-overlay .prompt-input {
-    flex: 1; background: #999997; border: none; color: #c7c7c7;
-    font-size: 18px; padding: 0 14px; outline: none;
+  #studio-overlay .studio-prompt-bar {
+    --accent: #ea5823;
+    position: relative;
+    inset: auto;
+    width: 100%;
+    display: flex;
+    align-items: center;
   }
-  #studio-overlay .prompt-input::placeholder { color: #c7c7c7; opacity: 0.65; }
-  #studio-overlay .prompt-refine-btn {
-    width: 160px; flex-shrink: 0; background: #ea5823; border: 3px solid #999997; border-left: none;
-    color: #c7c7c7; font-size: 24px; letter-spacing: 0.06em;
-    cursor: pointer; transition: opacity 0.15s;
-  }
-  #studio-overlay .prompt-refine-btn:hover { opacity: 0.85; }
-  #studio-overlay .prompt-refine-btn.loading { opacity: 0.5; cursor: default; pointer-events: none; }
+  #studio-overlay .studio-prompt-bar .prompt-input-area { width: 100%; }
+  #studio-overlay .studio-prompt-bar .btn-frame { font-size: 31px; }
+  #studioPromptBar .btn-frame:active { filter: brightness(0.82); }
 
   /* ── REFINE OVERLAY ───────────────────────────────── */
   #refine-overlay {
@@ -5044,19 +5042,6 @@
   #studio-overlay .crop-handle { position: absolute; width: 10px; height: 10px; background: #c7c7c7; }
 
   #studio-overlay .prompt-wrap { display: flex; flex-direction: column; gap: 6px; width: 100%; }
-  #studio-overlay .refine-prompt { display: flex; align-items: stretch; height: 47px; width: 100%; }
-  #studio-overlay .prompt-input {
-    flex: 1; background: #999997; border: none; color: #c7c7c7;
-    font-size: 18px; padding: 0 14px; outline: none;
-  }
-  #studio-overlay .prompt-input::placeholder { color: #c7c7c7; opacity: 0.65; }
-  #studio-overlay .prompt-refine-btn {
-    width: 160px; flex-shrink: 0; background: #ea5823; border: 3px solid #999997; border-left: none;
-    color: #c7c7c7; font-size: 24px; letter-spacing: 0.06em;
-    cursor: pointer; transition: opacity 0.15s;
-  }
-  #studio-overlay .prompt-refine-btn:hover { opacity: 0.85; }
-  #studio-overlay .prompt-refine-btn.loading { opacity: 0.5; cursor: default; pointer-events: none; }
 
   /* ── REFINE OVERLAY ───────────────────────────────── */
   #refine-overlay {
@@ -6157,4 +6142,116 @@ body.module-collapsed .module-panel {
     grid-column: 1 / -1;
     font-size: 22px;
   }
+}
+
+/* Studio reference card polish */
+.studio-module-panel .plr {
+  align-items: stretch;
+  height: 25px;
+  overflow: hidden;
+}
+
+.studio-module-panel .plr-x.blue {
+  flex: 0 0 24px;
+  border: 1px solid #ea5823;
+}
+
+.studio-module-panel .sm-action-btn {
+  flex: 0 0 76px;
+  height: 25px;
+  line-height: 25px;
+  border: 1px solid #ea5823;
+}
+
+.studio-module-panel .plr-name {
+  min-width: 0;
+  height: 25px;
+  line-height: 25px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-module-panel .plr-name.blue {
+  border: 1px solid #ea5823;
+  color: #ea5823;
+}
+
+.studio-module-panel .drawer-open .plr-name.blue {
+  border-color: #c7c7c7;
+  color: #999997;
+}
+
+.studio-module-panel .action-drawer-open .sm-action-btn {
+  border-color: #c7c7c7;
+}
+
+.studio-module-panel .drawer-open .plr-x.blue,
+.studio-module-panel .action-drawer-open .plr-x.blue {
+  border-color: #ea5823;
+}
+
+.studio-module-panel .clr-main {
+  border-color: #ea5823;
+}
+
+.studio-module-panel .clr-x,
+.studio-module-panel .clr-toggle,
+.studio-module-panel .clr-replace {
+  background: #ea5823;
+  border: 1px solid #c7c7c7;
+}
+
+.studio-module-panel .btn-add-child {
+  background: #ea5823;
+}
+
+.studio-module-panel .btn-add-child::before,
+.studio-module-panel .btn-add-child::after {
+  background: #c7c7c7;
+}
+
+.studio-module-panel .clr-replace {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 22px;
+  height: 22px;
+  z-index: 2;
+  color: #c7c7c7;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.studio-module-panel .clr-replace span {
+  position: relative;
+  width: 12px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+}
+
+.studio-module-panel .clr-replace span::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 2px;
+  height: 3px;
+  border-left: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: skewX(-28deg);
+}
+
+.studio-module-panel .clr-replace span::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: -5px;
+  width: 7px;
+  height: 7px;
+  border-top: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
 }

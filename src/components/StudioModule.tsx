@@ -7,6 +7,10 @@ import { useApp } from "@/context/AppContext";
 
 const ACTIONS = ['INSERT', 'SWAP', 'TRANSFER', 'REMOVE', 'PRESERVE'];
 const MAX_IMAGES = 3;
+type PendingUpload =
+  | { type: 'create'; action: string }
+  | { type: 'insert'; index: number }
+  | { type: 'replace'; index: number; imageIndex: number };
 
 export default function StudioModule() {
   const { groups, setGroups, isOpen } = useStudio();
@@ -18,7 +22,7 @@ export default function StudioModule() {
   const [editingGroupName, setEditingGroupName] = useState("");
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [pendingUpload, setPendingUpload] = useState<{ type: 'create' | 'insert', index?: number, action?: string } | null>(null);
+  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
 
   // Close menus on outside click
   useEffect(() => {
@@ -44,22 +48,34 @@ export default function StudioModule() {
     reader.onload = async (evt) => {
       const url = evt.target?.result as string;
       const uuid = crypto.randomUUID();
-      
-      if (activeProjectId) {
-        await DB.images.put(uuid, url, activeProjectId);
-      }
 
       if (pendingUpload.type === 'create') {
+        if (activeProjectId) {
+          await DB.images.put(uuid, url, activeProjectId);
+        }
         const newGroup: StudioGroup = {
-          action: pendingUpload.action || 'TRANSFER',
+          action: pendingUpload.action,
           name: 'REFERENCE',
           images: [{ uuid, url, visible: true }]
         };
         setGroups([newGroup, ...groups]);
-      } else if (pendingUpload.type === 'insert' && pendingUpload.index !== undefined) {
+      } else if (pendingUpload.type === 'insert') {
+        if (activeProjectId) {
+          await DB.images.put(uuid, url, activeProjectId);
+        }
         const next = [...groups];
         next[pendingUpload.index].images.push({ uuid, url, visible: true });
         setGroups(next);
+      } else if (pendingUpload.type === 'replace') {
+        const next = [...groups];
+        const current = next[pendingUpload.index]?.images[pendingUpload.imageIndex];
+        if (current && activeProjectId) {
+          await DB.images.put(current.uuid, url, activeProjectId);
+        }
+        if (current) {
+          next[pendingUpload.index].images[pendingUpload.imageIndex] = { ...current, url };
+          setGroups(next);
+        }
       }
       
       setPendingUpload(null);
@@ -221,6 +237,18 @@ export default function StudioModule() {
                           <img src="assets/icon-trash.svg" alt="remove" />
                         </div>
                       )}
+                      <button
+                        type="button"
+                        className="clr-replace"
+                        title="Replace reference"
+                        aria-label="Replace reference"
+                        onClick={() => {
+                          setPendingUpload({ type: 'replace', index: gIdx, imageIndex: iIdx });
+                          fileInputRef.current?.click();
+                        }}
+                      >
+                        <span aria-hidden="true"></span>
+                      </button>
                       <div className="clr-main img-a">
                         <img src={img.url} style={{width: '100%', height: '100%', objectFit: 'cover'}} alt="image" />
                       </div>

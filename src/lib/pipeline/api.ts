@@ -470,9 +470,15 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
     });
   }
 
+  const imageConfig: { aspectRatio?: string, imageSize: string, imageOutputOptions: { mimeType: string } } = {
+    imageSize: imageSize || '1K',
+    imageOutputOptions: { mimeType: 'image/png' }
+  };
+  if (aspectRatio) imageConfig.aspectRatio = aspectRatio;
+
   const generationConfig = {
     responseModalities: ['IMAGE'],
-    imageConfig: { aspectRatio: aspectRatio || '1:1', imageSize: imageSize || '1K', imageOutputOptions: { mimeType: 'image/png' } }
+    imageConfig
   };
 
   const url = `https://aiplatform.googleapis.com/v1/publishers/google/models/${modelId}:generateContent?key=${apiKey}`;

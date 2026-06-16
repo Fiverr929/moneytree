@@ -10,6 +10,28 @@ import StudioModule from "./StudioModule";
 
 type Point = { x: number, y: number };
 type Stroke = { color: string, size: number, points: Point[] };
+type StudioPromptCommand =
+  | { kind: "refine"; prompt: string }
+  | { kind: "upscale"; prompt: string; imageSize: "2K" | "4K" }
+  | { kind: "invalid-upscale"; message: string };
+
+const parseStudioPromptCommand = (rawPrompt: string): StudioPromptCommand => {
+  const trimmed = rawPrompt.trim();
+  if (!trimmed.toLowerCase().startsWith("/upscale")) {
+    return { kind: "refine", prompt: rawPrompt };
+  }
+
+  const match = trimmed.match(/^\/upscale(?:\s+(2k|4k))?(?:\s+([\s\S]*))?$/i);
+  if (!match || !match[1]) {
+    return { kind: "invalid-upscale", message: "Use /upscale 2k or /upscale 4k, optionally followed by a prompt." };
+  }
+
+  return {
+    kind: "upscale",
+    imageSize: match[1].toUpperCase() as "2K" | "4K",
+    prompt: match[2]?.trim() || ""
+  };
+};
 
 export default function Studio() {
   const { 
@@ -34,6 +56,7 @@ export default function Studio() {
 
   const [prompt, setPrompt] = useState("");
   const [loadingCount, setLoadingCount] = useState(0);
+  const inputRef = useRef<HTMLDivElement>(null);
 
   // Drawing state
   const isDrawing = useRef(false);
@@ -261,6 +284,21 @@ export default function Studio() {
   useEffect(() => { promptRef.current = prompt; }, [prompt]);
   const undoLengthRef = useRef(undoStack.length);
   useEffect(() => { undoLengthRef.current = undoStack.length; }, [undoStack]);
+  useEffect(() => {
+    if (inputRef.current && inputRef.current.textContent !== prompt) {
+      inputRef.current.textContent = prompt;
+    }
+  }, [prompt]);
+
+  const handlePromptKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleRefine();
+    } else if (e.key === "Escape") {
+      setPrompt("");
+      e.currentTarget.blur();
+    }
+  };
 
   const handleRefine = () => {
     if (!activeUrl || !activeModel) return;
@@ -269,8 +307,22 @@ export default function Studio() {
       return;
     }
     
+    const parsedCommand = parseStudioPromptCommand(prompt);
+    if (parsedCommand.kind === "invalid-upscale") {
+      alert(parsedCommand.message);
+      return;
+    }
+    if (
+      parsedCommand.kind === "upscale" &&
+      !activeModel.resolutions.includes(parsedCommand.imageSize)
+    ) {
+      alert(`${activeModel.label} does not support ${parsedCommand.imageSize} output.`);
+      return;
+    }
+
     // Capture state
-    const currentPrompt = prompt;
+    const currentPrompt = parsedCommand.prompt;
+    const isUpscale = parsedCommand.kind === "upscale";
     const currentActiveUrl = activeUrl;
     const currentGroups = groups.map(g => ({
        action: g.action,
@@ -304,8 +356,9 @@ export default function Studio() {
           apiKey: googleApiKey,
           prompt: currentPrompt,
           baseImageUrl: currentActiveUrl,
-          annotationImageUrl,
-          references,
+          annotationImageUrl: isUpscale ? undefined : annotationImageUrl,
+          references: isUpscale ? [] : references,
+          imageSize: isUpscale ? parsedCommand.imageSize : undefined,
         });
 
         setHistory(prev => [generatedUrl, ...prev]);
@@ -321,8 +374,8 @@ export default function Studio() {
           id: Date.now(),
           uuid: newUuid,
           ratio: "1:1",
-          mode: "STUDIO REFINE",
-          type: "Studio Edit",
+          mode: isUpscale ? "STUDIO UPSCALE" : "STUDIO REFINE",
+          type: isUpscale ? "Studio Upscale" : "Studio Edit",
           kind: "image",
           origin: "studio-edit",
           createdAt,
@@ -488,17 +541,22 @@ export default function Studio() {
           </div>
 
           <div className="prompt-wrap">
-            <div className="refine-prompt">
-              <input 
-                className="prompt-input" 
-                id="studioPromptInput" 
-                type="text" 
-                placeholder={undoStack.length > 0 ? "Describe what to do in the marked area..." : "What do you want me to do now?"}
-                value={prompt}
-                onChange={e => setPrompt(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleRefine(); }}
-              />
-              <button className="prompt-refine-btn" id="studioRefineBtn" onClick={handleRefine}>REFINE</button>
+            <div className="studio-prompt-bar" id="studioPromptBar" data-state="FRAME">
+              <div className="prompt-input-area">
+                <div
+                  className={`prompt-text-field ${prompt === "" ? "has-placeholder" : ""}`}
+                  id="studioPromptInput"
+                  contentEditable="true"
+                  data-placeholder={undoStack.length > 0 ? "Describe what to do in the marked area..." : "What do you want me to do now?"}
+                  ref={inputRef}
+                  onInput={(e) => setPrompt(e.currentTarget.textContent || "")}
+                  onKeyDown={handlePromptKeyDown}
+                  suppressContentEditableWarning={true}
+                ></div>
+                <div className={`btn-frame ${loadingCount > 0 ? 'cafe-loading' : ''}`} id="studioRefineBtn" onClick={handleRefine}>
+                  REFINE
+                </div>
+              </div>
             </div>
           </div>
         </div>
