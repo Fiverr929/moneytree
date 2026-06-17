@@ -223,6 +223,16 @@ Loose uploads now enter `PromptBuilder.collect().refs` as the Reference layer. T
 
 Studio is the current image editing workspace for Gallery images and Module image layers.
 
+Current Next.js implementation note (`src/components/Studio.tsx`, `src/components/StudioModule.tsx`, `src/context/StudioContext.tsx`, `src/lib/pipeline/api.ts`):
+
+- Studio uses the shared canvas prompt-bar visual language, without the canvas settings and `+` controls.
+- Studio refine sends the active image directly and omits `imageConfig.aspectRatio` unless a caller explicitly provides one. This lets cropped/freeform images rely on API/model shape inference instead of forcing `1:1`.
+- Studio prompt supports `/upscale 2k` and `/upscale 4k`, optionally followed by prompt text. The slash command is parsed locally and is not sent as model prompt text; only the text after the command is sent.
+- `/upscale` sends `imageSize: "2K" | "4K"` with no `aspectRatio`, no annotation image, and no Studio reference images. This keeps upscale testing isolated to the active base image.
+- Studio generations create gallery records with `STUDIO REFINE` or `STUDIO UPSCALE` metadata and `usedImages` provenance.
+- Studio reference images have per-image visibility, remove, and replace controls. Replace keeps the same image UUID and updates the stored `DB.images` data URL.
+- The Studio reference card visual state is centralized in `globals.css` under "Studio reference card polish": orange image/name/action borders in normal state, light-gray active command/name borders, orange tile controls with light-gray icons/borders.
+
 - **Entry points** — Gallery HUD pencil and Module image row / Image Inspector `...` menu `STUDIO` both call `window.Studio.open({ imgUrl, uuid, ratio, caller, onDone })`
 - **History is image-specific** — saved under `DB.studioState.histories[uuid]`, not shared globally
 - **Active history image** — clicking a history thumbnail updates `activeUrl`; Back returns that selected active image to the caller

@@ -14,6 +14,31 @@ Track component work, decisions, and session continuations here.
 
 ## Sessions
 
+### 2026-06-17 - Studio Workflow Polish + Upscale Command
+
+**Status:** COMPLETED
+
+**What Was Done:**
+- Reworked the Studio prompt area to reuse the main canvas prompt-bar visual system while omitting the canvas settings and `+` controls.
+- Changed Studio image requests so omitted `aspectRatio` is no longer forced to `1:1`; Studio now sends cropped/freeform base images without an aspect-ratio override unless one is explicitly supplied.
+- Added Studio-only slash commands:
+  - `/upscale 2k`
+  - `/upscale 4k`
+  - Optional text after the command is sent as the model prompt; the command token itself is not sent.
+- Kept `/upscale` isolated from normal refine context: it sends the active base image plus `imageSize`, with no Studio references, annotation image, or `aspectRatio`.
+- Added Studio reference image replacement. The bottom-right replace control keeps the existing image UUID and updates the stored `DB.images` data URL.
+- Polished Studio reference card controls: orange image/name/action borders in normal state, light-gray active command/name borders, orange tile controls with light-gray icons/borders, and a cleaned add-image button treatment.
+- Consolidated the Studio reference card CSS into a single "Studio reference card polish" block and removed obsolete Studio prompt input/button CSS.
+- Tightened Studio upload state with a typed `PendingUpload` union.
+
+**Files Touched:**
+- `src/app/globals.css`
+- `src/components/Studio.tsx`
+- `src/components/StudioModule.tsx`
+- `src/lib/pipeline/api.ts`
+- `docs/CafeHTML.md`
+- `docs/log.md`
+
 ### 2026-06-11 - Gallery/HUD/Studio Stabilization + Error-State Polish
 
 **Status:** COMPLETED
