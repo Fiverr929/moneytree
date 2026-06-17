@@ -2382,6 +2382,32 @@
     }
 
     /* ── PRESET ROW ───────────────────────────────────── */
+    .module-panel,
+    .module-panel button,
+    .module-panel .cmp-image-row,
+    .module-panel .cmp-folder,
+    .module-panel .cmp-folder-toggle,
+    .module-panel .cmp-thumb,
+    .module-panel .cmp-dot,
+    .module-panel .cmp-folder-dot,
+    .module-panel .cmp-strength,
+    .module-panel .cmp-toggle,
+    .module-panel .cmp-big-thumb,
+    .module-panel .cmp-label-edit,
+    .module-panel .cmp-image-eye,
+    .module-panel .cmp-image-remove {
+      cursor: default;
+    }
+    .module-panel input,
+    .module-panel textarea {
+      cursor: text;
+    }
+    .module-panel.dragging,
+    .module-panel.dragging * {
+      cursor: default;
+      user-select: none;
+    }
+
     .preset-row {
       height: 50px;
       width: 100%;

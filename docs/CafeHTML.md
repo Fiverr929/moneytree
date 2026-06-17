@@ -76,6 +76,14 @@ Current Next.js gallery generation behavior:
   - `FAILED`
 - Retry only appears when retry is meaningful (`TIMEOUT` and generic `FAILED`).
 - Gallery loading tiles use the same shimmer animation style as Studio loading thumbnails.
+- Effective prompts are intentionally minimal: user text becomes `Task: ...`; an empty prompt falls back to `Create one finished image from the provided references.`
+- Reference guidance is emitted per active image only. Absent roles are not mentioned.
+- Root Module images use visible top-to-bottom layer order for prompt numbering, manifest positions, inline image order, and HUD `usedImages`.
+
+Current Next.js Module ordering behavior:
+- Root module rows reorder with pointer movement, not native HTML drag, so the cursor stays quiet/default.
+- Folder/file movement still uses native drag/drop.
+- Ordering currently persists through the existing `modified` sort field. A dedicated `order` field would be cleaner later, but was not added in this polish pass.
 
 ---
 

@@ -14,6 +14,25 @@ Track component work, decisions, and session continuations here.
 
 ## Sessions
 
+### 2026-06-17 - Module Order + Prompt Cleanup
+
+**Status:** COMPLETED
+
+**What Was Done:**
+- Simplified generated effective prompts: empty user prompts now use a neutral `Task`, and references emit only their own role guidance.
+- Added shared module layer ordering so visible top-to-bottom root module order controls `Image 1`, `Image 2`, etc. in the prompt, manifest, inline image order, and HUD `usedImages`.
+- Polished Module root-row reorder UX with pointer-based movement instead of native HTML drag, keeping cursor behavior quiet and avoiding blocked/edit drag cursor flicker.
+- Cleaned dead native root drag/drop code from the Module panel; native drag remains only for folder/file movement.
+
+**Files Touched:**
+- `src/components/ModulePanel.tsx`
+- `src/app/globals.css`
+- `src/lib/pipeline/api.ts`
+- `src/lib/pipeline/prompt-builder.ts`
+- `src/lib/pipeline/module-order.ts`
+- `docs/CafeHTML.md`
+- `docs/log.md`
+
 ### 2026-06-17 - Studio Workflow Polish + Upscale Command
 
 **Status:** COMPLETED

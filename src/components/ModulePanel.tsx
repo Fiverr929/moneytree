@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useRef, ChangeEvent, useEffect, useState } from "react";
+import React, { useRef, ChangeEvent, useEffect, useState, useCallback } from "react";
 import { useModule, ModuleFile, ModuleFolder } from "@/context/ModuleContext";
 import { useStudio } from "@/context/StudioContext";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
 import { deriveEditedName, loadImageMetadata } from "@/lib/imageMeta";
+import { sortModuleFilesByLayerOrder } from "@/lib/pipeline/module-order";
 import { describeReferenceStrength, normalizeStrength, type ReferenceRole } from "@/lib/pipeline/strength";
 
 const ACCENTS = [
@@ -81,9 +82,16 @@ export default function ModulePanel() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const pointerDragRef = useRef<{
+    fileId: number;
+    startY: number;
+    active: boolean;
+  } | null>(null);
+  const suppressNextRowClickRef = useRef(false);
 
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [draggedFileId, setDraggedFileId] = useState<number | null>(null);
+  const [dragPlaceholderIndex, setDragPlaceholderIndex] = useState<number | null>(null);
 
   const [folderFormName, setFolderFormName] = useState("");
   const [folderFormAccent, setFolderFormAccent] = useState(
@@ -375,20 +383,52 @@ export default function ModulePanel() {
   };
 
   // Drag and Drop
+  const setMoveDragEffect = (e: React.DragEvent) => {
+    e.dataTransfer.dropEffect = "move";
+  };
+
   const handleFolderDragStart = (e: React.DragEvent, folderId: string) => {
     setDraggedFolderId(folderId);
     setDraggedFileId(null);
+    e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", folderId);
   };
 
   const handleFileDragStart = (e: React.DragEvent, fileId: number) => {
     setDraggedFileId(fileId);
     setDraggedFolderId(null);
+    e.dataTransfer.effectAllowed = "move";
+    const row = (e.currentTarget as HTMLElement).closest(".cmp-image-row") as HTMLElement | null;
+    if (row) {
+      const rect = row.getBoundingClientRect();
+      const dragPreview = row.cloneNode(true) as HTMLElement;
+      dragPreview.style.position = "fixed";
+      dragPreview.style.top = "-1000px";
+      dragPreview.style.left = "-1000px";
+      dragPreview.style.width = `${rect.width}px`;
+      dragPreview.style.pointerEvents = "none";
+      dragPreview.style.boxShadow = "none";
+      document.body.appendChild(dragPreview);
+      e.dataTransfer.setDragImage(
+        dragPreview,
+        Math.max(0, e.clientX - rect.left),
+        Math.max(0, e.clientY - rect.top),
+      );
+      window.setTimeout(() => dragPreview.remove(), 0);
+    }
     e.dataTransfer.setData("text/plain", fileId.toString());
   };
 
+  const clearDragState = useCallback(() => {
+    setDraggedFileId(null);
+    setDraggedFolderId(null);
+    setDragPlaceholderIndex(null);
+    setDragOver(null);
+  }, [setDragOver]);
+
   const handleFolderDragOver = (e: React.DragEvent, folderId: string) => {
     e.preventDefault();
+    setMoveDragEffect(e);
     setDragOver(folderId);
   };
 
@@ -413,6 +453,7 @@ export default function ModulePanel() {
 
     setDraggedFolderId(null);
     setDraggedFileId(null);
+    setDragPlaceholderIndex(null);
     setDragOver(null);
   };
 
@@ -425,6 +466,7 @@ export default function ModulePanel() {
   ) => {
     e.preventDefault();
     e.stopPropagation();
+    setMoveDragEffect(e);
 
     if (draggedFileId !== null && draggedFileId !== targetFileId) {
       const draggedFile = files.find((f) => f.id === draggedFileId);
@@ -472,9 +514,113 @@ export default function ModulePanel() {
       });
     }
 
-    setDraggedFileId(null);
-    setDraggedFolderId(null);
+    clearDragState();
   };
+
+  const reorderRootFiles = useCallback((targetIndex: number | null, fileId: number) => {
+    setFiles((prev) => {
+      const draggedFile = prev.find((f) => f.id === fileId);
+      if (!draggedFile || draggedFile.folder !== null) return prev;
+
+      const rootFiles = sortModuleFilesByLayerOrder(
+        prev.filter((f) => f.folder === null),
+      );
+      const withoutDragged = rootFiles.filter((f) => f.id !== fileId);
+      const boundedIndex = Math.max(
+        0,
+        Math.min(targetIndex ?? withoutDragged.length, withoutDragged.length),
+      );
+      const reorderedRoot = [...withoutDragged];
+      reorderedRoot.splice(boundedIndex, 0, draggedFile);
+
+      const now = Date.now();
+      const updatedRoot = reorderedRoot.map((file, index) => ({
+        ...file,
+        modified: new Date(now - index * 1000).toISOString(),
+      }));
+      const byId = new Map(updatedRoot.map((file) => [file.id, file]));
+      const next = prev.map((file) => byId.get(file.id) || file);
+
+      if (activeProjectId) {
+        updatedRoot.forEach((file) =>
+          DB.references.put({ ...file, project_id: activeProjectId }),
+        );
+      }
+
+      return next;
+    });
+  }, [activeProjectId, setFiles]);
+
+  const startRootPointerReorder = (
+    e: React.PointerEvent,
+    fileId: number,
+    rootFiles: ModuleFile[],
+  ) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("button, input, textarea, .cmp-menu, .cmp-dot")) return;
+
+    pointerDragRef.current = {
+      fileId,
+      startY: e.clientY,
+      active: false,
+    };
+    const rootIndex = rootFiles.findIndex((f) => f.id === fileId);
+    setDragPlaceholderIndex(rootIndex === -1 ? null : rootIndex);
+  };
+
+  const updatePointerPlaceholder = useCallback((clientY: number, fileId: number) => {
+    const rows = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        `.module-panel .cmp-image-row.loose[data-module-file-id]:not([data-module-file-id="${fileId}"])`,
+      ),
+    );
+    const nextIndex = rows.findIndex((row) => {
+      const rect = row.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    });
+    setDragPlaceholderIndex(nextIndex === -1 ? rows.length : nextIndex);
+  }, []);
+
+  useEffect(() => {
+    const handlePointerMove = (e: PointerEvent) => {
+      const drag = pointerDragRef.current;
+      if (!drag) return;
+
+      const moved = Math.abs(e.clientY - drag.startY);
+      if (!drag.active && moved < 4) return;
+
+      e.preventDefault();
+      if (!drag.active) {
+        drag.active = true;
+        suppressNextRowClickRef.current = true;
+        setDraggedFileId(drag.fileId);
+        setDraggedFolderId(null);
+      }
+      updatePointerPlaceholder(e.clientY, drag.fileId);
+    };
+
+    const handlePointerUp = () => {
+      const drag = pointerDragRef.current;
+      if (!drag) return;
+
+      if (drag.active) {
+        reorderRootFiles(dragPlaceholderIndex, drag.fileId);
+      }
+      pointerDragRef.current = null;
+      clearDragState();
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, [clearDragState, dragPlaceholderIndex, reorderRootFiles, updatePointerPlaceholder]);
 
   const renderThumb = (file: ModuleFile) => {
     if (file.url)
@@ -581,7 +727,11 @@ export default function ModulePanel() {
     );
   };
 
-  const renderImageRow = (f: ModuleFile, showFolderTag: boolean) => {
+  const renderImageRow = (
+    f: ModuleFile,
+    showFolderTag: boolean,
+    rootFilesForDrag?: ModuleFile[],
+  ) => {
     const selected = selectedIds.has(f.id);
     const renaming = renamingFileId === f.id;
     const folder = folders.find((x) => x.id === f.folder);
@@ -589,22 +739,43 @@ export default function ModulePanel() {
     return (
       <div
         key={f.id}
+        data-module-file-id={f.id}
         className={`cmp-image-row ${f.folder === null ? "loose" : ""} ${selected ? "selected" : ""} ${!f.eye ? "hidden" : ""}`}
-        draggable={true}
+        draggable={!rootFilesForDrag}
+        onPointerDown={(e) => {
+          if (rootFilesForDrag) startRootPointerReorder(e, f.id, rootFilesForDrag);
+        }}
         onDragStart={(e) => {
+          if (rootFilesForDrag) {
+            e.preventDefault();
+            return;
+          }
           e.stopPropagation();
           handleFileDragStart(e, f.id);
         }}
         onDragOver={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
+          if (!rootFilesForDrag) {
+            e.preventDefault();
+            e.stopPropagation();
+            setMoveDragEffect(e);
+          }
         }}
         onDrop={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          handleFileDrop(e, f.id, f.folder);
+          if (!rootFilesForDrag) {
+            e.preventDefault();
+            e.stopPropagation();
+            setMoveDragEffect(e);
+            handleFileDrop(e, f.id, f.folder);
+          }
+        }}
+        onDragEnd={() => {
+          clearDragState();
         }}
         onClick={() => {
+          if (suppressNextRowClickRef.current) {
+            suppressNextRowClickRef.current = false;
+            return;
+          }
           if (collapsed) return;
 
           if (selectMode) {
@@ -684,6 +855,37 @@ export default function ModulePanel() {
         {renderRowMenu(f)}
       </div>
     );
+  };
+
+  const renderSortableRootRows = (rootFiles: ModuleFile[]) => {
+    const isRootDrag =
+      draggedFileId !== null &&
+      rootFiles.some((file) => file.id === draggedFileId);
+
+    if (!isRootDrag) {
+      return rootFiles.map((f) => renderImageRow(f, false, rootFiles));
+    }
+
+    const visibleRows = rootFiles.filter((f) => f.id !== draggedFileId);
+    const draggedFile = rootFiles.find((f) => f.id === draggedFileId);
+    const placeholderIndex = Math.max(
+      0,
+      Math.min(dragPlaceholderIndex ?? visibleRows.length, visibleRows.length),
+    );
+    const rows: React.ReactNode[] = [];
+
+    visibleRows.forEach((file, index) => {
+      if (index === placeholderIndex && draggedFile) {
+        rows.push(renderImageRow(draggedFile, false, rootFiles));
+      }
+      rows.push(renderImageRow(file, false, rootFiles));
+    });
+
+    if (placeholderIndex === visibleRows.length && draggedFile) {
+      rows.push(renderImageRow(draggedFile, false, rootFiles));
+    }
+
+    return rows;
   };
 
   const renderFolderForm = (folder: ModuleFolder | null) => {
@@ -935,9 +1137,9 @@ export default function ModulePanel() {
 
   const renderRoot = () => {
     const q = searchQuery.trim().toLowerCase();
-    const rootFiles = files
-      .filter((f) => f.folder === null)
-      .sort((a, b) => b.modified.localeCompare(a.modified));
+    const rootFiles = sortModuleFilesByLayerOrder(
+      files.filter((f) => f.folder === null),
+    );
     const roleFiles = files.filter((f) => moduleRole(f.mode) !== "UNASSIGNED");
     const assigned = files.filter((f) => f.folder !== null);
     const results = q
@@ -984,9 +1186,11 @@ export default function ModulePanel() {
           className="cmp-scroll"
           onDragOver={(e) => {
             e.preventDefault();
+            setMoveDragEffect(e);
           }}
           onDrop={(e) => {
             e.preventDefault();
+            setMoveDragEffect(e);
             const fileId = parseInt(e.dataTransfer.getData("text/plain"), 10);
             if (!isNaN(fileId) && draggedFileId === fileId) {
               const draggedFile = files.find((f) => f.id === fileId);
@@ -994,8 +1198,7 @@ export default function ModulePanel() {
                 updateFile(fileId, { folder: null });
               }
             }
-            setDraggedFileId(null);
-            setDraggedFolderId(null);
+            clearDragState();
           }}
         >
           {q ? (
@@ -1010,7 +1213,7 @@ export default function ModulePanel() {
             </>
           ) : (
             <>
-              {rootFiles.map((f) => renderImageRow(f, false))}
+              {renderSortableRootRows(rootFiles)}
               {folders.map(renderFolder)}
               {addingFolder && renderFolderForm(null)}
             </>
@@ -1342,7 +1545,7 @@ export default function ModulePanel() {
   return (
     <div className="right-sidebar">
       <div className={`mod-panel-wrap ${collapsed ? "collapsed" : ""}`}>
-        <div className="module-panel" ref={panelRef}>
+        <div className={`module-panel ${draggedFileId !== null || draggedFolderId !== null ? "dragging" : ""}`} ref={panelRef}>
           {view === "file" ? renderInspector() : renderRoot()}
         </div>
       </div>

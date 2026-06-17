@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { fetchJSON } from './net';
+import { getGenerationModuleImages } from './module-order';
 import {
   describeReferenceStrength,
   normalizeStrength,
@@ -234,10 +235,7 @@ function patchGenerationDebug(patch: Record<string, any>) {
 }
 
 function getVisibleImageFiles(files?: Record<string, any>[]) {
-  return (files || []).filter(file => {
-    if (!file?.url || file.eye === false || file.folder) return false;
-    return ['SUBJECT', 'SCENE', 'STYLE'].includes(String(file.mode || '').toUpperCase());
-  });
+  return getGenerationModuleImages(files);
 }
 
 function normalizeRole(file: Record<string, any>): ReferenceRole {
@@ -248,19 +246,29 @@ function normalizeRole(file: Record<string, any>): ReferenceRole {
   return 'UNASSIGNED';
 }
 
+function describeRoleInstruction(role: ReferenceRole) {
+  const instructions: Record<ReferenceRole, string> = {
+    SUBJECT: 'Use as the main subject reference.',
+    SCENE: 'Use as the environment, layout, props, lighting, and spatial context.',
+    STYLE: 'Use only for visual treatment: palette, lens, lighting quality, texture, and mood.',
+    UNASSIGNED: 'Use as a general visual reference.'
+  };
+  return instructions[role];
+}
+
 function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, any>[]) {
-  const lines = ['User request:', rawPrompt.trim() || 'Generate a coherent image using the assigned module images.'];
+  const task = rawPrompt.trim() || 'Create one finished image from the provided references.';
+  const lines = ['Task:', task];
 
   if (imageFiles.length) {
-    lines.push('', 'Assigned module images:');
+    lines.push('', 'References:');
     imageFiles.forEach((file, index) => {
       const label = file.label || file.name || 'UNASSIGNED';
       const role = normalizeRole(file);
-      const strength = describeReferenceStrength(file.strength, role);
-      lines.push(`Image ${index + 1}: ${label} / ${role} / strength ${strength.value}% (${strength.strengthLabel})`);
-      lines.push(`Influence: ${strength.intent}`);
+      lines.push(`Image ${index + 1} - ${label}`);
+      lines.push(`Role: ${role}`);
+      lines.push(describeRoleInstruction(role));
     });
-    lines.push('', 'Strength is a weighting instruction, not an opacity value: lower strength means looser influence, higher strength means closer preservation for that image role. Use SUBJECT images for the main person, product, object, or wardrobe. Use SCENE images for the environment, setting, props, lighting, and layout. Use STYLE images only for the visual look, color, lens, rendering, and mood. Ignore unassigned module images. Do not make a collage. Generate one final coherent image.');
   }
 
   return lines.join('\n');
