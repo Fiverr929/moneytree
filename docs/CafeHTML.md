@@ -37,7 +37,7 @@ Local dev note:
 
 Debug capture:
 - Generation runs write a local debug payload to `window.__cafeLastGenerationDebug`.
-- The payload is runtime-scoped to the current browser tab and is meant for checking the latest prompt, settings, module files, manifest, and result status without manual copy/paste.
+- The payload is runtime-scoped to the current browser tab and is meant for checking the latest prompt, settings, module files, manifest, request size, result status, and structured HTTP error details without manual copy/paste.
 
 Legacy files:
 Main file: `CafeHTML-v2.html`
@@ -47,7 +47,19 @@ Docs: `docs/` folder
 
 ---
 
-## Generation Pipeline
+## Current Generation Pipeline
+
+```
+1. collectPayload()         - captures the user prompt, settings, module snapshot, and provenance
+2. buildSimplePrompt()      - writes the minimal Task / References / Role prompt
+3. googleGenerate()         - sends prompt and ordered inline images through @google/genai
+4. Promise.allSettled()     - runs one SDK call per variation and preserves successful siblings
+5. Gallery.resolveLoading() - resolves the matching tile and persists it to the launch project
+```
+
+The current transport uses the official SDK in Vertex Express mode. HTTP 429 responses are not retried automatically; the Gallery exposes an in-memory manual retry instead.
+
+## Legacy Generation Pipeline
 
 ```
 1. PromptBuilder.collect()     — reads ModuleState + settings → structured payload
@@ -66,7 +78,9 @@ Docs: `docs/` folder
 
 There is no single-request multi-image parameter for the Gemini image models, so each variation is a separate `callGoogleAPI`. They run concurrently via `Promise.allSettled`; a failed call (network / 429-after-retries / safety block) is dropped without discarding the variations that succeeded. The batch only errors when *zero* images come back.
 
-Current Next.js gallery generation behavior:
+## Current Gallery Generation Behavior
+- Separate generation batches can be started while earlier batches are still running. The FRAME button remains visually busy while any batch is active but does not lock further submissions.
+- HTTP 429 quota errors are not retried automatically. They render a temporary Gallery `RETRY` action that repeats only that image request when clicked; the retry closure is not persisted across refresh.
 - Loading tiles resolve per variation.
 - Requests time out after `90s` so hung calls stop cleanly.
 - Non-success outcomes render explicit tile labels:
@@ -74,10 +88,10 @@ Current Next.js gallery generation behavior:
   - `QUOTA`
   - `TIMEOUT`
   - `FAILED`
-- Retry only appears when retry is meaningful (`TIMEOUT` and generic `FAILED`).
+- Retry only appears when retry is meaningful (`QUOTA`, `TIMEOUT`, and generic `FAILED`).
 - Gallery loading tiles use the same shimmer animation style as Studio loading thumbnails.
 - Effective prompts are intentionally minimal: user text becomes `Task: ...`; an empty prompt falls back to `Create one finished image from the provided references.`
-- Reference guidance is emitted per active image only. Absent roles are not mentioned.
+- Reference guidance emits the image label, assigned role, and one generic role instruction per active image. Absent roles are not mentioned.
 - Root Module images use visible top-to-bottom layer order for prompt numbering, manifest positions, inline image order, and HUD `usedImages`.
 
 Current Next.js Module ordering behavior:
@@ -87,7 +101,9 @@ Current Next.js Module ordering behavior:
 
 ---
 
-## VisionScan Pipeline
+## Legacy VisionScan Pipeline
+
+This section documents the former plain-JavaScript pipeline and is not active in the current Next.js implementation.
 
 VisionScan (`vision.js`) describes individual images using `gemini-2.5-flash`. Its output feeds the enhancer so the enhancer call becomes text-only for described images — faster and cheaper than sending everything inline.
 
@@ -266,6 +282,7 @@ Purpose-built panel — does not use `ModulePanel.makeSection`. Owns its own ren
 
 ## Gallery HUD
 
+- HUD navigation includes completed image cells only. Loading, blocked, and failed Gallery tiles remain visible in the grid but are excluded from HUD slides and its counter.
 - HUD shows normalized image metadata (`Date`, `Type`, `Dimensions`) from gallery records.
 - Provenance is text-only in the current build:
   - `Studio Edit` -> "Updated from an earlier gallery image."
@@ -291,8 +308,8 @@ The Projects modal is owned by `logic/prompt-bar.js`; persistence lives in `logi
 | Label | Model ID | Thinking | Resolutions |
 |---|---|---|---|
 | NANO BANANA | `gemini-2.5-flash-image` | none | default only |
-| NANO BANANA 2 | `gemini-3.1-flash-image-preview` | minimal / high (user-selectable, default minimal) | 512, 1K, 2K, 4K |
-| NANO BANANA PRO | `gemini-3-pro-image-preview` | on by default, not configurable | 1K, 2K, 4K |
+| NANO BANANA 2 | `gemini-3.1-flash-image` | minimal / high (user-selectable, default minimal) | 512, 1K, 2K, 4K |
+| NANO BANANA PRO | `gemini-3-pro-image` | on by default, not configurable | 1K, 2K, 4K |
 
 `thinkingLevel` values are lowercase (`minimal` / `high`). Only NB2 exposes a selectable level — a "Thinking" control appears on the settings API page when NB2 is active (`CafeSettings.getActiveThinkingLevel()`). `seed` is **not** supported by any of these models (Imagen-only) and is not sent.
 
@@ -302,7 +319,7 @@ Enhancer model: `gemini-2.5-flash` (text + vision, not an image model)
 
 ## Provider
 
-Google AI Platform only (`aiplatform.googleapis.com`). fal.ai has been removed entirely. No rate limit — multiple concurrent generations allowed.
+Google Vertex AI Express mode through the official `@google/genai` SDK. The current browser-held API key is passed to `GoogleGenAI({ vertexai: true, apiKey, apiVersion: "v1" })`. fal.ai has been removed entirely.
 
 ---
 

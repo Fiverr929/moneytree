@@ -80,6 +80,28 @@ export default function ModulePanel() {
   const { openStudio } = useStudio();
   const { activeProjectId } = useApp();
 
+  const persistReference = useCallback((file: ModuleFile) => {
+    if (!activeProjectId) return;
+    void DB.references.put({ ...file, project_id: activeProjectId })
+      .catch((error) => console.error("Failed to persist module reference", error));
+  }, [activeProjectId]);
+
+  const persistImage = useCallback((uuid: string, url: string) => {
+    if (!activeProjectId) return;
+    void DB.images.put(uuid, url, activeProjectId)
+      .catch((error) => console.error("Failed to persist module image", error));
+  }, [activeProjectId]);
+
+  const deleteReference = useCallback((id: number) => {
+    void DB.references.delete(id)
+      .catch((error) => console.error("Failed to delete module reference", error));
+  }, []);
+
+  const deleteImage = useCallback((uuid: string) => {
+    void DB.images.delete(uuid)
+      .catch((error) => console.error("Failed to delete module image", error));
+  }, []);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const pointerDragRef = useRef<{
@@ -160,12 +182,16 @@ export default function ModulePanel() {
 
   const updateFile = (id: number, patch: Partial<ModuleFile>) => {
     setFiles((prev) => {
+      const previous = prev.find((f) => f.id === id);
       const next = prev.map((f) => (f.id === id ? { ...f, ...patch } : f));
       const updated = next.find((f) => f.id === id);
-      if (updated && activeProjectId) {
-        DB.references.put({ ...updated, project_id: activeProjectId });
+      if (updated) {
+        persistReference(updated);
         if (patch.url && updated.uuid) {
-          DB.images.put(updated.uuid, patch.url, activeProjectId);
+          persistImage(updated.uuid, patch.url);
+        }
+        if (patch.uuid && previous?.uuid && previous.uuid !== patch.uuid) {
+          deleteImage(previous.uuid);
         }
       }
       return next;
@@ -203,11 +229,9 @@ export default function ModulePanel() {
         if (nextMode === mode && moduleRole(f.mode) === mode) return { ...f, mode: "REFERENCE" };
         return f;
       });
-      if (activeProjectId) {
-        next
-          .filter((f) => f.id === id || prev.some((old) => old.id === f.id && old.mode !== f.mode))
-          .forEach((f) => DB.references.put({ ...f, project_id: activeProjectId }));
-      }
+      next
+        .filter((f) => f.id === id || prev.some((old) => old.id === f.id && old.mode !== f.mode))
+        .forEach(persistReference);
       return next;
     });
   };
@@ -224,8 +248,8 @@ export default function ModulePanel() {
       setView("root");
       setActiveFileId(null);
     }
-    if (activeProjectId) DB.references.delete(id);
-    if (target?.uuid) DB.images.delete(target.uuid);
+    if (activeProjectId) deleteReference(id);
+    if (target?.uuid) deleteImage(target.uuid);
   };
 
   const assignFile = (fileId: number, folderId: string) => {
@@ -242,10 +266,8 @@ export default function ModulePanel() {
       mode: "REFERENCE",
     };
     if (activeProjectId) {
-      if (file.url) {
-        DB.images.put(copy.uuid, file.url, activeProjectId);
-      }
-      DB.references.put({ ...copy, project_id: activeProjectId });
+      if (file.url) persistImage(copy.uuid, file.url);
+      persistReference(copy);
     }
     setFiles((prev) => {
       const idx = prev.findIndex((f) => f.id === file.id);
@@ -334,8 +356,8 @@ export default function ModulePanel() {
     };
 
     if (activeProjectId) {
-      DB.images.put(newFile.uuid, pendingUpload.url, activeProjectId);
-      DB.references.put({ ...newFile, project_id: activeProjectId });
+      persistImage(newFile.uuid, pendingUpload.url);
+      persistReference(newFile);
       DB.projects.update(activeProjectId, {}).catch(console.error);
     }
 
@@ -499,11 +521,7 @@ export default function ModulePanel() {
                 now - idxInGroup * 1000,
               ).toISOString();
               const updatedFile = { ...f, modified: newModified };
-              if (activeProjectId)
-                DB.references.put({
-                  ...updatedFile,
-                  project_id: activeProjectId,
-                });
+              if (activeProjectId) persistReference(updatedFile);
               return updatedFile;
             }
             return f;
@@ -542,14 +560,12 @@ export default function ModulePanel() {
       const next = prev.map((file) => byId.get(file.id) || file);
 
       if (activeProjectId) {
-        updatedRoot.forEach((file) =>
-          DB.references.put({ ...file, project_id: activeProjectId }),
-        );
+        updatedRoot.forEach(persistReference);
       }
 
       return next;
     });
-  }, [activeProjectId, setFiles]);
+  }, [activeProjectId, persistReference, setFiles]);
 
   const startRootPointerReorder = (
     e: React.PointerEvent,
@@ -1234,7 +1250,7 @@ export default function ModulePanel() {
                     if (activeProjectId) {
                       next
                         .filter((f) => hiddenIds.has(f.id))
-                        .forEach((f) => DB.references.put({ ...f, project_id: activeProjectId }));
+                        .forEach(persistReference);
                     }
                     return next;
                   });
@@ -1250,10 +1266,10 @@ export default function ModulePanel() {
                   const filesToDelete = files.filter((f) => deleteIds.has(f.id));
                   setFiles((prev) => prev.filter((f) => !deleteIds.has(f.id)));
                   if (activeProjectId) {
-                    deleteIds.forEach((id) => DB.references.delete(id));
+                    deleteIds.forEach(deleteReference);
                   }
                   filesToDelete.forEach((f) => {
-                    if (f.uuid) DB.images.delete(f.uuid);
+                    if (f.uuid) deleteImage(f.uuid);
                   });
                   setSelectMode(false);
                   setSelectedIds(new Set());

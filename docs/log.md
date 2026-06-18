@@ -1201,3 +1201,13 @@ Implemented the new CafeHTML Module Panel design from the S-C handoff as a vanil
 - `style.css`
 - `docs/CafeHTML.md`
 - `docs/log.md`
+- Replaced the generic reference prompt sentence with a deterministic translation layer: `Label`, `Use as`, strength-aware `Influence`, and a compact role instruction that prioritizes the literal image label.
+- Kept user task text exact, retained the existing empty-task fallback, and intentionally deferred label interpretation and prompt-intent detection.
+- Removed the PromptBar cross-run generation lock. An active-run counter now keeps the FRAME button's loading state accurate while allowing additional batches to start before earlier batches finish.
+- Expanded generation diagnostics to retain request-size metrics plus structured SDK error status and details instead of reducing failures to only a Gallery label.
+- Updated Nano Banana 2 and Nano Banana Pro from preview model IDs to the current stable IDs: `gemini-3.1-flash-image` and `gemini-3-pro-image`.
+- Reverted the experimental `TASK / Label / Use as / Influence / Instruction` compiler to the earlier minimal `Task / References / Role` prompt format.
+- Migrated FRAME and Studio generation from hand-written `aiplatform.googleapis.com` REST calls to the official `@google/genai` SDK in Vertex Express mode, preserving image-only responses, safety settings, thinking levels, retries, timeouts, and existing gallery callbacks.
+- Excluded loading, blocked, and failed Gallery cells from HUD opening, slides, navigation, and counters through one shared image-cell eligibility rule.
+- Split SDK transport and debug storage out of `pipeline/api.ts`, fixed stale project-load races, bound async generation results to their launch project, made Gallery/module persistence failures observable, repaired manual retry loading state, and added transactional project-delete cascading.
+- Removed automatic HTTP 429 retries. Quota failures now keep an in-memory per-image retry closure and render the existing Gallery `RETRY` action without a duplicate batch alert or persisted retry state.

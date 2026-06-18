@@ -119,6 +119,8 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
   const { activeProjectId } = useApp();
 
   useEffect(() => {
+    let cancelled = false;
+
     if (activeProjectId) {
       DB.references.getByProject(activeProjectId).then(async data => {
         const files = data as ModuleFile[];
@@ -127,16 +129,24 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
             try {
               const img = await DB.images.get(f.uuid);
               if (img && img.dataUrl) return { ...f, url: img.dataUrl };
-            } catch {}
+            } catch (error) {
+              console.error("Failed to restore module image", error);
+            }
           }
           return f;
         }));
-        setFiles(withUrls);
-        pruneProjectImages(activeProjectId).catch(console.error);
+        if (!cancelled) {
+          setFiles(withUrls);
+          pruneProjectImages(activeProjectId).catch(console.error);
+        }
       }).catch(console.error);
     } else {
       setFiles([]);
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeProjectId]);
 
   return (

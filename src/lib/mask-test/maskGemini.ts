@@ -1,3 +1,11 @@
+import type { Part } from "@google/genai";
+import {
+  createGenAIClient,
+  GENERATION_SAFETY_SETTINGS,
+  sendGenerationRequest,
+  type GenAIRequest,
+} from "@/lib/pipeline/genai-client";
+
 type MaskValidation = {
   valid: boolean;
   reason?: string;
@@ -33,53 +41,36 @@ export async function requestGeminiMask(opts: {
     opts.instruction,
   ].join("\n");
 
-  const body = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: prompt },
-          { inline_data: { mime_type: parsed.mimeType, data: parsed.base64 } },
-        ],
-      },
-    ],
-    generationConfig: {
+  const parts: Part[] = [
+    { text: prompt },
+    { inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } },
+  ];
+  const ai = createGenAIClient(opts.apiKey);
+  const request: GenAIRequest = {
+    model: opts.modelId,
+    contents: [{ role: "user", parts }],
+    config: {
       responseModalities: ["IMAGE"],
       imageConfig: {
         imageSize: "1K",
-        imageOutputOptions: { mimeType: "image/png" },
+        outputMimeType: "image/png",
       },
+      safetySettings: GENERATION_SAFETY_SETTINGS,
     },
-    safetySettings: [
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-    ],
   };
 
-  const url = `https://aiplatform.googleapis.com/v1/publishers/google/models/${opts.modelId}:generateContent?key=${opts.apiKey}`;
-  let res: Response;
+  let data;
   try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    data = await sendGenerationRequest(ai, request);
   } catch (err) {
-    throw new Error(`Gemini request failed before response: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(`Gemini ${res.status}: ${JSON.stringify(data)}`);
+    throw new Error(`Gemini request failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   for (const candidate of data.candidates || []) {
     for (const part of candidate.content?.parts || []) {
-      const inline = part.inlineData || part.inline_data;
+      const inline = part.inlineData;
       if (inline?.data) {
-        return `data:${inline.mimeType || inline.mime_type || "image/png"};base64,${inline.data}`;
+        return `data:${inline.mimeType || "image/png"};base64,${inline.data}`;
       }
     }
   }

@@ -11,14 +11,14 @@ import { collectPayload } from "@/lib/pipeline/prompt-builder";
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
 
 export default function PromptBar() {
-  const { setSettingsOpen } = useApp();
+  const { setSettingsOpen, activeProjectId } = useApp();
   const settings = useSettings();
   const gallery = useGallery();
   const moduleContext = useModule();
   
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   
   // Prompt settings state
   const [frameRatio, setFrameRatio] = useState("1:1");
@@ -88,7 +88,6 @@ export default function PromptBar() {
   }, [promptText]);
 
   const handleGenerate = async () => {
-    if (isGenerating) return;
     if (!settings.googleApiKey.trim()) {
       setSettingsOpen(true);
       setDropdownOpen(false);
@@ -137,36 +136,42 @@ export default function PromptBar() {
     };
     storeGenerationDebug(promptBarDebug);
 
-    setIsGenerating(true);
-    await generate(payload, fullSettings, settings.googleApiKey, {
-      onStart: (count) => console.log('Starting generation of', count, 'images...'),
-      onLoadingIds: (ids) => {
-        ids.forEach(id => gallery.addLoading(id, (payload.settings.aspectRatio || '1:1'), "FRAME"));
-      },
-      onVariationReady: (dataUrl, lid, cellData) => {
-        gallery.resolveLoading(lid, cellData as GalleryCell);
-      },
-      onVariationBlocked: (lid, statusLabel) => {
-        gallery.blockLoading(lid, statusLabel);
-      },
-      onVariationFailed: (lid, retryFn, statusLabel) => {
-        gallery.failLoading(lid, retryFn, statusLabel);
-      },
-      onGenerationError: (ids, statusLabel) => {
-        ids.forEach((id) => {
-          if (statusLabel === "BLOCKED") gallery.blockLoading(id, statusLabel);
-          else gallery.failLoading(id, undefined, statusLabel);
-        });
-      },
-      onComplete: () => {
-        setIsGenerating(false);
-      },
-      onError: (err) => {
-        console.error('Generation Error:', err);
-        alert(`Generation Failed: ${err.message}`);
-        setIsGenerating(false);
-      }
-    }, moduleContext.files);
+    setActiveGenerationCount((count) => count + 1);
+    try {
+      await generate(payload, fullSettings, settings.googleApiKey, {
+        onStart: (count) => console.log('Starting generation of', count, 'images...'),
+        onLoadingIds: (ids) => {
+          ids.forEach(id => gallery.addLoading(
+            id,
+            (payload.settings.aspectRatio || '1:1'),
+            "FRAME",
+            activeProjectId
+          ));
+        },
+        onVariationReady: (dataUrl, lid, cellData) => {
+          gallery.resolveLoading(lid, { ...cellData, project_id: activeProjectId || undefined } as GalleryCell);
+        },
+        onVariationBlocked: (lid, statusLabel) => {
+          gallery.blockLoading(lid, statusLabel);
+        },
+        onVariationFailed: (lid, retryFn, statusLabel) => {
+          gallery.failLoading(lid, retryFn, statusLabel);
+        },
+        onGenerationError: (ids, statusLabel) => {
+          ids.forEach((id) => {
+            if (statusLabel === "BLOCKED") gallery.blockLoading(id, statusLabel);
+            else gallery.failLoading(id, undefined, statusLabel);
+          });
+        },
+        onComplete: () => {},
+        onError: (err) => {
+          console.error('Generation Error:', err);
+          alert(`Generation Failed: ${err.message}`);
+        }
+      }, moduleContext.files);
+    } finally {
+      setActiveGenerationCount((count) => Math.max(0, count - 1));
+    }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -272,7 +277,7 @@ export default function PromptBar() {
           onKeyDown={handleKeyDown}
           suppressContentEditableWarning={true}
         ></div>
-        <div className={`btn-frame ${isGenerating ? 'cafe-loading' : ''}`} id="generateBtn" onClick={handleGenerate}>
+        <div className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`} id="generateBtn" onClick={handleGenerate}>
           FRAME
         </div>
       </div>

@@ -8,6 +8,7 @@ import type { StrengthBand } from "@/lib/pipeline/strength";
 export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string; strength?: number; strengthBand?: StrengthBand };
 export type GalleryCell = {
   id: number;
+  project_id?: number;
   uuid?: string;
   _imgUuid?: string;
   _dbId?: number;
@@ -63,7 +64,7 @@ interface GalleryContextType {
   infoPanelOpen: boolean;
   setInfoPanelOpen: (val: boolean) => void;
   // Mutations
-  addLoading: (id: string, ratio: string, mode: string) => void;
+  addLoading: (id: string, ratio: string, mode: string, projectId?: number | null) => void;
   resolveLoading: (id: string, cell: GalleryCell) => void;
   failLoading: (id: string, retryFn?: (newId: string) => void, statusLabel?: string) => void;
   blockLoading: (id: string, statusLabel?: string) => void;
@@ -121,28 +122,54 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    let cancelled = false;
+
     if (activeProjectId) {
       DB.gallery.getByProject(activeProjectId).then(async data => {
         const cells = data as GalleryCell[];
         const withUrls = await Promise.all(cells.map(async c => {
+          let restored = c;
           if (c.uuid) {
             try {
               const img = await DB.images.get(c.uuid);
-              if (img && img.dataUrl) return { ...c, imgUrl: img.dataUrl };
-            } catch {}
+              if (img?.dataUrl) restored = { ...c, imgUrl: img.dataUrl };
+            } catch (error) {
+              console.error("Failed to restore gallery image", error);
+            }
           }
-          return normalizeCell(c);
+          return normalizeCell(restored);
         }));
-        setCells(withUrls.reverse());
+        if (!cancelled) setCells(withUrls.reverse());
       }).catch(console.error);
     } else {
       setCells([]);
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeProjectId]);
 
-  const addLoading = (id: string, ratio: string, mode: string) => {
+  const persistCell = async (cell: GalleryCell) => {
+    const projectId = cell.project_id || activeProjectId;
+    if (!projectId || !cell.uuid || !cell.imgUrl) return;
+    const project = await DB.projects.get(projectId);
+    if (!project) return;
+    const dbCell = {
+      ...cell,
+      project_id: projectId,
+      loadingId: undefined,
+      retryFn: undefined,
+    };
+    await DB.images.put(cell.uuid, cell.imgUrl, projectId);
+    await DB.gallery.put(dbCell);
+    await DB.projects.update(projectId, { thumbnail: cell.imgUrl });
+  };
+
+  const addLoading = (id: string, ratio: string, mode: string, projectId?: number | null) => {
     setCells(prev => [{
       id: Date.now() + Math.random(),
+      project_id: projectId || undefined,
       loadingId: id,
       ratio,
       mode,
@@ -157,13 +184,11 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
 
   const resolveLoading = (id: string, cell: GalleryCell) => {
     const normalized = normalizeCell(cell);
-    setCells(prev => prev.map(c => c.loadingId === id ? { ...normalized, loadingId: undefined } : c));
-    if (activeProjectId && normalized.uuid && normalized.imgUrl) {
-      const dbCell = { ...normalized, project_id: activeProjectId, loadingId: undefined };
-      DB.images.put(normalized.uuid, normalized.imgUrl, activeProjectId);
-      DB.gallery.put(dbCell);
-      DB.projects.update(activeProjectId, { thumbnail: normalized.imgUrl }).catch(console.error);
-    }
+    setCells(prev => prev.map(c => c.loadingId === id
+      ? { ...normalized, project_id: normalized.project_id || c.project_id, loadingId: undefined }
+      : c
+    ));
+    void persistCell(normalized).catch((error) => console.error("Failed to persist generated image", error));
   };
 
   const failLoading = (id: string, retryFn?: (newId: string) => void, statusLabel = "FAILED") => {
@@ -177,12 +202,7 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
   const addCell = (cell: GalleryCell) => {
     const normalized = normalizeCell(cell);
     setCells(prev => [normalized, ...prev]);
-    if (activeProjectId && normalized.uuid && normalized.imgUrl) {
-      const dbCell = { ...normalized, project_id: activeProjectId, loadingId: undefined };
-      DB.images.put(normalized.uuid, normalized.imgUrl, activeProjectId);
-      DB.gallery.put(dbCell);
-      DB.projects.update(activeProjectId, { thumbnail: normalized.imgUrl }).catch(console.error);
-    }
+    void persistCell(normalized).catch((error) => console.error("Failed to persist gallery image", error));
   };
 
   return (

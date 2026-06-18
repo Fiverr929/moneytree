@@ -69,22 +69,25 @@ export default function ProjectsModal() {
     setProjectCreateOpen(true);
   };
 
-  const handleDelete = (id: number, e: React.MouseEvent) => {
+  const handleDelete = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm("Delete this project forever?")) {
-      DB.projects.delete(id).then(() => {
-        if (id === activeProjectId) {
-           DB.projects.getAll().then((data) => {
-              if (data && data.length > 0) {
-                 data.sort((a, b) => b.date_modified.localeCompare(a.date_modified));
-                 setActiveProjectId(data[0].id);
-              } else {
-                 DB.projects.create({ name: 'Project 1' }).then((newId) => setActiveProjectId(newId as number));
-              }
-           });
+    if (!confirm("Delete this project forever?")) return;
+
+    try {
+      await DB.projects.delete(id);
+      if (id === activeProjectId) {
+        const data = await DB.projects.getAll();
+        if (data.length > 0) {
+          data.sort((a, b) => b.date_modified.localeCompare(a.date_modified));
+          setActiveProjectId(data[0].id);
+        } else {
+          const newId = await DB.projects.create({ name: "Project 1" });
+          setActiveProjectId(newId as number);
         }
-        loadProjects();
-      });
+      }
+      loadProjects();
+    } catch (error) {
+      console.error("Failed to delete project", error);
     }
   };
 

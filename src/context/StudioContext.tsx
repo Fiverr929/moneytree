@@ -141,7 +141,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             layers: { groups }
           };
           await DB.studioState.save(activeProjectId, saved);
-        } catch {}
+        } catch (error) {
+          console.error("Failed to autosave studio state", error);
+        }
       }, 1000);
       return () => clearTimeout(timer);
     }

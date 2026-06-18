@@ -26,7 +26,7 @@ export const MODELS: Record<string, ModelConfig> = {
     thinkingLevel: null
   },
   'google-nano-banana-2': {
-    id: 'gemini-3.1-flash-image-preview',
+    id: 'gemini-3.1-flash-image',
     label: 'NANO BANANA 2',
     provider: 'google',
     aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
@@ -37,7 +37,7 @@ export const MODELS: Record<string, ModelConfig> = {
     thinkingLevels: ['minimal', 'high']
   },
   'nano-banana-pro': {
-    id: 'gemini-3-pro-image-preview',
+    id: 'gemini-3-pro-image',
     label: 'NANO BANANA PRO',
     provider: 'google',
     aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],

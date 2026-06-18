@@ -1,6 +1,22 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { fetchJSON } from './net';
 import { getGenerationModuleImages } from './module-order';
+import {
+  createGenAIClient,
+  describeGenAIError,
+  findImagePrediction,
+  GENERATION_SAFETY_SETTINGS,
+  isQuotaError,
+  sendGenerationRequest,
+  toThinkingLevel,
+  type GenAIRequest,
+  type GenerateContentConfig,
+  type Part,
+} from './genai-client';
+import {
+  getGenerationDebug,
+  patchGenerationDebug,
+  storeGenerationDebug,
+} from './generation-debug';
 import {
   describeReferenceStrength,
   normalizeStrength,
@@ -23,103 +39,129 @@ type GenerateOptions = {
   imageRefs?: string[];
   imageSize?: string;
   thinkingLevel?: string;
+  debugRunId?: string;
   onVariationReady?: (dataUrl: string, idx: number) => void;
   onVariationFailed?: (idx: number, statusLabel?: string) => void;
   onVariationBlocked?: (idx: number, statusLabel?: string) => void;
 };
 
+const BLOCKED_FINISH_REASONS = new Set([
+  "SAFETY",
+  "RECITATION",
+  "IMAGE_PROHIBITED_CONTENT",
+  "PROHIBITED_CONTENT",
+  "BLOCKLIST",
+  "SPII",
+]);
+
 function classifyGenerationError(err: unknown): "BLOCKED" | "QUOTA" | "TIMEOUT" | "FAILED" {
   const message = err instanceof Error ? err.message : String(err);
   if (message.includes("IMAGE_PROHIBITED_CONTENT") || message.includes("Prompt blocked")) return "BLOCKED";
+  if (isQuotaError(err)) return "QUOTA";
   if (message.includes("RESOURCE_EXHAUSTED") || message.includes("[CafeAPI] 429") || message.includes(" 429:")) return "QUOTA";
   if ((err instanceof Error && err.name === "AbortError") || message.includes("timed out")) return "TIMEOUT";
   return "FAILED";
 }
 
 function isRetryMeaningful(statusLabel?: string): boolean {
-  return statusLabel === "TIMEOUT" || statusLabel === "FAILED";
+  return statusLabel === "QUOTA" || statusLabel === "TIMEOUT" || statusLabel === "FAILED";
 }
 
 export async function googleGenerate(opts: GenerateOptions) {
-  const { modelId, apiKey, prompt, numImages, aspectRatio, imageRefs, imageSize, thinkingLevel, onVariationReady, onVariationFailed, onVariationBlocked } = opts;
+  const { modelId, apiKey, prompt, numImages, aspectRatio, imageRefs, imageSize, thinkingLevel, debugRunId, onVariationReady, onVariationFailed, onVariationBlocked } = opts;
   
   const arMap: Record<string, string> = { '1:1': '1:1', '16:9': '16:9', '9:16': '9:16', '4:3': '4:3', '3:4': '3:4' };
   const ar = arMap[aspectRatio] || '1:1';
 
-  const parts: {text?: string, inline_data?: {mime_type: string, data: string}}[] = [{ text: prompt }];
+  const parts: Part[] = [{ text: prompt }];
   if (imageRefs && imageRefs.length) {
     imageRefs.forEach(ref => {
       const parsed = parseDataUrl(ref);
-      parts.push({ inline_data: { mime_type: parsed.mimeType, data: parsed.base64 } });
+      parts.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } });
     });
   }
 
-  const generationConfig: Record<string, any> = {
+  const generationConfig: GenerateContentConfig = {
     responseModalities: ['IMAGE'],
-    imageConfig: { aspectRatio: ar, imageSize: imageSize || '1K', imageOutputOptions: { mimeType: 'image/png' } }
+    imageConfig: {
+      aspectRatio: ar,
+      imageSize: imageSize || '1K',
+      outputMimeType: 'image/png'
+    },
+    safetySettings: GENERATION_SAFETY_SETTINGS,
+    systemInstruction: [
+      'Follow the user prompt and attached reference images.',
+      'The inline images are supplied in the same Image N order named in the prompt.',
+      'Use each image according to its label, folder, and any direct user instruction.',
+      'Do not create a collage, pasted cutout, side-by-side composite, contact sheet, or flat overlay.',
+      'Generate one coherent final image with matching perspective, lighting, shadows, scale, and physical integration.'
+    ].join(' ')
   };
   
-  if (thinkingLevel && thinkingLevel !== 'none') {
-    generationConfig.thinkingConfig = { thinkingLevel };
+  const sdkThinkingLevel = toThinkingLevel(thinkingLevel);
+  if (sdkThinkingLevel) {
+    generationConfig.thinkingConfig = { thinkingLevel: sdkThinkingLevel };
   }
 
-  const systemInstruction = {
-    parts: [{
-      text: [
-        'Follow the user prompt and attached reference images.',
-        'The inline images are supplied in the same Image N order named in the prompt.',
-        'Use each image according to its label, folder, and any direct user instruction.',
-        'Do not create a collage, pasted cutout, side-by-side composite, contact sheet, or flat overlay.',
-        'Generate one coherent final image with matching perspective, lighting, shadows, scale, and physical integration.'
-      ].join(' ')
-    }]
-  };
-
-  const url = `https://aiplatform.googleapis.com/v1/publishers/google/models/${modelId}:generateContent?key=${apiKey}`;
-  const body = {
+  const request: GenAIRequest = {
+    model: modelId,
     contents: [{ role: 'user', parts }],
-    generationConfig,
-    safetySettings: [
-      { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_NONE' }
-    ],
-    systemInstruction
+    config: generationConfig
   };
+  const serializedBody = JSON.stringify(request);
+  const ai = createGenAIClient(apiKey);
+
+  patchGenerationDebug({
+    request: {
+      transport: '@google/genai',
+      apiMode: 'vertex-express',
+      modelId,
+      numImages,
+      aspectRatio: ar,
+      imageSize: imageSize || '1K',
+      thinkingLevel: thinkingLevel || null,
+      promptCharacters: prompt.length,
+      imageReferenceCount: imageRefs?.length || 0,
+      serializedBodyCharacters: serializedBody.length
+    }
+  }, debugRunId);
 
   console.log('[CafeAPI] → POST', modelId, '| ar:', ar, '| size:', imageSize, '| thinking:', thinkingLevel || 'none', '| image refs:', imageRefs?.length || 0);
 
   const calls = Array.from({ length: numImages }).map(async (_, idx) => {
     try {
-      const result = await fetchJSON(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      }, { label: '[CafeAPI]', timeoutMs: 90000 });
-
-      let prediction: any = null;
-      let blocked = !!(result.promptFeedback && result.promptFeedback.blockReason);
+      const result = await sendGenerationRequest(ai, request);
+      const prediction = findImagePrediction(result);
+      let blockedReason = result.promptFeedback?.blockReason
+        ? String(result.promptFeedback.blockReason)
+        : null;
+      const finishReasons: string[] = [];
       
-      (result.candidates || []).forEach((candidate: any) => {
-        if (candidate.finishReason && candidate.finishReason !== 'STOP') blocked = true;
-        if (prediction) return;
-        (candidate.content?.parts || []).forEach((part: any) => {
-          if (prediction) return;
-          const id = part.inlineData || part.inline_data;
-          if (id && id.data) {
-            prediction = { mimeType: id.mimeType || id.mime_type || 'image/png', bytesBase64Encoded: id.data };
+      (result.candidates || []).forEach((candidate) => {
+        if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+          finishReasons.push(candidate.finishReason);
+          if (BLOCKED_FINISH_REASONS.has(candidate.finishReason)) {
+            blockedReason = candidate.finishReason;
           }
-        });
+        }
       });
 
       if (prediction && onVariationReady) {
         onVariationReady(`data:${prediction.mimeType};base64,${prediction.bytesBase64Encoded}`, idx);
-      } else if (blocked && onVariationBlocked) {
-        onVariationBlocked(idx, 'BLOCKED');
+      } else if (blockedReason && onVariationBlocked) {
+        onVariationBlocked(idx, blockedReason);
+      } else if (onVariationFailed) {
+        onVariationFailed(idx, finishReasons[0] || 'FAILED');
       }
       return result;
     } catch (err) {
+      patchGenerationDebug({
+        lastApiError: {
+          variationIndex: idx,
+          classification: classifyGenerationError(err),
+          ...describeGenAIError(err)
+        }
+      }, debugRunId);
       if (onVariationFailed) onVariationFailed(idx, classifyGenerationError(err));
       throw err;
     }
@@ -141,14 +183,16 @@ export async function googleGenerate(opts: GenerateOptions) {
     if (result.promptFeedback?.blockReason) {
       blockReason = result.promptFeedback.blockReason;
     }
-    (result.candidates || []).forEach((candidate: any) => {
+    (result.candidates || []).forEach((candidate) => {
       if (candidate.finishReason && candidate.finishReason !== 'STOP') {
         finishReasons.push(candidate.finishReason);
       }
-      (candidate.content?.parts || []).forEach((part: any) => {
-        const id = part.inlineData || part.inline_data;
-        if (id && id.data) {
-          predictions.push({ mimeType: id.mimeType || id.mime_type || 'image/png', bytesBase64Encoded: id.data });
+      (candidate.content?.parts || []).forEach((part) => {
+        if (part.inlineData?.data) {
+          predictions.push({
+            mimeType: part.inlineData.mimeType || 'image/png',
+            bytesBase64Encoded: part.inlineData.data
+          });
         }
       });
     });
@@ -190,49 +234,7 @@ export type GenerationPayload = {
   [key: string]: any;
 };
 
-declare global {
-  interface Window {
-    __cafeLastGenerationDebug?: Record<string, any>;
-  }
-}
-
-function truncateDebugValue(value: any): any {
-  if (typeof value === 'string') {
-    if (value.startsWith('data:')) {
-      return `${value.slice(0, 96)}...[trimmed ${Math.max(0, value.length - 96)} chars]`;
-    }
-    if (value.length > 2000) {
-      return `${value.slice(0, 2000)}...[trimmed ${value.length - 2000} chars]`;
-    }
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(truncateDebugValue);
-  }
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, truncateDebugValue(entry)])
-    );
-  }
-  return value;
-}
-
-export function storeGenerationDebug(data: Record<string, any>) {
-  if (typeof window === 'undefined') return;
-  window.__cafeLastGenerationDebug = truncateDebugValue(data);
-}
-
-function patchGenerationDebug(patch: Record<string, any>) {
-  if (typeof window === 'undefined') return;
-  const current = window.__cafeLastGenerationDebug;
-  if (!current) return;
-  const next = {
-    ...current,
-    ...patch,
-    updatedAt: new Date().toISOString()
-  };
-  storeGenerationDebug(next);
-}
+export { storeGenerationDebug } from './generation-debug';
 
 function getVisibleImageFiles(files?: Record<string, any>[]) {
   return getGenerationModuleImages(files);
@@ -256,7 +258,7 @@ function describeRoleInstruction(role: ReferenceRole) {
   return instructions[role];
 }
 
-function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, any>[]) {
+export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, any>[]) {
   const task = rawPrompt.trim() || 'Create one finished image from the provided references.';
   const lines = ['Task:', task];
 
@@ -292,6 +294,8 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
   }
 
   callbacks.onStart(numImages);
+  let terminalOutcomeReported = false;
+  const debugRunId = crypto.randomUUID();
 
   try {
     const effectivePrompt = buildSimplePrompt(userPrompt, imageFiles);
@@ -316,6 +320,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
     const startedAt = new Date().toISOString();
 
     storeGenerationDebug({
+      runId: debugRunId,
       status: 'started',
       startedAt,
       updatedAt: startedAt,
@@ -370,77 +375,90 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
       imageRefs,
       imageSize,
       thinkingLevel: thinkingLevel || undefined,
+      debugRunId,
       onVariationReady: (dataUrl, idx) => {
         const lid = loadingIds[idx] || loadingIds[0];
-        const previousResults = window.__cafeLastGenerationDebug?.results || [];
+        const previousResults = getGenerationDebug()?.results;
         patchGenerationDebug({
           status: 'running',
           results: [
-            ...previousResults,
+            ...(Array.isArray(previousResults) ? previousResults : []),
             { idx, loadingId: lid, status: 'ready', dataUrlPreview: dataUrl.slice(0, 64) }
           ]
-        });
+        }, debugRunId);
         callbacks.onVariationReady(dataUrl, lid, buildCellData(dataUrl));
       },
       onVariationBlocked: (idx, statusLabel) => {
+        terminalOutcomeReported = true;
         const lid = loadingIds[idx];
-        const previousResults = window.__cafeLastGenerationDebug?.results || [];
+        const previousResults = getGenerationDebug()?.results;
         patchGenerationDebug({
           status: 'running',
           results: [
-            ...previousResults,
+            ...(Array.isArray(previousResults) ? previousResults : []),
             { idx, loadingId: lid, status: statusLabel || 'blocked' }
           ]
-        });
+        }, debugRunId);
         callbacks.onVariationBlocked(lid, statusLabel);
       },
       onVariationFailed: (idx, statusLabel) => {
+        terminalOutcomeReported = true;
         const lid = loadingIds[idx];
-        const previousResults = window.__cafeLastGenerationDebug?.results || [];
+        const previousResults = getGenerationDebug()?.results;
         patchGenerationDebug({
           status: 'running',
           results: [
-            ...previousResults,
+            ...(Array.isArray(previousResults) ? previousResults : []),
             { idx, loadingId: lid, status: statusLabel || 'failed' }
           ]
-        });
-        const retryFn = isRetryMeaningful(statusLabel) ? (newLid: string) => {
-          googleGenerate({
-            modelId: model!.id, apiKey, prompt: effectivePrompt, numImages: 1, aspectRatio: ratio, imageRefs, imageSize, thinkingLevel: thinkingLevel || undefined,
+        }, debugRunId);
+        const runRetry = (newLid: string) => {
+          void googleGenerate({
+            modelId: model!.id, apiKey, prompt: effectivePrompt, numImages: 1, aspectRatio: ratio, imageRefs, imageSize, thinkingLevel: thinkingLevel || undefined, debugRunId,
             onVariationReady: (dataUrl) => {
-              const retryResults = window.__cafeLastGenerationDebug?.results || [];
+              const retryResults = getGenerationDebug()?.results;
               patchGenerationDebug({
                 status: 'running',
                 results: [
-                  ...retryResults,
+                  ...(Array.isArray(retryResults) ? retryResults : []),
                   { idx, loadingId: newLid, status: 'retry-ready', dataUrlPreview: dataUrl.slice(0, 64) }
                 ]
-              });
+              }, debugRunId);
               callbacks.onVariationReady(dataUrl, newLid, buildCellData(dataUrl));
             },
-            onVariationFailed: (_retryIdx, retryStatusLabel) => callbacks.onVariationFailed(newLid, undefined, retryStatusLabel),
+            onVariationFailed: (_retryIdx, retryStatusLabel) => {
+              callbacks.onVariationFailed(
+                newLid,
+                isRetryMeaningful(retryStatusLabel) ? runRetry : undefined,
+                retryStatusLabel
+              );
+            },
             onVariationBlocked: (_retryIdx, retryStatusLabel) => callbacks.onVariationBlocked(newLid, retryStatusLabel)
-          });
-        } : undefined;
+          }).catch(() => {});
+        };
+        const retryFn = isRetryMeaningful(statusLabel) ? runRetry : undefined;
         callbacks.onVariationFailed(lid, retryFn, statusLabel);
       }
     });
 
-    patchGenerationDebug({ status: 'complete', completedAt: new Date().toISOString() });
+    patchGenerationDebug({ status: 'complete', completedAt: new Date().toISOString() }, debugRunId);
     callbacks.onComplete();
 
   } catch (err: any) {
-    if (typeof callbacks.onGenerationError === 'function') {
-      const loadingIds = Array.isArray(window.__cafeLastGenerationDebug?.loadingIds)
-        ? window.__cafeLastGenerationDebug!.loadingIds as string[]
+    if (!terminalOutcomeReported && typeof callbacks.onGenerationError === 'function') {
+      const debugLoadingIds = getGenerationDebug()?.loadingIds;
+      const loadingIds = Array.isArray(debugLoadingIds)
+        ? debugLoadingIds as string[]
         : [];
       callbacks.onGenerationError(loadingIds, classifyGenerationError(err));
     }
     patchGenerationDebug({
       status: 'error',
-      error: err instanceof Error ? err.message : String(err)
-    });
-    callbacks.onError(err instanceof Error ? err : new Error(String(err)));
+      error: describeGenAIError(err)
+    }, debugRunId);
+    if (!terminalOutcomeReported) {
+      callbacks.onError(err instanceof Error ? err : new Error(String(err)));
+    }
   }
 }
 
@@ -459,67 +477,47 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
   const { modelId, apiKey, prompt, baseImageUrl, annotationImageUrl, references, imageSize, aspectRatio } = opts;
 
   const fullPrompt = (prompt + (annotationImageUrl ? ' Focus on the annotated area.' : '')).trim();
-  const parts: {text?: string, inline_data?: {mime_type: string, data: string}}[] = [];
+  const parts: Part[] = [];
   if (fullPrompt) parts.push({ text: fullPrompt });
 
   const baseParsed = parseDataUrl(baseImageUrl);
-  parts.push({ inline_data: { mime_type: baseParsed.mimeType, data: baseParsed.base64 } });
+  parts.push({ inlineData: { mimeType: baseParsed.mimeType, data: baseParsed.base64 } });
 
   if (annotationImageUrl) {
     const annoParsed = parseDataUrl(annotationImageUrl);
-    parts.push({ inline_data: { mime_type: 'image/png', data: annoParsed.base64 } });
+    parts.push({ inlineData: { mimeType: 'image/png', data: annoParsed.base64 } });
   }
 
   if (references) {
     references.forEach(ref => {
       parts.push({ text: `Reference action: ${ref.action || 'TRANSFER'}\nIntent: ${ref.name}\nUse this reference only for the stated action and intent:` });
       const refParsed = parseDataUrl(ref.url);
-      parts.push({ inline_data: { mime_type: refParsed.mimeType, data: refParsed.base64 } });
+      parts.push({ inlineData: { mimeType: refParsed.mimeType, data: refParsed.base64 } });
     });
   }
 
-  const imageConfig: { aspectRatio?: string, imageSize: string, imageOutputOptions: { mimeType: string } } = {
+  const imageConfig: NonNullable<GenerateContentConfig['imageConfig']> = {
     imageSize: imageSize || '1K',
-    imageOutputOptions: { mimeType: 'image/png' }
+    outputMimeType: 'image/png'
   };
   if (aspectRatio) imageConfig.aspectRatio = aspectRatio;
 
-  const generationConfig = {
+  const generationConfig: GenerateContentConfig = {
     responseModalities: ['IMAGE'],
-    imageConfig
+    imageConfig,
+    safetySettings: GENERATION_SAFETY_SETTINGS
   };
 
-  const url = `https://aiplatform.googleapis.com/v1/publishers/google/models/${modelId}:generateContent?key=${apiKey}`;
-  const body = {
+  const request = {
+    model: modelId,
     contents: [{ role: 'user', parts }],
-    generationConfig,
-    safetySettings: [
-      { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-      { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_NONE' }
-    ]
+    config: generationConfig
   };
 
   console.log('[CafeAPI] → POST (Studio)', modelId, '| refs:', references?.length || 0);
 
-  const result = await fetchJSON(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  }, { label: '[CafeAPI Studio]', timeoutMs: 90000 });
-
-  let prediction: any = null;
-  (result.candidates || []).forEach((candidate: any) => {
-    if (prediction) return;
-    (candidate.content?.parts || []).forEach((part: any) => {
-      if (prediction) return;
-      const id = part.inlineData || part.inline_data;
-      if (id && id.data) {
-        prediction = { mimeType: id.mimeType || id.mime_type || 'image/png', bytesBase64Encoded: id.data };
-      }
-    });
-  });
+  const result = await sendGenerationRequest(createGenAIClient(apiKey), request);
+  const prediction = findImagePrediction(result);
 
   if (!prediction) {
     const block = result.promptFeedback?.blockReason;

@@ -22,6 +22,9 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
   reqCurrent.onsuccess = (e: any) => {
     const db = e.target.result as IDBDatabase;
     const currentVersion = db.version || 1;
+    const hasIndex = (storeName: string, indexName: string) =>
+      db.objectStoreNames.contains(storeName) &&
+      db.transaction(storeName).objectStore(storeName).indexNames.contains(indexName);
     const needsUpgrade = !db.objectStoreNames.contains(S.PROJECTS) ||
                          !db.objectStoreNames.contains(S.SETTINGS) ||
                          !db.objectStoreNames.contains(S.MODULE_STATE) ||
@@ -29,7 +32,10 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
                          !db.objectStoreNames.contains(S.REFERENCES) ||
                          !db.objectStoreNames.contains(S.GALLERY) ||
                          !db.objectStoreNames.contains(S.IMAGES) ||
-                         !db.objectStoreNames.contains(S.DESCRIPTIONS);
+                         !db.objectStoreNames.contains(S.DESCRIPTIONS) ||
+                         !hasIndex(S.PROJECTS, 'by_modified') ||
+                         !hasIndex(S.REFERENCES, 'by_project') ||
+                         !hasIndex(S.GALLERY, 'by_project');
     db.close();
 
     const targetVersion = needsUpgrade ? currentVersion + 1 : currentVersion;
@@ -41,6 +47,9 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
       if (!db2.objectStoreNames.contains(S.PROJECTS)) {
         const ps = db2.createObjectStore(S.PROJECTS, { keyPath: 'id', autoIncrement: true });
         ps.createIndex('by_modified', 'date_modified');
+      } else {
+        const ps = e2.target.transaction.objectStore(S.PROJECTS);
+        if (!ps.indexNames.contains('by_modified')) ps.createIndex('by_modified', 'date_modified');
       }
       if (!db2.objectStoreNames.contains(S.SETTINGS)) db2.createObjectStore(S.SETTINGS, { keyPath: 'project_id' });
       if (!db2.objectStoreNames.contains(S.MODULE_STATE)) db2.createObjectStore(S.MODULE_STATE, { keyPath: 'project_id' });
@@ -49,18 +58,29 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
       if (!db2.objectStoreNames.contains(S.REFERENCES)) {
         const rs = db2.createObjectStore(S.REFERENCES, { keyPath: 'id', autoIncrement: true });
         rs.createIndex('by_project', 'project_id');
+      } else {
+        const rs = e2.target.transaction.objectStore(S.REFERENCES);
+        if (!rs.indexNames.contains('by_project')) rs.createIndex('by_project', 'project_id');
       }
       if (!db2.objectStoreNames.contains(S.GALLERY)) {
         const gs = db2.createObjectStore(S.GALLERY, { keyPath: 'id', autoIncrement: true });
         gs.createIndex('by_project', 'project_id');
+      } else {
+        const gs = e2.target.transaction.objectStore(S.GALLERY);
+        if (!gs.indexNames.contains('by_project')) gs.createIndex('by_project', 'project_id');
       }
       if (!db2.objectStoreNames.contains(S.IMAGES)) db2.createObjectStore(S.IMAGES, { keyPath: 'uuid' });
       if (!db2.objectStoreNames.contains(S.DESCRIPTIONS)) db2.createObjectStore(S.DESCRIPTIONS, { keyPath: 'uuid' });
     };
 
     req.onsuccess = (e2: any) => {
-      _db = e2.target.result;
-      resolve(_db!);
+      const openedDb = e2.target.result as IDBDatabase;
+      _db = openedDb;
+      openedDb.onversionchange = () => {
+        openedDb.close();
+        _db = null;
+      };
+      resolve(openedDb);
     };
     req.onerror = (e2: any) => reject(e2.target.error);
   };
@@ -79,6 +99,63 @@ function wrap<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
+function transactionDone(transaction: IDBTransaction) {
+  return new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error || new Error("IndexedDB transaction aborted"));
+  });
+}
+
+function deleteProjectRecordsByIndex(store: IDBObjectStore, projectId: number) {
+  const request = store.index("by_project").openKeyCursor(IDBKeyRange.only(projectId));
+  request.onsuccess = () => {
+    const cursor = request.result;
+    if (!cursor) return;
+    store.delete(cursor.primaryKey);
+    cursor.continue();
+  };
+}
+
+async function deleteProjectCascade(id: number) {
+  await ready;
+  const transaction = tx(
+    [
+      S.PROJECTS,
+      S.SETTINGS,
+      S.MODULE_STATE,
+      S.REFERENCES,
+      S.GALLERY,
+      S.IMAGES,
+      S.DESCRIPTIONS,
+      S.STUDIO_STATE,
+    ],
+    "readwrite",
+  );
+
+  const imagesStore = transaction.objectStore(S.IMAGES);
+  const descriptionsStore = transaction.objectStore(S.DESCRIPTIONS);
+  const imagesRequest = imagesStore.getAll();
+
+  imagesRequest.onsuccess = () => {
+    (imagesRequest.result as Array<{ uuid: string; project_id?: number }>)
+      .filter((image) => image.project_id === id)
+      .forEach((image) => {
+        imagesStore.delete(image.uuid);
+        descriptionsStore.delete(image.uuid);
+      });
+  };
+
+  deleteProjectRecordsByIndex(transaction.objectStore(S.REFERENCES), id);
+  deleteProjectRecordsByIndex(transaction.objectStore(S.GALLERY), id);
+  transaction.objectStore(S.SETTINGS).delete(id);
+  transaction.objectStore(S.MODULE_STATE).delete(id);
+  transaction.objectStore(S.STUDIO_STATE).delete(id);
+  transaction.objectStore(S.PROJECTS).delete(id);
+
+  await transactionDone(transaction);
+}
+
 const projects = {
   getAll: () => ready.then(() => wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).getAll())),
   get: (id: number) => ready.then(() => wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).get(id))),
@@ -94,10 +171,7 @@ const projects = {
       return wrap(store.put({ ...existing, ...data, id, date_modified: new Date().toISOString() }));
     });
   }),
-  delete: (id: number) => ready.then(() => {
-    const store = tx(S.PROJECTS, 'readwrite').objectStore(S.PROJECTS);
-    return wrap(store.delete(id));
-  })
+  delete: deleteProjectCascade,
 };
 
 const images = {

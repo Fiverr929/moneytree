@@ -7,6 +7,7 @@ import { useModule } from "@/context/ModuleContext";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
 import { dimensionsToRatio, loadImageMetadata } from "@/lib/imageMeta";
+import { isHudImageCell } from "@/lib/galleryCells";
 
 export default function HUD() {
   const { 
@@ -36,13 +37,14 @@ export default function HUD() {
     if (ratioFilter === 'square')    return cell.ratio === '1:1';
     return true;
   });
-  const visibleCells = sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
+  const sortedCells = sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
+  const visibleCells = sortedCells.filter(isHudImageCell);
   const activeCell = visibleCells[hudIndex];
 
-  const persistGalleryCell = useCallback((cell: ActiveHudCell) => {
+  const persistGalleryCell = useCallback(async (cell: ActiveHudCell) => {
     if (!activeProjectId || !cell?.uuid || !cell.imgUrl) return;
-    DB.images.put(cell.uuid, cell.imgUrl, activeProjectId);
-    DB.gallery.put({ ...cell, project_id: activeProjectId, loadingId: undefined, retryFn: undefined });
+    await DB.images.put(cell.uuid, cell.imgUrl, activeProjectId);
+    await DB.gallery.put({ ...cell, project_id: activeProjectId, loadingId: undefined, retryFn: undefined });
   }, [activeProjectId]);
 
   const formatInfoDate = useCallback((value?: string) => {
@@ -91,7 +93,7 @@ export default function HUD() {
           sourceUuid: cell?.sourceUuid || cell?.uuid,
         };
         setCells((prev) => prev.map((entry) => entry.id === cell?.id ? updatedCell : entry));
-        persistGalleryCell(updatedCell);
+        void persistGalleryCell(updatedCell).catch((error) => console.error("Failed to persist Studio result", error));
       })
       .catch(() => {
         const updatedCell: GalleryCell = {
@@ -105,7 +107,7 @@ export default function HUD() {
           sourceUuid: cell?.sourceUuid || cell?.uuid,
         };
         setCells((prev) => prev.map((entry) => entry.id === cell?.id ? updatedCell : entry));
-        persistGalleryCell(updatedCell);
+        void persistGalleryCell(updatedCell).catch((error) => console.error("Failed to persist Studio result", error));
       });
   }, [persistGalleryCell, setCells]);
 
@@ -122,7 +124,7 @@ export default function HUD() {
       type: cell.type || "Generation",
     };
     setCells((prev) => prev.map((entry) => entry.id === cell.id ? updatedCell : entry));
-    persistGalleryCell(updatedCell);
+    void persistGalleryCell(updatedCell).catch((error) => console.error("Failed to persist image metadata", error));
   }, [persistGalleryCell, setCells]);
 
   const handleNext = useCallback(() => {
@@ -167,11 +169,25 @@ export default function HUD() {
     }
   }, [hudOpen, infoPanelOpen, setInfoPanelOpen]);
 
+  useEffect(() => {
+    if (!visibleCells.length) {
+      if (hudOpen) setHudOpen(false);
+      return;
+    }
+    if (hudIndex >= visibleCells.length) {
+      setHudIndex(visibleCells.length - 1);
+    }
+  }, [hudIndex, hudOpen, setHudIndex, setHudOpen, visibleCells.length]);
+
   if (!activeCell) return null; // Wait until active cell is available
 
   const handleDelete = () => {
-    if (activeCell?.id) DB.gallery.delete(activeCell.id);
-    if (activeCell?.uuid) DB.images.delete(activeCell.uuid);
+    if (activeCell?.id) {
+      void DB.gallery.delete(activeCell.id).catch((error) => console.error("Failed to delete gallery record", error));
+    }
+    if (activeCell?.uuid) {
+      void DB.images.delete(activeCell.uuid).catch((error) => console.error("Failed to delete gallery image", error));
+    }
     setCells(prev => prev.filter(c => c.id !== activeCell.id));
     setHudOpen(false);
   };
@@ -195,7 +211,7 @@ export default function HUD() {
       retryFn: undefined,
     };
     setCells(prev => [newCell, ...prev]);
-    persistGalleryCell(newCell);
+    void persistGalleryCell(newCell).catch((error) => console.error("Failed to persist duplicate", error));
     setThreeDotOpen(false);
   };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from "react";
 import DB from "@/lib/db";
 
 interface AppContextType {
@@ -32,18 +32,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
   
   const [promptSettingsOpen, setPromptSettingsOpen] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
+  const initializedRef = useRef(false);
 
   useEffect(() => {
-    DB.projects.getAll().then((data) => {
-      if (data && data.length > 0) {
-        data.sort((a, b) => b.date_modified.localeCompare(a.date_modified));
-        setActiveProjectId(data[0].id);
-      } else {
-        DB.projects.create({ name: 'Project 1' }).then((newId) => {
-          setActiveProjectId(newId as number);
-        });
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
+    const initializeProject = async () => {
+      try {
+        const data = await DB.projects.getAll();
+        if (data.length > 0) {
+          data.sort((a, b) => b.date_modified.localeCompare(a.date_modified));
+          setActiveProjectId(data[0].id);
+          return;
+        }
+        const newId = await DB.projects.create({ name: "Project 1" });
+        setActiveProjectId(newId as number);
+      } catch (error) {
+        console.error("Failed to initialize project", error);
       }
-    }).catch(console.error);
+    };
+
+    void initializeProject();
   }, []);
 
   return (

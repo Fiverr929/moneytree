@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useGallery, GalleryCell } from "@/context/GalleryContext";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
+import { isHudImageCell } from "@/lib/galleryCells";
 
 export default function Gallery() {
   const { 
@@ -23,10 +24,11 @@ export default function Gallery() {
   const filterRef = useRef<HTMLDivElement>(null);
   const threeDotRef = useRef<HTMLDivElement>(null);
 
-  const persistCell = (cell: GalleryCell) => {
+  const persistCell = async (cell: GalleryCell) => {
     if (!cell.uuid || !cell.imgUrl) return;
-    DB.images.put(cell.uuid, cell.imgUrl, activeProjectId!);
-    DB.gallery.put({ ...cell, project_id: activeProjectId, loadingId: undefined, retryFn: undefined });
+    if (!activeProjectId) return;
+    await DB.images.put(cell.uuid, cell.imgUrl, activeProjectId);
+    await DB.gallery.put({ ...cell, project_id: activeProjectId, loadingId: undefined, retryFn: undefined });
   };
 
   // Close dropdowns on click outside
@@ -52,6 +54,7 @@ export default function Gallery() {
   });
 
   const visibleCells = sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
+  const hudCells = visibleCells.filter(isHudImageCell);
 
   const handleCellClick = (cellId: number) => {
     if (selectMode) {
@@ -60,7 +63,7 @@ export default function Gallery() {
       else next.add(cellId);
       setSelectedIds(next);
     } else {
-      const idx = visibleCells.findIndex(c => c.id === cellId);
+      const idx = hudCells.findIndex(c => c.id === cellId);
       if (idx !== -1) {
         setHudIndex(idx);
         setHudOpen(true);
@@ -91,7 +94,9 @@ export default function Gallery() {
           retryFn: undefined,
         };
         newCells.push(newCell);
-        if (activeProjectId) persistCell(newCell);
+        if (activeProjectId) {
+          void persistCell(newCell).catch((error) => console.error("Failed to persist duplicate", error));
+        }
       }
     });
     setCells(prev => [...newCells, ...prev]);
@@ -103,8 +108,10 @@ export default function Gallery() {
   const handleDeleteSelected = () => {
     selectedIds.forEach(id => {
       const cell = cells.find(c => c.id === id);
-      DB.gallery.delete(id);
-      if (cell?.uuid) DB.images.delete(cell.uuid);
+      void DB.gallery.delete(id).catch((error) => console.error("Failed to delete gallery record", error));
+      if (cell?.uuid) {
+        void DB.images.delete(cell.uuid).catch((error) => console.error("Failed to delete gallery image", error));
+      }
     });
     setCells(prev => prev.filter(c => !selectedIds.has(c.id)));
     setSelectedIds(new Set());
@@ -217,6 +224,11 @@ export default function Gallery() {
                   <span className="cell-error-label" onClick={(e) => {
                     e.stopPropagation();
                     if (cell.retryFn && cell.loadingId) {
+                      setCells((current) => current.map((entry) =>
+                        entry.loadingId === cell.loadingId
+                          ? { ...entry, error: false, blocked: false, statusLabel: undefined, phClass: "loading" }
+                          : entry
+                      ));
                       cell.retryFn(cell.loadingId);
                     }
                   }} style={{ cursor: cell.retryFn ? 'pointer' : 'default' }}>
