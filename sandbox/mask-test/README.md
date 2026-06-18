@@ -17,8 +17,7 @@ Use a Gemini API key in the environment:
 
 ```powershell
 $env:GOOGLE_API_KEY="your-key"
-& "C:\Users\This PC\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" .\sandbox\mask-test\run-mask-test.py --input .\sandbox\mask-test\input.png --model "your-image-model-id" --instruction "Remove the white outside background and the horizontal text strip."
+python .\sandbox\mask-test\run-mask-test.py --input .\sandbox\mask-test\input.png --model "your-image-model-id" --instruction "Remove the white outside background and the horizontal text strip."
 ```
 
 The model should be an image-capable Gemini model supported by the same Google endpoint used by the app.
-

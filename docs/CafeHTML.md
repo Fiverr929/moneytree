@@ -369,7 +369,7 @@ No `CafeEntities` registry — direct window globals only.
 
 ## Component Build Process
 
-1. Build every component as a standalone HTML file first in `C:\Users\This PC\Gravity`
+1. Build every component as a standalone HTML file in the local workspace first
 2. User reviews and approves the standalone version
 3. Only then integrate into `CafeHTML-v2.html`
 4. When syncing — do NOT launch explore agents. Grep/Read the target file at insertion points and edit directly.
