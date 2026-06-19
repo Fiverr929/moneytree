@@ -334,12 +334,14 @@ The old `veo-3.1-generate-preview` and `veo-3.1-fast-generate-preview` endpoints
 Current request flow:
 
 1. The browser posts the video request to `POST /api/video/generate`.
-2. The Node.js route creates an Enterprise `GoogleGenAI` client for project `gen-lang-client-0527764010` in `us-central1`.
+2. The Node.js route creates an Enterprise `GoogleGenAI` client using the server-only `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` environment variables.
 3. The route starts generation through `ai.models.generateVideos(...)`, passing `prompt` and optional `image` at the top level.
 4. Poll through `ai.operations.getVideosOperation({ operation })`.
-5. Return inline video bytes to the browser and add the clip to the Video `SEQUENCE` rail.
+5. Stream the MP4 response to the browser and add the clip to the Video `SEQUENCE` rail.
 
 Video generation uses Vertex Enterprise mode and does not use the browser-held image API key. The Next.js server requires Application Default Credentials or `GOOGLE_APPLICATION_CREDENTIALS`; project and location alone do not authenticate the request.
+
+Local Vertex configuration belongs in `.env.local`, which is ignored by Git. `.env.example` contains only placeholder variable names for setup guidance. Deployed environments must configure the same variables through their hosting platform's secret/environment settings.
 
 Supported UI modes:
 

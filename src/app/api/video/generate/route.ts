@@ -10,8 +10,6 @@ import type { VeoGenerationRequest } from "@/lib/video/api";
 export const runtime = "nodejs";
 export const maxDuration = 1200;
 
-const PROJECT = process.env.GOOGLE_CLOUD_PROJECT || "gen-lang-client-0527764010";
-const LOCATION = process.env.GOOGLE_CLOUD_LOCATION || "us-central1";
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLL_TIME_MS = 20 * 60 * 1000;
 const MAX_REQUEST_BYTES = 40 * 1024 * 1024;
@@ -111,6 +109,17 @@ function describeError(error: unknown) {
 
 export async function POST(request: Request) {
   try {
+    const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
+    const location = process.env.GOOGLE_CLOUD_LOCATION?.trim();
+    if (!project || !location) {
+      return NextResponse.json(
+        {
+          error: "Vertex video generation is not configured. Set GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION on the server.",
+        },
+        { status: 503 },
+      );
+    }
+
     const contentLength = Number(request.headers.get("content-length") || 0);
     if (contentLength > MAX_REQUEST_BYTES) {
       return NextResponse.json({ error: "Video generation request is too large." }, { status: 413 });
@@ -119,8 +128,8 @@ export async function POST(request: Request) {
 
     const ai = new GoogleGenAI({
       enterprise: true,
-      project: PROJECT,
-      location: LOCATION,
+      project,
+      location,
       apiVersion: "v1",
     });
     const config: GenerateVideosConfig = {
