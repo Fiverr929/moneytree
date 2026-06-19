@@ -2,17 +2,11 @@
 
 import React, { useState } from "react";
 import { useApp } from "@/context/AppContext";
-import { useSettings, MODELS } from "@/context/SettingsContext";
+import { useSettings } from "@/context/SettingsContext";
 
 export default function SettingsModal() {
   const { settingsOpen, setSettingsOpen } = useApp();
-  const { 
-    googleApiKey, setGoogleApiKey,
-    activeModelKey, setActiveModelKey,
-    activeResolution, setActiveResolution,
-    setThinkingLevel,
-    activeModel, activeThinkingLevel, costPerImage
-  } = useSettings();
+  const { googleApiKey, setGoogleApiKey } = useSettings();
 
   const [apiKeyInput, setApiKeyInput] = useState("");
 
@@ -60,54 +54,6 @@ export default function SettingsModal() {
                   />
                   <button type="button" className="csm-google-save" onClick={handleSaveKey}>Save</button>
                 </div>
-              </div>
-
-              <div className="csm-section">
-                <div className="csm-section-label">Model</div>
-                <div className="csm-model-list">
-                  {Object.keys(MODELS).map(key => {
-                    const m = MODELS[key];
-                    const isActive = key === activeModelKey;
-                    const baseCost = m.costByResolution[m.defaultResolution || ''] || m.costByResolution['default'] || 0;
-                    return (
-                      <div key={key} className={`csm-model-row ${isActive ? 'active' : ''}`} onClick={() => setActiveModelKey(key)}>
-                        <span className="csm-model-label">{m.label}</span>
-                        <span className="csm-model-cost">from ${baseCost.toFixed(3)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="csm-section">
-                <div className="csm-section-label">Resolution</div>
-                <div className="csm-resolution-list">
-                  {activeModel.resolutions.map(res => (
-                    <div key={res} className={`csm-resolution-row ${res === activeResolution ? 'active' : ''}`} onClick={() => setActiveResolution(res)}>
-                      {res === activeResolution && <span className="csm-resolution-check">&#10003;</span>}
-                      {res}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {activeModel.thinkingLevels && activeModel.thinkingLevels.length > 0 && (
-                <div className="csm-section csm-thinking-section">
-                  <div className="csm-section-label">Thinking</div>
-                  <div className="csm-thinking-list">
-                    {activeModel.thinkingLevels.map(level => (
-                      <div key={level} className={`csm-resolution-row ${level === activeThinkingLevel ? 'active' : ''}`} onClick={() => setThinkingLevel(level)}>
-                        {level === activeThinkingLevel && <span className="csm-resolution-check">&#10003;</span>}
-                        {level.charAt(0).toUpperCase() + level.slice(1)}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="csm-cost-display">
-                <span className="csm-cost-label">Estimated Cost</span>
-                <span className="csm-cost-value">${costPerImage.toFixed(3)} per image</span>
               </div>
             </div>
 

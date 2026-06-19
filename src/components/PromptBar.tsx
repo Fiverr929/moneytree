@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, KeyboardEvent } from "react";
 import { useApp } from "@/context/AppContext";
-import { useSettings } from "@/context/SettingsContext";
+import { MODELS, useSettings } from "@/context/SettingsContext";
 import { useGallery, GalleryCell } from "@/context/GalleryContext";
 import { useModule } from "@/context/ModuleContext";
 import { generate, storeGenerationDebug } from "@/lib/pipeline/api";
@@ -223,45 +223,105 @@ export default function PromptBar() {
         </div>
         
         <div className="cmp-menu settings-dropdown" id="settingsDropdown" hidden={!dropdownOpen}>
-          
-          <div className="cmp-menu-title">ASPECT RATIO</div>
-          <>
-            {["1:1", "16:9", "9:16", "3:4"].map((r) => {
-              const labels: Record<string, string> = { "1:1": "SQUARE", "16:9": "LANDSCAPE", "9:16": "PORTRAIT", "3:4": "PORTRAIT" };
-              return (
-                <button
-                  key={r}
-                  className={frameRatio === r ? "active primary" : ""}
-                  onClick={() => setFrameRatio(r)}
-                >
-                  {r} {labels[r]}
-                </button>
-              );
-            })}
-          </>
+          <div className="cmp-menu-title">MODEL</div>
+          {Object.entries(MODELS).map(([modelKey, model]) => (
+            <button
+              key={modelKey}
+              className={settings.activeModelKey === modelKey ? "primary" : ""}
+              type="button"
+              onClick={() => settings.setActiveModelKey(modelKey)}
+            >
+              <span>{model.label}</span>
+            </button>
+          ))}
 
-          <div className="cmp-menu-title" style={{ marginTop: 2, borderTop: '0.756px solid rgba(234,88,35,0.45)' }}>
-            VARIATIONS
-          </div>
-          
-          <div className="cmp-menu-counter" style={{ display: 'flex', alignItems: 'center', padding: '4px 10px', justifyContent: 'space-between', color: '#c7c7c7', fontSize: '9px', letterSpacing: '0.12em' }}>
-            <button 
-              style={{ width: '24px', height: '20px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', color: '#c7c7c7' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                const v = parseInt(frameVar.toString(), 10);
-                if (v > 1) setFrameVar(v - 1);
+          <div className="cmp-menu-title">ASPECT RATIO</div>
+          {settings.activeModel.aspectRatios.map((ratio) => {
+            const labels: Record<string, string> = {
+              "1:1": "SQUARE",
+              "16:9": "LANDSCAPE",
+              "9:16": "PORTRAIT",
+              "4:3": "LANDSCAPE",
+              "3:4": "PORTRAIT",
+            };
+            return (
+              <button
+                key={ratio}
+                className={frameRatio === ratio ? "primary" : ""}
+                type="button"
+                onClick={() => setFrameRatio(ratio)}
+              >
+                <span>{ratio}</span>
+                <span>{labels[ratio]}</span>
+              </button>
+            );
+          })}
+
+          <div className="cmp-menu-title">RESOLUTION</div>
+          {settings.activeModel.resolutions.length ? (
+            <div className="image-settings-options">
+              {settings.activeModel.resolutions.map((resolution) => (
+                <button
+                  key={resolution}
+                  className={settings.activeResolution === resolution ? "primary" : ""}
+                  type="button"
+                  onClick={() => settings.setActiveResolution(resolution)}
+                >
+                  {resolution}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <button className="primary" type="button">
+              <span>DEFAULT</span>
+            </button>
+          )}
+
+          {settings.activeModel.thinkingLevels && settings.activeModel.thinkingLevels.length > 0 && (
+            <>
+              <div className="cmp-menu-title">THINKING</div>
+              <div className="image-settings-options">
+                {settings.activeModel.thinkingLevels.map((level) => (
+                  <button
+                    key={level}
+                    className={settings.thinkingLevel === level ? "primary" : ""}
+                    type="button"
+                    onClick={() => settings.setThinkingLevel(level)}
+                  >
+                    {level.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          <div className="cmp-menu-title">VARIATIONS</div>
+          <div className="image-settings-stepper">
+            <button
+              type="button"
+              title="Decrease variations"
+              disabled={parseInt(frameVar.toString(), 10) <= 1}
+              onClick={() => {
+                const value = parseInt(frameVar.toString(), 10);
+                if (value > 1) setFrameVar(value - 1);
               }}
-            >-</button>
-            <span>{frameVar} IMAGE{parseInt(frameVar.toString(), 10) !== 1 ? "S" : ""}</span>
-            <button 
-              style={{ width: '24px', height: '20px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', color: '#c7c7c7' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                const v = parseInt(frameVar.toString(), 10);
-                if (v < 10) setFrameVar(v + 1);
+            >
+              -
+            </button>
+            <span>
+              {frameVar} IMAGE{parseInt(frameVar.toString(), 10) === 1 ? "" : "S"}
+            </span>
+            <button
+              type="button"
+              title="Increase variations"
+              disabled={parseInt(frameVar.toString(), 10) >= 10}
+              onClick={() => {
+                const value = parseInt(frameVar.toString(), 10);
+                if (value < 10) setFrameVar(value + 1);
               }}
-            >+</button>
+            >
+              +
+            </button>
           </div>
         </div>
       </div>

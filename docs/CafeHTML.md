@@ -8,7 +8,7 @@
 
 A structured AI media creation pipeline. Not a prompt box — a reference-based generation system where the user builds a scene from real images and the system writes the generation brief automatically.
 
-Current scope: Image generation (FRAME mode). Video, Audio, Timeline are future tabs.
+Current scope: Image generation (FRAME mode) and the initial Video workspace. Audio and the full Timeline remain future tabs.
 
 ---
 
@@ -317,6 +317,53 @@ Enhancer model: `gemini-2.5-flash` (text + vision, not an image model)
 
 ---
 
+## Video Generation
+
+The Next.js Video tab lives at `src/app/video/page.tsx`. Its API client is `src/lib/video/api.ts`.
+
+Verified Gemini API Veo model IDs:
+
+| Label | Model ID | Stage | Resolutions | Reference assets |
+|---|---|---|---|---|
+| VEO 3.1 | `veo-3.1-generate-001` | GA | 720p, 1080p | Up to 3 |
+| VEO 3.1 FAST | `veo-3.1-fast-generate-001` | GA | 720p, 1080p | Up to 3 |
+| VEO 3.1 LITE | `veo-3.1-lite-generate-001` | Preview | 720p, 1080p | Not supported |
+
+The old `veo-3.1-generate-preview` and `veo-3.1-fast-generate-preview` endpoints were discontinued on April 2, 2026. Google directs those workflows to the corresponding `-001` models.
+
+Current request flow:
+
+1. The browser posts the video request to `POST /api/video/generate`.
+2. The Node.js route creates an Enterprise `GoogleGenAI` client for project `gen-lang-client-0527764010` in `us-central1`.
+3. The route starts generation through `ai.models.generateVideos(...)`, passing `prompt` and optional `image` at the top level.
+4. Poll through `ai.operations.getVideosOperation({ operation })`.
+5. Return inline video bytes to the browser and add the clip to the Video `SEQUENCE` rail.
+
+Video generation uses Vertex Enterprise mode and does not use the browser-held image API key. The Next.js server requires Application Default Credentials or `GOOGLE_APPLICATION_CREDENTIALS`; project and location alone do not authenticate the request.
+
+Supported UI modes:
+
+- `FRAMES`: start frame plus optional end frame.
+- `REFERENCES`: up to the selected model's reference-asset limit; currently 3 for VEO 3.1 and FAST.
+- Reference-image generation requires 8 seconds.
+- Supported durations are 4, 6, and 8 seconds.
+- Supported aspect ratios are 16:9 and 9:16.
+- Maximum output videos per prompt is 4.
+
+Generated video persistence:
+
+- The `videos` IndexedDB store contains project-scoped MP4 blobs and clip metadata.
+- Each record stores its prompt, model, duration, creation time, and sequence order.
+- The Video page restores the active project's clips after reload or project switching.
+- The MEDIA panel exposes the same records through a `VIDEO` folder; the folder and sequence do not duplicate the video binary.
+- Reordering and deleting sequence clips updates the persistent records.
+- Project deletion cascades through the `videos` store.
+- Runtime playback uses temporary blob URLs, which are revoked when clips are removed, projects change, or the page closes.
+
+Official source: `https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/veo/3-1-generate`
+
+---
+
 ## Provider
 
 Google Vertex AI Express mode through the official `@google/genai` SDK. The current browser-held API key is passed to `GoogleGenAI({ vertexai: true, apiKey, apiVersion: "v1" })`. fal.ai has been removed entirely.
@@ -350,9 +397,8 @@ No `CafeEntities` registry — direct window globals only.
 
 ## Future Components (not built)
 
-- **Video Tab** — receives Sequence Bar frames, sends to video generation models
 - **Audio Tab** — scoring, voiceover, sound design
-- **Timeline Tab** — final assembly
+- **Timeline Tab** — full editing, trimming, transitions, and final assembly
 - **SCENE mode** — shot-by-shot video pipeline
 
 ---
@@ -617,7 +663,8 @@ Orange = active, expanded. `.collapsed` rotates arrow −90°. Collapsing hides 
 
 | 2026-05-28 | Module Panel S-C redesign | Visible module UI is now the image-reference manager with loose images, preset folders, per-image mode/strength/state, Image Inspector, row/inspector `...` action menus, and `cafeModule` persistence. Legacy `subject/stage/style` snapshots are generated as a PromptBuilder compatibility bridge. |
 | 2026-06-05 | Next.js migration baseline | Current implementation now lives in `src/` as a Next.js / React app. Legacy HTML docs remain useful for product architecture, but file paths and `window.*` implementation contracts are historical unless mirrored in `src/components`, `src/context`, or `src/lib/pipeline`. |
+| 2026-06-19 | Current Veo 3.1 model IDs | Video generation uses `veo-3.1-generate-001`, `veo-3.1-fast-generate-001`, and `veo-3.1-lite-generate-001`. The Standard and Fast preview endpoints were discontinued on April 2, 2026. |
 
 ---
 
-*Last updated: 2026-05-28*
+*Last updated: 2026-06-19*

@@ -11,6 +11,7 @@ const S = {
   REFERENCES: 'references',
   GALLERY: 'gallery',
   IMAGES: 'images',
+  VIDEOS: 'videos',
   DESCRIPTIONS: 'descriptions',
   STUDIO_STATE: 'studio-state'
 };
@@ -32,10 +33,12 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
                          !db.objectStoreNames.contains(S.REFERENCES) ||
                          !db.objectStoreNames.contains(S.GALLERY) ||
                          !db.objectStoreNames.contains(S.IMAGES) ||
+                         !db.objectStoreNames.contains(S.VIDEOS) ||
                          !db.objectStoreNames.contains(S.DESCRIPTIONS) ||
                          !hasIndex(S.PROJECTS, 'by_modified') ||
                          !hasIndex(S.REFERENCES, 'by_project') ||
-                         !hasIndex(S.GALLERY, 'by_project');
+                         !hasIndex(S.GALLERY, 'by_project') ||
+                         !hasIndex(S.VIDEOS, 'by_project');
     db.close();
 
     const targetVersion = needsUpgrade ? currentVersion + 1 : currentVersion;
@@ -70,6 +73,13 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
         if (!gs.indexNames.contains('by_project')) gs.createIndex('by_project', 'project_id');
       }
       if (!db2.objectStoreNames.contains(S.IMAGES)) db2.createObjectStore(S.IMAGES, { keyPath: 'uuid' });
+      if (!db2.objectStoreNames.contains(S.VIDEOS)) {
+        const vs = db2.createObjectStore(S.VIDEOS, { keyPath: 'id' });
+        vs.createIndex('by_project', 'project_id');
+      } else {
+        const vs = e2.target.transaction.objectStore(S.VIDEOS);
+        if (!vs.indexNames.contains('by_project')) vs.createIndex('by_project', 'project_id');
+      }
       if (!db2.objectStoreNames.contains(S.DESCRIPTIONS)) db2.createObjectStore(S.DESCRIPTIONS, { keyPath: 'uuid' });
     };
 
@@ -127,6 +137,7 @@ async function deleteProjectCascade(id: number) {
       S.REFERENCES,
       S.GALLERY,
       S.IMAGES,
+      S.VIDEOS,
       S.DESCRIPTIONS,
       S.STUDIO_STATE,
     ],
@@ -148,6 +159,7 @@ async function deleteProjectCascade(id: number) {
 
   deleteProjectRecordsByIndex(transaction.objectStore(S.REFERENCES), id);
   deleteProjectRecordsByIndex(transaction.objectStore(S.GALLERY), id);
+  deleteProjectRecordsByIndex(transaction.objectStore(S.VIDEOS), id);
   transaction.objectStore(S.SETTINGS).delete(id);
   transaction.objectStore(S.MODULE_STATE).delete(id);
   transaction.objectStore(S.STUDIO_STATE).delete(id);
@@ -187,6 +199,25 @@ const images = {
   delete: (uuid: string) => ready.then(() => wrap(tx(S.IMAGES, 'readwrite').objectStore(S.IMAGES).delete(uuid)))
 };
 
+const videos = {
+  getByProject: (projectId: number) => ready.then(() => {
+    const idx = tx(S.VIDEOS).objectStore(S.VIDEOS).index('by_project');
+    return wrap(idx.getAll(projectId));
+  }),
+  put: (data: any) => ready.then(() =>
+    wrap(tx(S.VIDEOS, 'readwrite').objectStore(S.VIDEOS).put(data))
+  ),
+  putMany: (records: any[]) => ready.then(async () => {
+    const transaction = tx(S.VIDEOS, 'readwrite');
+    const store = transaction.objectStore(S.VIDEOS);
+    records.forEach((record) => store.put(record));
+    await transactionDone(transaction);
+  }),
+  delete: (id: string) => ready.then(() =>
+    wrap(tx(S.VIDEOS, 'readwrite').objectStore(S.VIDEOS).delete(id))
+  ),
+};
+
 const studioState = {
   get: (projectId: number) => ready.then(() => wrap(tx(S.STUDIO_STATE).objectStore(S.STUDIO_STATE).get(projectId))),
   save: (projectId: number, data: any) => ready.then(() => 
@@ -219,7 +250,7 @@ const descriptions = {
   )
 };
 
-const DB = { ready, projects, images, studioState, gallery, references, descriptions };
+const DB = { ready, projects, images, videos, studioState, gallery, references, descriptions };
 export default DB;
 
 
