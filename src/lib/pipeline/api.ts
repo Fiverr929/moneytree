@@ -19,6 +19,7 @@ import {
 } from './generation-debug';
 import {
   describeReferenceStrength,
+  getStrengthBand,
   normalizeStrength,
   type ReferenceRole
 } from './strength';
@@ -258,6 +259,26 @@ function describeRoleInstruction(role: ReferenceRole) {
   return instructions[role];
 }
 
+function describeSubjectInstruction(
+  imageNumber: number,
+  label: string,
+  strength: unknown
+) {
+  const focus = label && label !== 'UNASSIGNED'
+    ? `, with particular attention to "${label}"`
+    : '';
+
+  const instructions = {
+    trace: `Take only faint inspiration from the subject in Image ${imageNumber}${focus}; keep the final subject otherwise flexible.`,
+    subtle: `Use Image ${imageNumber} as light subject inspiration${focus}; borrow a few recognizable qualities while keeping identity and details flexible.`,
+    standard: `Use Image ${imageNumber} as the main subject reference${focus}; carry over its recognizable identity and important visible details while adapting it naturally to the task.`,
+    strong: `Closely follow the subject in Image ${imageNumber}${focus}; preserve its identity, silhouette, proportions, and important visible details unless the task asks for a change.`,
+    locked: `Treat the subject in Image ${imageNumber} as near-locked${focus}; preserve its identity and visible details as faithfully as possible except where the task explicitly requests a change.`
+  };
+
+  return instructions[getStrengthBand(strength)];
+}
+
 export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, any>[]) {
   const task = rawPrompt.trim() || 'Create one finished image from the provided references.';
   const lines = ['Task:', task];
@@ -267,6 +288,10 @@ export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, 
     imageFiles.forEach((file, index) => {
       const label = file.label || file.name || 'UNASSIGNED';
       const role = normalizeRole(file);
+      if (role === 'SUBJECT') {
+        lines.push(describeSubjectInstruction(index + 1, label, file.strength));
+        return;
+      }
       lines.push(`Image ${index + 1} - ${label}`);
       lines.push(`Role: ${role}`);
       lines.push(describeRoleInstruction(role));
