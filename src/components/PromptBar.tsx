@@ -93,7 +93,7 @@ export default function PromptBar() {
   }, [activeProjectId, draftProjectId, promptText]);
 
   const handleGenerate = async () => {
-    if (activeGenerationCount > 0 || !activeProjectId) return;
+    if (!activeProjectId) return;
     if (!settings.googleApiKey.trim()) {
       setSettingsOpen(true);
       setDropdownOpen(false);
@@ -373,7 +373,7 @@ export default function PromptBar() {
           className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`}
           id="generateBtn"
           type="button"
-          disabled={activeGenerationCount > 0 || !activeProjectId}
+          disabled={!activeProjectId}
           onClick={handleGenerate}
         >
           FRAME

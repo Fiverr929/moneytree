@@ -13,6 +13,40 @@ Track component work, decisions, and session continuations here.
 ---
 
 ## Sessions
+### 2026-06-20 - Subject Strength Evaluation and Research Export
+
+**Status:** COMPLETED
+
+**What Was Done:**
+- Added Subject-only dynamic prompt wording across five strength bands and versioned new records as `subject-v1-strength`.
+- Kept Scene and Style prompt behavior unchanged.
+- Removed the cross-run FRAME button lock so consecutive generation batches can run while prior batches are active.
+- Added a HUD star action and centered evaluation dialog with Task, Subject, Label, and Strength ratings plus comments.
+- Added a debounced queue so consecutive completed generations are evaluated one at a time; ratings persist in IndexedDB.
+- Added rated-only research export through `POST /api/evaluations/export`.
+- Local exports write `latest.jsonl`, `latest-report.md`, and timestamped history files under ignored `evaluation-exports/`.
+- Export records exclude image data, API keys, and unrated generations.
+
+**Initial Findings:**
+- Five rated `FASHION` tests averaged Task 3.20, Subject 4.00, Label 4.00, and Strength 4.40.
+- 24% was too weak, 76% gave the best balance, and 100% moved toward reference copying.
+- Unrequested backgrounds, props, and clothing additions were the repeated failure.
+- The next Subject compiler should interpret labels as narrower targets and add a default policy for unrequested scene content.
+
+**Files Touched:**
+- `.gitignore`
+- `src/app/api/evaluations/export/route.ts`
+- `src/app/globals.css`
+- `src/app/page.tsx`
+- `src/components/EvaluationDialog.tsx`
+- `src/components/HUD.tsx`
+- `src/components/ProjectsModal.tsx`
+- `src/components/PromptBar.tsx`
+- `src/context/GalleryContext.tsx`
+- `src/lib/evaluationExport.ts`
+- `src/lib/pipeline/api.ts`
+- `docs/CafeHTML.md`
+- `docs/log.md`
 
 ### 2026-06-17 - Module Order + Prompt Cleanup
 

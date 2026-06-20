@@ -59,6 +59,44 @@ Docs: `docs/` folder
 
 The current transport uses the official SDK in Vertex Express mode. HTTP 429 responses are not retried automatically; the Gallery exposes an in-memory manual retry instead.
 
+## Subject Prompt Evaluation System
+
+The active Subject compiler is versioned as `subject-v1-strength`.
+
+- Subject prompt wording is selected from five strength bands: trace, subtle, standard, strong, and locked.
+- The image label is included as the requested focus, while Scene and Style still use their fixed role instructions.
+- Strength currently changes prompt language only; the Gemini API does not receive a separate numeric image-weight parameter.
+- New generated gallery records store the pipeline version, model ID, generation settings, effective prompt, references, and optional evaluation.
+
+Completed generations enter a debounced evaluation queue. The HUD star opens the same evaluator manually; an empty star means unrated and a filled orange star means rated. Evaluation fields are:
+
+- Task match: 1-5
+- Subject match: 1-5
+- Label match: 1-5 or N/A
+- Strength match: 1-5
+- Free-text comment
+
+Evaluations persist on the gallery record in IndexedDB. Project `EXPORT EVALUATIONS` sends rated records only to `POST /api/evaluations/export`. The Node route writes local research files under the ignored `evaluation-exports/` directory:
+
+```
+evaluation-exports/
+  latest.jsonl
+  latest-report.md
+  history/<timestamp>.jsonl
+  history/<timestamp>-report.md
+```
+
+Exports contain prompts, pipeline/model/settings metadata, reference role/label/strength, result metadata, ratings, and comments. They exclude API keys, image base64/data URLs, and unrated generations.
+
+Initial `subject-v1-strength` evaluation (five rated generations using the `FASHION` label) found:
+
+- 24% subtle influence was too weak for Subject and Label matching.
+- 76% strong influence produced the best overall balance.
+- 100% locked influence approached reference copying and reduced Task Match.
+- Unrequested backgrounds, props, and wardrobe additions were the repeated failure.
+- The next Subject revision should translate labels into narrower targets and define a policy for scene/prop invention when the task does not request them.
+
+---
 ## Legacy Generation Pipeline
 
 ```

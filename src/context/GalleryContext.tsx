@@ -6,6 +6,15 @@ import { useApp } from "@/context/AppContext";
 import type { ModuleFile } from "@/context/ModuleContext";
 import type { StrengthBand } from "@/lib/pipeline/strength";
 export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string; strength?: number; strengthBand?: StrengthBand };
+export type EvaluationScore = 1 | 2 | 3 | 4 | 5;
+export type GenerationEvaluation = {
+  taskMatch: EvaluationScore;
+  subjectMatch: EvaluationScore;
+  labelMatch: EvaluationScore | null;
+  strengthMatch: EvaluationScore;
+  comment: string;
+  evaluatedAt: string;
+};
 export type GalleryCell = {
   id: number;
   project_id?: number;
@@ -30,6 +39,15 @@ export type GalleryCell = {
   mode?: string;
   moduleSnapshot?: { files: ModuleFile[] };
   usedImages?: GalleryImageUse[];
+  pipelineVersion?: string;
+  model?: string;
+  modelId?: string;
+  generationSettings?: {
+    aspectRatio?: string;
+    imageSize?: string;
+    thinkingLevel?: string | null;
+  };
+  evaluation?: GenerationEvaluation;
   // Internal state for pending loads
   loadingId?: string;
   blocked?: boolean;
@@ -69,6 +87,12 @@ interface GalleryContextType {
   failLoading: (id: string, retryFn?: (newId: string) => void, statusLabel?: string) => void;
   blockLoading: (id: string, statusLabel?: string) => void;
   addCell: (cell: GalleryCell) => void;
+  evaluationTargetId: number | null;
+  evaluationQueueLength: number;
+  openEvaluation: (cellId: number) => void;
+  closeEvaluationQueue: () => void;
+  skipEvaluation: (cellId: number) => void;
+  saveEvaluation: (cellId: number, evaluation: GenerationEvaluation) => Promise<void>;
 }
 
 const GalleryContext = createContext<GalleryContextType | undefined>(undefined);
@@ -85,8 +109,15 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
   const [hudOpen, setHudOpen] = useState(false);
   const [hudIndex, setHudIndex] = useState(0);
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
+  const [evaluationQueue, setEvaluationQueue] = useState<number[]>([]);
+  const [evaluationTargetId, setEvaluationTargetId] = useState<number | null>(null);
+  const evaluationTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { activeProjectId } = useApp();
+
+  const scheduleEvaluation = (cellId: number) => {
+    setEvaluationQueue((current) => current.includes(cellId) ? current : [...current, cellId]);
+  };
 
   const normalizeCell = (cell: GalleryCell): GalleryCell => {
     const effectivePrompt = cell.effectivePrompt || cell.prompt;
@@ -150,6 +181,27 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
     };
   }, [activeProjectId]);
 
+  useEffect(() => () => {
+    if (evaluationTimerRef.current) clearTimeout(evaluationTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (evaluationTargetId !== null || !evaluationQueue.length) return;
+    if (evaluationTimerRef.current) clearTimeout(evaluationTimerRef.current);
+    evaluationTimerRef.current = setTimeout(() => {
+      setEvaluationTargetId(evaluationQueue[0]);
+    }, 900);
+    return () => {
+      if (evaluationTimerRef.current) clearTimeout(evaluationTimerRef.current);
+    };
+  }, [evaluationQueue, evaluationTargetId]);
+
+  useEffect(() => {
+    setEvaluationQueue([]);
+    setEvaluationTargetId(null);
+    if (evaluationTimerRef.current) clearTimeout(evaluationTimerRef.current);
+  }, [activeProjectId]);
+
   const persistCell = async (cell: GalleryCell) => {
     const projectId = cell.project_id || activeProjectId;
     if (!projectId || !cell.uuid || !cell.imgUrl) return;
@@ -189,6 +241,7 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
       : c
     ));
     void persistCell(normalized).catch((error) => console.error("Failed to persist generated image", error));
+    scheduleEvaluation(normalized.id);
   };
 
   const failLoading = (id: string, retryFn?: (newId: string) => void, statusLabel = "FAILED") => {
@@ -205,6 +258,45 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
     void persistCell(normalized).catch((error) => console.error("Failed to persist gallery image", error));
   };
 
+  const advanceEvaluationQueue = (cellId: number) => {
+    setEvaluationQueue((current) => {
+      const remaining = current.filter((id) => id !== cellId);
+      setEvaluationTargetId(remaining[0] ?? null);
+      return remaining;
+    });
+  };
+
+  const openEvaluation = (cellId: number) => {
+    setEvaluationQueue((current) => current.includes(cellId) ? current : [cellId, ...current]);
+    setEvaluationTargetId(cellId);
+  };
+
+  const closeEvaluationQueue = () => {
+    setEvaluationQueue([]);
+    setEvaluationTargetId(null);
+  };
+
+  const skipEvaluation = (cellId: number) => {
+    advanceEvaluationQueue(cellId);
+  };
+
+  const saveEvaluation = async (cellId: number, evaluation: GenerationEvaluation) => {
+    const cell = cells.find((entry) => entry.id === cellId);
+    if (!cell) return;
+    const updated = { ...cell, evaluation };
+    setCells((current) => current.map((entry) => entry.id === cellId ? updated : entry));
+    const projectId = updated.project_id || activeProjectId;
+    if (projectId) {
+      await DB.gallery.put({
+        ...updated,
+        project_id: projectId,
+        loadingId: undefined,
+        retryFn: undefined,
+      });
+    }
+    advanceEvaluationQueue(cellId);
+  };
+
   return (
     <GalleryContext.Provider
       value={{
@@ -217,7 +309,8 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
         hudOpen, setHudOpen,
         hudIndex, setHudIndex,
         infoPanelOpen, setInfoPanelOpen,
-        addLoading, resolveLoading, failLoading, blockLoading, addCell
+        addLoading, resolveLoading, failLoading, blockLoading, addCell,
+        evaluationTargetId, evaluationQueueLength: evaluationQueue.length, openEvaluation, closeEvaluationQueue, skipEvaluation, saveEvaluation
       }}
     >
       {children}

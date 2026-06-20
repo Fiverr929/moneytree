@@ -24,6 +24,8 @@ import {
   type ReferenceRole
 } from './strength';
 
+export const IMAGE_PIPELINE_VERSION = 'subject-v1-strength';
+
 function parseDataUrl(dataUrl: string) {
   const base64 = dataUrl.split(',')[1];
   const mimeMatch = dataUrl.match(/^data:([^;]+);/);
@@ -387,7 +389,14 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
         cost: settings.costPerImage || 0,
         generated: true,
         moduleSnapshot: payload.moduleSnapshot || null,
-        usedImages: payload.usedImages || []
+        usedImages: payload.usedImages || [],
+        pipelineVersion: IMAGE_PIPELINE_VERSION,
+        modelId: model?.id,
+        generationSettings: {
+          aspectRatio: ratio,
+          imageSize,
+          thinkingLevel: thinkingLevel || null
+        }
       };
     }
 

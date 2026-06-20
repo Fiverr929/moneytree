@@ -5,6 +5,7 @@ import TitleBar from "@/components/TitleBar";
 import ModulePanel from "@/components/ModulePanel";
 import ProjectsModal from "@/components/ProjectsModal";
 import SettingsModal from "@/components/SettingsModal";
+import EvaluationDialog from "@/components/EvaluationDialog";
 
 export default function Home() {
   return (
@@ -16,6 +17,7 @@ export default function Home() {
       <ModulePanel />
       <ProjectsModal />
       <SettingsModal />
+      <EvaluationDialog />
     </>
   );
 }

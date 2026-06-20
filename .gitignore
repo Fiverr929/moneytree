@@ -55,3 +55,6 @@ mingit.zip
 /sandbox/mask-test/preview-*.png
 /transparent-bg-and-strip*.png
 /transparent-checker*.png
+
+# local generation evaluation research
+/evaluation-exports/

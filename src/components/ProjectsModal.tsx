@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
+import { useGallery } from "@/context/GalleryContext";
+import { exportGenerationEvaluations } from "@/lib/evaluationExport";
 
 type ProjectListItem = {
   id: number;
@@ -23,6 +25,9 @@ export default function ProjectsModal() {
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [newProjectName, setNewProjectName] = useState("New Project");
+  const [exportStatus, setExportStatus] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const { cells } = useGallery();
 
   const loadProjects = () => {
     setLoading(true);
@@ -67,6 +72,25 @@ export default function ProjectsModal() {
   const openCreate = () => {
     setNewProjectName("New Project");
     setProjectCreateOpen(true);
+  };
+
+  const handleExportEvaluations = async () => {
+    if (!activeProjectId || exporting) return;
+    setExporting(true);
+    setExportStatus("");
+    try {
+      const project = await DB.projects.get(activeProjectId) as ProjectListItem | undefined;
+      const result = await exportGenerationEvaluations(cells, {
+        id: activeProjectId,
+        name: project?.name || "Project",
+      });
+      setExportStatus(`${result.count} records saved`);
+    } catch (error) {
+      console.error("Failed to export evaluations", error);
+      setExportStatus(error instanceof Error ? error.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleDelete = async (id: number, e: React.MouseEvent) => {
@@ -143,9 +167,10 @@ export default function ProjectsModal() {
             <>
               <button className="pm-foot-btn" onClick={openCreate}>New</button>
               <span className="pm-foot-divider">&middot;</span>
-              <button className="pm-foot-btn" onClick={() => console.info("Export not implemented")}>Export</button>
+              <button className="pm-foot-btn" disabled={exporting} onClick={handleExportEvaluations}>{exporting ? "Exporting" : "Export evaluations"}</button>
               <span className="pm-foot-divider">&middot;</span>
               <button className="pm-foot-btn" onClick={() => console.info("Import not implemented")}>Import</button>
+              {exportStatus && <span className="pm-export-status" title={exportStatus}>{exportStatus}</span>}
             </>
           )}
         </div>
