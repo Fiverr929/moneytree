@@ -1211,3 +1211,22 @@ Implemented the new CafeHTML Module Panel design from the S-C handoff as a vanil
 - Excluded loading, blocked, and failed Gallery cells from HUD opening, slides, navigation, and counters through one shared image-cell eligibility rule.
 - Split SDK transport and debug storage out of `pipeline/api.ts`, fixed stale project-load races, bound async generation results to their launch project, made Gallery/module persistence failures observable, repaired manual retry loading state, and added transactional project-delete cascading.
 - Removed automatic HTTP 429 retries. Quota failures now keep an in-memory per-image retry closure and render the existing Gallery `RETRY` action without a duplicate batch alert or persisted retry state.
+### 2026-06-20 - Video Workspace and Sequence UX
+
+**Status:** COMPLETED
+
+- Reworked responsive video layout so the playback strip and lower controls remain visible during vertical resizing.
+- Added square sequence clips with hover-only remove controls.
+- Split sequence removal from video-library deletion.
+- Added persistent drag-and-drop from the VIDEO folder into and within the sequence.
+- Tightened prompt, gallery, upload, and project-switch behavior included in the current Next.js change set.
+
+**Files Touched:**
+- `src/app/video/page.tsx`
+- `src/app/globals.css`
+- `src/components/Gallery.tsx`
+- `src/components/PromptBar.tsx`
+- `docs/CafeHTML.md`
+- `docs/log.md`
+
+---

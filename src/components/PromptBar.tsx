@@ -19,6 +19,7 @@ export default function PromptBar() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [activeGenerationCount, setActiveGenerationCount] = useState(0);
+  const [generationError, setGenerationError] = useState("");
   
   // Prompt settings state
   const [frameRatio, setFrameRatio] = useState("1:1");
@@ -28,6 +29,7 @@ export default function PromptBar() {
   const [promptText, setPromptText] = useState("");
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [draftProjectId, setDraftProjectId] = useState<number | null>(null);
   const inputRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on click outside
@@ -69,25 +71,29 @@ export default function PromptBar() {
   }, [promptText]);
 
   useEffect(() => {
+    setDraftProjectId(null);
+    setGenerationError("");
     try {
-      const savedDraft = window.localStorage.getItem(PROMPT_DRAFT_STORAGE_KEY);
-      if (savedDraft !== null) {
-        setPromptText(savedDraft);
-      }
+      const savedDraft = window.localStorage.getItem(`${PROMPT_DRAFT_STORAGE_KEY}:${activeProjectId || "none"}`);
+      setPromptText(savedDraft || "");
     } catch {
+      setPromptText("");
       // Ignore storage access issues in embedded browsers.
     }
-  }, []);
+    setDraftProjectId(activeProjectId);
+  }, [activeProjectId]);
 
   useEffect(() => {
+    if (!activeProjectId || draftProjectId !== activeProjectId) return;
     try {
-      window.localStorage.setItem(PROMPT_DRAFT_STORAGE_KEY, promptText);
+      window.localStorage.setItem(`${PROMPT_DRAFT_STORAGE_KEY}:${activeProjectId}`, promptText);
     } catch {
       // Ignore storage access issues in embedded browsers.
     }
-  }, [promptText]);
+  }, [activeProjectId, draftProjectId, promptText]);
 
   const handleGenerate = async () => {
+    if (activeGenerationCount > 0 || !activeProjectId) return;
     if (!settings.googleApiKey.trim()) {
       setSettingsOpen(true);
       setDropdownOpen(false);
@@ -95,6 +101,11 @@ export default function PromptBar() {
     }
 
     const trimmed = promptText.trim();
+    if (!trimmed && moduleContext.files.length === 0) {
+      setGenerationError("Add a prompt or at least one module image.");
+      return;
+    }
+    setGenerationError("");
     if (trimmed && promptHistory[0] !== trimmed) {
       setPromptHistory([trimmed, ...promptHistory]);
     }
@@ -139,7 +150,7 @@ export default function PromptBar() {
     setActiveGenerationCount((count) => count + 1);
     try {
       await generate(payload, fullSettings, settings.googleApiKey, {
-        onStart: (count) => console.log('Starting generation of', count, 'images...'),
+        onStart: () => {},
         onLoadingIds: (ids) => {
           ids.forEach(id => gallery.addLoading(
             id,
@@ -166,9 +177,13 @@ export default function PromptBar() {
         onComplete: () => {},
         onError: (err) => {
           console.error('Generation Error:', err);
-          alert(`Generation Failed: ${err.message}`);
+          setGenerationError(err.message || "Image generation failed.");
         }
       }, moduleContext.files);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Image generation failed.";
+      setGenerationError(message);
+      console.error("Generation Error:", error);
     } finally {
       setActiveGenerationCount((count) => Math.max(0, count - 1));
     }
@@ -206,21 +221,26 @@ export default function PromptBar() {
 
   return (
     <div className="prompt-bar" id="promptBar" data-state="FRAME">
-      <div 
+      <button
         className="btn-upload-ref" 
         id="moduleQuickUpload" 
+        type="button"
         title="Add module image"
+        aria-label="Add module image"
         onClick={() => document.getElementById("mp-file-input")?.click()}
-      ></div>
+      ></button>
       
       <div className="settings-anchor" ref={dropdownRef}>
-        <div 
+        <button
           className={`btn-settings ${dropdownOpen ? "open" : ""}`} 
           id="settingsBtn"
+          type="button"
+          title="Image settings"
+          aria-label="Image settings"
           onClick={() => setDropdownOpen(!dropdownOpen)}
         >
           <img src="assets/icon-settings.svg" alt="settings" />
-        </div>
+        </button>
         
         <div className="cmp-menu settings-dropdown" id="settingsDropdown" hidden={!dropdownOpen}>
           <div className="cmp-menu-title">MODEL</div>
@@ -326,20 +346,38 @@ export default function PromptBar() {
         </div>
       </div>
 
+      {generationError && (
+        <button
+          className="prompt-inline-error"
+          type="button"
+          title={generationError}
+          onClick={() => setGenerationError("")}
+        >
+          {generationError}
+        </button>
+      )}
       <div className="prompt-input-area">
         <div 
           className={`prompt-text-field ${promptText === "" ? "has-placeholder" : ""}`} 
           id="promptText" 
           contentEditable="true"
+          role="textbox"
+          aria-label="Image prompt"
           data-placeholder={placeholderText}
           ref={inputRef}
           onInput={(e) => setPromptText(e.currentTarget.textContent || "")}
           onKeyDown={handleKeyDown}
           suppressContentEditableWarning={true}
         ></div>
-        <div className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`} id="generateBtn" onClick={handleGenerate}>
+        <button
+          className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`}
+          id="generateBtn"
+          type="button"
+          disabled={activeGenerationCount > 0 || !activeProjectId}
+          onClick={handleGenerate}
+        >
           FRAME
-        </div>
+        </button>
       </div>
     </div>
   );

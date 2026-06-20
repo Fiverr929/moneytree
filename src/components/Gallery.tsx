@@ -45,6 +45,13 @@ export default function Gallery() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setThreeDotDropdownOpen(false);
+    setHudOpen(false);
+  }, [activeProjectId, setHudOpen, setSelectMode, setSelectedIds]);
+
   // Filter and Sort Cells
   const filteredCells = cells.filter(cell => {
     if (ratioFilter === 'landscape') return ['16:9', '21:9', '4:3'].includes(cell.ratio);
@@ -119,6 +126,25 @@ export default function Gallery() {
     setThreeDotDropdownOpen(false);
   };
 
+  const handleDownloadSelected = () => {
+    const selected = visibleCells.filter((cell) => selectedIds.has(cell.id) && !!cell.imgUrl);
+    selected.forEach((cell, index) => {
+      const mimeType = cell.imgUrl?.match(/^data:(image\/[^;,]+)/i)?.[1]?.toLowerCase();
+      const extension = mimeType === "image/jpeg"
+        ? "jpg"
+        : mimeType === "image/webp"
+          ? "webp"
+          : "png";
+      const link = document.createElement("a");
+      link.href = cell.imgUrl!;
+      link.download = `cafehtml-image-${String(index + 1).padStart(2, "0")}.${extension}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    });
+    setThreeDotDropdownOpen(false);
+  };
+
   const hasSelected = selectedIds.size > 0;
   const isFilterActive = sortOrder === "oldest" || ratioFilter !== "all";
 
@@ -136,7 +162,7 @@ export default function Gallery() {
           </button>
           <div className={`cmp-menu gallery-action-menu ${threeDotDropdownOpen ? "open" : ""}`} id="threedot-dropdown" hidden={!threeDotDropdownOpen}>
             <div className="cmp-menu-title">SELECTED</div>
-            <button id="ddrop-download" disabled={!hasSelected}>DOWNLOAD</button>
+            <button id="ddrop-download" disabled={!hasSelected} onClick={handleDownloadSelected}>DOWNLOAD</button>
             <div className="cafe-menu-divider"></div>
             <button id="ddrop-duplicate" disabled={!hasSelected} onClick={handleDuplicateSelected}>DUPLICATE</button>
             <button className="danger" id="ddrop-delete" disabled={!hasSelected} onClick={handleDeleteSelected}>DELETE</button>

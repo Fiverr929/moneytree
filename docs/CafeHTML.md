@@ -669,4 +669,13 @@ Orange = active, expanded. `.collapsed` rotates arrow −90°. Collapsing hides 
 
 ---
 
-*Last updated: 2026-06-19*
+*Last updated: 2026-06-20*
+## Video Workspace Update — 2026-06-20
+
+- Responsive video workspace keeps the playback controls, sequence, and prompt controls visible while the preview contracts.
+- Sequence thumbnails are square; remove controls appear on hover or keyboard focus.
+- Removing a sequence clip detaches it without deleting the stored video.
+- Videos can be dragged from the VIDEO folder into the sequence, appended on empty space, or inserted before an existing clip.
+- Sequence membership and ordering persist per project.
+
+*Last updated: 2026-06-20*
