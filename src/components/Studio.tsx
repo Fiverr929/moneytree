@@ -4,7 +4,6 @@ import React, { useCallback, useRef, useEffect, useState } from "react";
 import { useStudio } from "@/context/StudioContext";
 import { useSettings } from "@/context/SettingsContext";
 import { useGallery, type GalleryImageUse } from "@/context/GalleryContext";
-import { useApp } from "@/context/AppContext";
 import { studioGenerate } from "@/lib/pipeline/api";
 import StudioModule from "./StudioModule";
 
@@ -46,8 +45,7 @@ export default function Studio() {
   } = useStudio();
   
   const { addCell } = useGallery();
-  const { googleApiKey, activeModel } = useSettings();
-  const { setSettingsOpen } = useApp();
+  const { activeModel } = useSettings();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -302,10 +300,6 @@ export default function Studio() {
 
   const handleRefine = () => {
     if (!activeUrl || !activeModel) return;
-    if (!googleApiKey.trim()) {
-      setSettingsOpen(true);
-      return;
-    }
     
     const parsedCommand = parseStudioPromptCommand(prompt);
     if (parsedCommand.kind === "invalid-upscale") {
@@ -353,7 +347,6 @@ export default function Studio() {
 
         const generatedUrl = await studioGenerate({
           modelId: activeModel.id,
-          apiKey: googleApiKey,
           prompt: currentPrompt,
           baseImageUrl: currentActiveUrl,
           annotationImageUrl: isUpscale ? undefined : annotationImageUrl,

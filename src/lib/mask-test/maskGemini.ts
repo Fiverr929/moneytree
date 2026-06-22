@@ -1,6 +1,5 @@
 import type { Part } from "@google/genai";
 import {
-  createGenAIClient,
   GENERATION_SAFETY_SETTINGS,
   sendGenerationRequest,
   type GenAIRequest,
@@ -18,7 +17,6 @@ function parseDataUrl(dataUrl: string) {
 }
 
 export async function requestGeminiMask(opts: {
-  apiKey: string;
   modelId: string;
   imageUrl: string;
   instruction: string;
@@ -45,7 +43,6 @@ export async function requestGeminiMask(opts: {
     { text: prompt },
     { inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } },
   ];
-  const ai = createGenAIClient(opts.apiKey);
   const request: GenAIRequest = {
     model: opts.modelId,
     contents: [{ role: "user", parts }],
@@ -61,9 +58,9 @@ export async function requestGeminiMask(opts: {
 
   let data;
   try {
-    data = await sendGenerationRequest(ai, request);
+    data = await sendGenerationRequest(request);
   } catch (err) {
-    throw new Error(`Gemini request failed: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Vertex request failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   for (const candidate of data.candidates || []) {
@@ -75,7 +72,7 @@ export async function requestGeminiMask(opts: {
     }
   }
 
-  throw new Error("Gemini returned no mask image");
+  throw new Error("Vertex returned no mask image");
 }
 
 export function validateMask(maskData: Uint8ClampedArray): MaskValidation {

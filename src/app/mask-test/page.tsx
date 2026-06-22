@@ -11,7 +11,7 @@ function parseMaskInstruction(instruction: string) {
 }
 
 export default function MaskTestPage() {
-  const { googleApiKey, activeModel } = useSettings();
+  const { activeModel } = useSettings();
   const inputRef = useRef<HTMLInputElement>(null);
   const [inputUrl, setInputUrl] = useState("");
   const [fileName, setFileName] = useState("");
@@ -23,8 +23,8 @@ export default function MaskTestPage() {
   const [invert, setInvert] = useState(false);
 
   const canRun = useMemo(
-    () => !!inputUrl && !!instruction.trim() && !!googleApiKey.trim() && !busy,
-    [busy, googleApiKey, inputUrl, instruction],
+    () => !!inputUrl && !!instruction.trim() && !busy,
+    [busy, inputUrl, instruction],
   );
 
   async function handleFile(file: File) {
@@ -35,7 +35,7 @@ export default function MaskTestPage() {
   }
 
   async function generateResult(nextInvert = invert) {
-    if (!inputUrl || !googleApiKey.trim()) return null;
+    if (!inputUrl) return null;
 
     const colorCommand = parseColorCommand(instruction);
     if (colorCommand) {
@@ -49,7 +49,6 @@ export default function MaskTestPage() {
     const maskInstruction = parseMaskInstruction(instruction);
 
     const maskUrl = await requestGeminiMask({
-      apiKey: googleApiKey.trim(),
       modelId: activeModel.id,
       imageUrl: inputUrl,
       instruction: maskInstruction,
@@ -178,7 +177,7 @@ export default function MaskTestPage() {
         <button type="submit" disabled={!canRun}>{busy ? "RUNNING" : "RUN"}</button>
       </form>
 
-      {!googleApiKey.trim() && <div className="mask-test-error">Add a Google API key in settings first.</div>}
+
       {error && <div className="mask-test-error">{error}</div>}
     </main>
   );

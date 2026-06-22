@@ -558,7 +558,7 @@ export default function VideoPage() {
   };
   const handleGenerate = () => {
     const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt || activeGenerationCount > 0 || !activeProjectId) return;
+    if (!trimmedPrompt || !activeProjectId) return;
     const launchProjectId = activeProjectId;
     const startFrame = startFrameId ? mediaById.get(startFrameId)?.url : undefined;
     const endFrame = endFrameId ? mediaById.get(endFrameId)?.url : undefined;
@@ -1135,7 +1135,7 @@ export default function VideoPage() {
               <button
                 className={`video-frame-btn ${activeGenerationCount > 0 ? "cafe-loading" : ""}`}
                 type="button"
-                disabled={!prompt.trim() || activeGenerationCount > 0 || !activeProjectId}
+                disabled={!prompt.trim() || !activeProjectId}
                 onClick={handleGenerate}
                 title={`${modelConfig.label} | ${videoSettings.ratio} | ${videoSettings.duration}s | ${videoSettings.resolution}`}
               >

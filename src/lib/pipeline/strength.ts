@@ -1,13 +1,47 @@
 export type ReferenceRole = "SUBJECT" | "SCENE" | "STYLE" | "UNASSIGNED";
 
-export type StrengthBand = "trace" | "subtle" | "standard" | "strong" | "locked";
+export type StrengthBand = "maxImprovise" | "improvise" | "faithful" | "expressive" | "maxExpressive";
+
+export type SemanticType = "character" | "object" | "environment" | "aesthetic";
 
 export type ReferenceStrength = {
   value: number;
+  uiValue: number;
   band: StrengthBand;
   strengthLabel: string;
   intent: string;
 };
+
+const SEMANTIC_DICTIONARY: Record<string, SemanticType> = {
+  // Living Subjects / Characters
+  model: "character", character: "character", person: "character", actor: "character",
+  man: "character", woman: "character", boy: "character", girl: "character",
+  warrior: "character", hero: "character", ninja: "character", wizard: "character",
+  dog: "character", cat: "character", animal: "character", creature: "character",
+  face: "character", portrait: "character", subject: "character", detective: "character",
+
+  // Environments / Scene Sets
+  bg: "environment", background: "environment", room: "environment", street: "environment",
+  city: "environment", house: "environment", forest: "environment", landscape: "environment",
+  set: "environment", layout: "environment", composition: "environment", scene: "environment",
+  view: "environment", place: "environment", location: "environment", environment: "environment",
+
+  // Styles / Aesthetics
+  style: "aesthetic", mood: "aesthetic", color: "aesthetic", palette: "aesthetic",
+  lighting: "aesthetic", sketch: "aesthetic", paint: "aesthetic", watercolor: "aesthetic",
+  texture: "aesthetic", render: "aesthetic", vibe: "aesthetic", aesthetic: "aesthetic",
+  photo: "aesthetic", medium: "aesthetic", tone: "aesthetic"
+};
+
+export function classifyLabel(label: string): SemanticType {
+  const tokens = label.toLowerCase().split(/[\s_-]+/);
+  for (const token of tokens) {
+    if (SEMANTIC_DICTIONARY[token]) {
+      return SEMANTIC_DICTIONARY[token];
+    }
+  }
+  return "object";
+}
 
 export function normalizeStrength(value: unknown, fallback = 50): number {
   const numeric = typeof value === "number" ? value : Number(value);
@@ -17,58 +51,69 @@ export function normalizeStrength(value: unknown, fallback = 50): number {
 
 export function getStrengthBand(value: unknown): StrengthBand {
   const strength = normalizeStrength(value);
-  if (strength <= 15) return "trace";
-  if (strength <= 35) return "subtle";
-  if (strength <= 65) return "standard";
-  if (strength <= 85) return "strong";
-  return "locked";
+  if (strength <= 15) return "maxImprovise";
+  if (strength <= 35) return "improvise";
+  if (strength <= 65) return "faithful";
+  if (strength <= 85) return "expressive";
+  return "maxExpressive";
 }
 
-export function describeReferenceStrength(value: unknown, role: ReferenceRole): ReferenceStrength {
+export function describeReferenceStrength(value: unknown, role: ReferenceRole, label = "UNASSIGNED"): ReferenceStrength {
   const strength = normalizeStrength(value);
+  const uiValue = strength - 50;
   const band = getStrengthBand(strength);
+  const semantic = classifyLabel(label);
 
   const roleIntent: Record<ReferenceRole, Record<StrengthBand, string>> = {
     SUBJECT: {
-      trace: "Treat as a faint subject cue only. Borrow broad category or mood; do not copy exact identity, pose, wardrobe, or silhouette unless the user prompt asks for it.",
-      subtle: "Use as light subject inspiration. Keep the generated subject flexible while borrowing a few recognizable traits, materials, colors, or proportions.",
-      standard: "Use as the main subject reference. Preserve the important identity, object shape, wardrobe, proportions, and distinguishing details while adapting naturally to the final scene.",
-      strong: "Closely follow the subject reference. Keep identity, silhouette, pose language, wardrobe, materials, colors, and key details stable unless they conflict with the user prompt.",
-      locked: "Prioritize the subject reference as near-locked. Preserve identity and core visible details as faithfully as possible while still integrating it into one coherent generated image."
+      maxImprovise: "Loose character inspiration. Improvise freely on wardrobe, details, and features.",
+      improvise: "Flexible character reference. Keep identity, wardrobe, and details loose.",
+      faithful: "Faithful character reference. Replicate identity and wardrobe details.",
+      expressive: "High character fidelity. Match identity/wardrobe exactly; vary pose/expression/action per Task.",
+      maxExpressive: "Strict character lock. Replicate identity and wardrobe perfectly; vary pose/expression/action per Task."
     },
     SCENE: {
-      trace: "Treat as faint environment context only. Borrow atmosphere or broad setting type; do not reproduce the exact layout.",
-      subtle: "Use as light scene inspiration. Borrow some setting, prop, lighting, or composition cues without forcing the exact space.",
-      standard: "Use as the main scene reference. Preserve the important environment, layout, props, lighting direction, scale, and spatial relationships.",
-      strong: "Closely follow the scene reference. Keep composition, set geometry, prop placement, lighting, and camera feel stable unless the user prompt overrides them.",
-      locked: "Prioritize the scene reference as near-locked. Preserve layout, perspective, lighting, and major set details as faithfully as possible while integrating all subjects naturally."
+      maxImprovise: "Loose layout cue. Change composition, layout, and perspective freely.",
+      improvise: "Flexible layout. Borrow environment/lighting, but do not force layout details.",
+      faithful: "Faithful scene. Replicate layout, perspective, and composition.",
+      expressive: "High fidelity. Match composition, set geometry, and perspective closely.",
+      maxExpressive: "Strict lock. Replicate exact composition, camera perspective, and layout."
     },
     STYLE: {
-      trace: "Treat as a faint style cue only. Borrow a slight color, texture, or mood influence; do not copy content.",
-      subtle: "Use as light visual styling. Add modest color, texture, lens, rendering, or mood influence while keeping the image mostly governed by the subject and scene.",
-      standard: "Use as the main style reference. Apply its color palette, lighting quality, lens/rendering character, texture, and mood without copying its depicted content.",
-      strong: "Strongly apply the visual style. Make color, lighting, lens/rendering, texture, and mood visibly dominant while keeping subject and scene content intact.",
-      locked: "Prioritize the style reference as near-locked for visual treatment. Match its palette, contrast, lighting, lens/rendering, texture, and mood as closely as possible without copying content."
+      maxImprovise: "Loose style cue. Borrow minor color/lighting; style is mostly open.",
+      improvise: "Flexible style. Apply general color palette and medium style.",
+      faithful: "Faithful style. Replicate medium, rendering, and palette.",
+      expressive: "High fidelity. Match style, texture, and color palette dominantly.",
+      maxExpressive: "Strict lock. Replicate exact aesthetic, rendering medium, and color palette."
     },
     UNASSIGNED: {
-      trace: "Treat as a faint reference cue only.",
-      subtle: "Use as light reference inspiration only.",
-      standard: "Use as a general reference with balanced influence.",
-      strong: "Use as a strong general reference.",
-      locked: "Use as a near-locked general reference where it does not conflict with assigned roles."
+      maxImprovise: "Loose reference cue.",
+      improvise: "Flexible reference inspiration.",
+      faithful: "Balanced general reference.",
+      expressive: "High fidelity general reference.",
+      maxExpressive: "Near-locked general reference."
     }
   };
 
+  if (role === "SUBJECT" && semantic === "object") {
+    roleIntent.SUBJECT.maxImprovise = "Loose object inspiration. Improvise freely on shape, texture, and details.";
+    roleIntent.SUBJECT.improvise = "Flexible object reference. Keep shape and details loose.";
+    roleIntent.SUBJECT.faithful = "Faithful object reference. Replicate shape and details.";
+    roleIntent.SUBJECT.expressive = "High object fidelity. Match shape, texture, and details very closely.";
+    roleIntent.SUBJECT.maxExpressive = "Strict object lock. Replicate shape, structure, and textures perfectly.";
+  }
+
   const strengthLabel: Record<StrengthBand, string> = {
-    trace: "trace",
-    subtle: "subtle",
-    standard: "standard",
-    strong: "strong",
-    locked: "locked"
+    maxImprovise: "max improvise",
+    improvise: "improvise",
+    faithful: "faithful",
+    expressive: "expressive",
+    maxExpressive: "max precise"
   };
 
   return {
     value: strength,
+    uiValue,
     band,
     strengthLabel: strengthLabel[band],
     intent: roleIntent[role]?.[band] || roleIntent.UNASSIGNED[band]

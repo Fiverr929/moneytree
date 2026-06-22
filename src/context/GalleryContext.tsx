@@ -8,10 +8,11 @@ import type { StrengthBand } from "@/lib/pipeline/strength";
 export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string; strength?: number; strengthBand?: StrengthBand };
 export type EvaluationScore = 1 | 2 | 3 | 4 | 5;
 export type GenerationEvaluation = {
-  taskMatch: EvaluationScore;
+  promptMatch: EvaluationScore;
   subjectMatch: EvaluationScore;
-  labelMatch: EvaluationScore | null;
-  strengthMatch: EvaluationScore;
+  sceneMatch: EvaluationScore;
+  styleMatch: EvaluationScore;
+  qualityMatch: EvaluationScore;
   comment: string;
   evaluatedAt: string;
 };
@@ -48,6 +49,7 @@ export type GalleryCell = {
     thinkingLevel?: string | null;
   };
   evaluation?: GenerationEvaluation;
+  generationTimeMs?: number;
   // Internal state for pending loads
   loadingId?: string;
   blocked?: boolean;
@@ -141,6 +143,7 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
       prompt: effectivePrompt,
       createdAt: createdAt || new Date().toISOString(),
       updatedAt,
+      generationTimeMs: cell.generationTimeMs,
       usedImages: (cell.usedImages || []).map((img) => ({
         imgUrl: img.imgUrl,
         uuid: img.uuid,

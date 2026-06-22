@@ -3,22 +3,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useGallery, type EvaluationScore } from "@/context/GalleryContext";
 
-type ScoreKey = "taskMatch" | "subjectMatch" | "labelMatch" | "strengthMatch";
+type ScoreKey = "promptMatch" | "subjectMatch" | "sceneMatch" | "styleMatch" | "qualityMatch";
 type DraftScores = Record<ScoreKey, EvaluationScore | null>;
 
 const SCORE_LABELS: Array<{ key: ScoreKey; label: string }> = [
-  { key: "taskMatch", label: "Task match" },
+  { key: "promptMatch", label: "Prompt match" },
   { key: "subjectMatch", label: "Subject match" },
-  { key: "labelMatch", label: "Label match" },
-  { key: "strengthMatch", label: "Strength match" },
+  { key: "sceneMatch", label: "Scene match" },
+  { key: "styleMatch", label: "Style match" },
+  { key: "qualityMatch", label: "Visual quality" },
 ];
-
-function hasMeaningfulLabel(labels: Array<string | undefined>) {
-  return labels.some((label) => {
-    const value = String(label || "").trim().toUpperCase();
-    return value && value !== "UNLABELED" && value !== "UNASSIGNED";
-  });
-}
 
 export default function EvaluationDialog() {
   const {
@@ -29,31 +23,32 @@ export default function EvaluationDialog() {
     skipEvaluation,
     saveEvaluation,
   } = useGallery();
+  
   const target = useMemo(
     () => cells.find((cell) => cell.id === evaluationTargetId),
     [cells, evaluationTargetId],
   );
-  const labelAvailable = hasMeaningfulLabel(target?.usedImages?.map((image) => image.label) || []);
+
   const [scores, setScores] = useState<DraftScores>({
-    taskMatch: null,
+    promptMatch: null,
     subjectMatch: null,
-    labelMatch: null,
-    strengthMatch: null,
+    sceneMatch: null,
+    styleMatch: null,
+    qualityMatch: null,
   });
   const [comment, setComment] = useState("");
-  const [labelNotApplicable, setLabelNotApplicable] = useState(!labelAvailable);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setScores({
-      taskMatch: target?.evaluation?.taskMatch ?? null,
+      promptMatch: target?.evaluation?.promptMatch ?? null,
       subjectMatch: target?.evaluation?.subjectMatch ?? null,
-      labelMatch: target?.evaluation?.labelMatch ?? null,
-      strengthMatch: target?.evaluation?.strengthMatch ?? null,
+      sceneMatch: target?.evaluation?.sceneMatch ?? null,
+      styleMatch: target?.evaluation?.styleMatch ?? null,
+      qualityMatch: target?.evaluation?.qualityMatch ?? null,
     });
     setComment(target?.evaluation?.comment || "");
-    setLabelNotApplicable(!labelAvailable || Boolean(target?.evaluation && target.evaluation.labelMatch === null));
-  }, [labelAvailable, target?.id, target?.evaluation]);
+  }, [target?.id, target?.evaluation]);
 
   useEffect(() => {
     if (!target) return;
@@ -66,17 +61,24 @@ export default function EvaluationDialog() {
 
   if (!target || evaluationTargetId === null) return null;
 
-  const canSave = Boolean(scores.taskMatch && scores.subjectMatch && scores.strengthMatch && (scores.labelMatch || labelNotApplicable));
+  const canSave = Boolean(
+    scores.promptMatch &&
+    scores.subjectMatch &&
+    scores.sceneMatch &&
+    scores.styleMatch &&
+    scores.qualityMatch
+  );
 
   const handleSave = async () => {
     if (!canSave || saving) return;
     setSaving(true);
     try {
       await saveEvaluation(target.id, {
-        taskMatch: scores.taskMatch!,
+        promptMatch: scores.promptMatch!,
         subjectMatch: scores.subjectMatch!,
-        labelMatch: labelNotApplicable ? null : scores.labelMatch,
-        strengthMatch: scores.strengthMatch!,
+        sceneMatch: scores.sceneMatch!,
+        styleMatch: scores.styleMatch!,
+        qualityMatch: scores.qualityMatch!,
         comment: comment.trim(),
         evaluatedAt: new Date().toISOString(),
       });
@@ -112,24 +114,11 @@ export default function EvaluationDialog() {
                       key={score}
                       onClick={() => {
                         setScores((current) => ({ ...current, [key]: score }));
-                        if (key === "labelMatch") setLabelNotApplicable(false);
                       }}
                     >
                       {score}
                     </button>
                   ))}
-                  {key === "labelMatch" && (
-                    <button
-                      type="button"
-                      className={labelNotApplicable ? "active na" : "na"}
-                      onClick={() => {
-                        setLabelNotApplicable(true);
-                        setScores((current) => ({ ...current, labelMatch: null }));
-                      }}
-                    >
-                      N/A
-                    </button>
-                  )}
                 </div>
               </div>
             ))}

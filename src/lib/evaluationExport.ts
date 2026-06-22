@@ -22,6 +22,7 @@ export type EvaluationRecord = {
   settings: GalleryCell["generationSettings"] | null;
   result: { ratio: string; dimensions: string | null };
   evaluation: GalleryCell["evaluation"] | null;
+  generationTimeMs: number | null;
 };
 
 export type EvaluationExportResult = {
@@ -53,16 +54,27 @@ function toRecord(cell: GalleryCell, project: ProjectInfo): EvaluationRecord {
     settings: cell.generationSettings || null,
     result: { ratio: cell.ratio, dimensions: cell.dims || null },
     evaluation: cell.evaluation || null,
+    generationTimeMs: typeof cell.generationTimeMs === "number" ? cell.generationTimeMs : null,
   };
 }
 
-function average(records: EvaluationRecord[], key: "taskMatch" | "subjectMatch" | "labelMatch" | "strengthMatch") {
+function average(records: EvaluationRecord[], key: "promptMatch" | "subjectMatch" | "sceneMatch" | "styleMatch" | "qualityMatch") {
   const values: number[] = records.flatMap((record) => {
     const value = record.evaluation?.[key];
     return typeof value === "number" ? [value] : [];
   });
   if (!values.length) return "-";
   return (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2);
+}
+
+function averageSpeed(records: EvaluationRecord[]) {
+  const values: number[] = records.flatMap((record) => {
+    const value = record.generationTimeMs;
+    return typeof value === "number" ? [value] : [];
+  });
+  if (!values.length) return "-";
+  const avgMs = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return `${(avgMs / 1000).toFixed(2)}s`;
 }
 
 export function buildEvaluationReport(records: EvaluationRecord[], project: ProjectInfo, exportedAt = new Date().toISOString()) {
@@ -76,15 +88,17 @@ export function buildEvaluationReport(records: EvaluationRecord[], project: Proj
     `Generations: ${records.length}`,
     `Rated: ${rated.length}`,
     `Unrated: ${records.length - rated.length}`,
+    `Average Speed: ${averageSpeed(records)}`,
     ``,
     `## Overall Scores`,
     ``,
     `| Dimension | Average |`,
     `| --- | ---: |`,
-    `| Task match | ${average(rated, "taskMatch")} |`,
+    `| Prompt match | ${average(rated, "promptMatch")} |`,
     `| Subject match | ${average(rated, "subjectMatch")} |`,
-    `| Label match | ${average(rated, "labelMatch")} |`,
-    `| Strength match | ${average(rated, "strengthMatch")} |`,
+    `| Scene match | ${average(rated, "sceneMatch")} |`,
+    `| Style match | ${average(rated, "styleMatch")} |`,
+    `| Visual quality | ${average(rated, "qualityMatch")} |`,
   ];
 
   versions.forEach((version) => {
@@ -94,9 +108,9 @@ export function buildEvaluationReport(records: EvaluationRecord[], project: Proj
       ``,
       `## ${version}`,
       ``,
-      `Generations: ${versionRecords.length} | Rated: ${versionRated.length}`,
+      `Generations: ${versionRecords.length} | Rated: ${versionRated.length} | Avg Speed: ${averageSpeed(versionRecords)}`,
       ``,
-      `Task ${average(versionRated, "taskMatch")} | Subject ${average(versionRated, "subjectMatch")} | Label ${average(versionRated, "labelMatch")} | Strength ${average(versionRated, "strengthMatch")}`,
+      `Prompt ${average(versionRated, "promptMatch")} | Subject ${average(versionRated, "subjectMatch")} | Scene ${average(versionRated, "sceneMatch")} | Style ${average(versionRated, "styleMatch")} | Quality ${average(versionRated, "qualityMatch")}`,
     );
     versionRated.filter((record) => record.evaluation?.comment).forEach((record) => {
       lines.push(``, `- ${record.createdAt || "Unknown date"}: ${record.evaluation!.comment}`);

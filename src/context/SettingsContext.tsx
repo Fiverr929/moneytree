@@ -49,8 +49,8 @@ export const MODELS: Record<string, ModelConfig> = {
 };
 
 interface SettingsContextType {
-  googleApiKey: string;
-  setGoogleApiKey: (val: string) => void;
+  geminiApiKey: string;
+  setGeminiApiKey: (val: string) => void;
   activeModelKey: string;
   setActiveModelKey: (val: string) => void;
   activeResolution: string;
@@ -69,7 +69,7 @@ const STORAGE_KEY = 'cafehtml-settings';
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [googleApiKey, setGoogleApiKey] = useState("");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
   const [activeModelKey, setActiveModelKey] = useState("google-nano-banana");
   const [activeResolution, setActiveResolution] = useState("1K");
   const [thinkingLevel, setThinkingLevel] = useState("minimal");
@@ -81,7 +81,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
-        if (saved.googleApiKey) setGoogleApiKey(saved.googleApiKey);
+        if (saved.geminiApiKey) setGeminiApiKey(saved.geminiApiKey);
         if (saved.activeModel && MODELS[saved.activeModel]) setActiveModelKey(saved.activeModel);
         if (saved.activeResolution) setActiveResolution(saved.activeResolution);
         if (saved.thinkingLevel) setThinkingLevel(saved.thinkingLevel);
@@ -94,13 +94,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     if (!mounted) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        googleApiKey,
+        geminiApiKey,
         activeModel: activeModelKey,
         activeResolution,
         thinkingLevel
       }));
     } catch {}
-  }, [googleApiKey, activeModelKey, activeResolution, thinkingLevel, mounted]);
+  }, [geminiApiKey, activeModelKey, activeResolution, thinkingLevel, mounted]);
 
   const activeModel = MODELS[activeModelKey];
 
@@ -125,7 +125,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   return (
     <SettingsContext.Provider
       value={{
-        googleApiKey, setGoogleApiKey,
+        geminiApiKey, setGeminiApiKey,
         activeModelKey, setActiveModelKey: handleSetActiveModelKey,
         activeResolution, setActiveResolution,
         thinkingLevel, setThinkingLevel,

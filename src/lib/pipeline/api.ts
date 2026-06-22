@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { getGenerationModuleImages } from './module-order';
 import {
-  createGenAIClient,
   describeGenAIError,
   findImagePrediction,
   GENERATION_SAFETY_SETTINGS,
@@ -19,9 +18,9 @@ import {
 } from './generation-debug';
 import {
   describeReferenceStrength,
-  getStrengthBand,
   normalizeStrength,
-  type ReferenceRole
+  type ReferenceRole,
+  classifyLabel
 } from './strength';
 
 export const IMAGE_PIPELINE_VERSION = 'subject-v1-strength';
@@ -35,7 +34,6 @@ function parseDataUrl(dataUrl: string) {
 
 type GenerateOptions = {
   modelId: string;
-  apiKey: string;
   prompt: string;
   numImages: number;
   aspectRatio: string;
@@ -71,7 +69,7 @@ function isRetryMeaningful(statusLabel?: string): boolean {
 }
 
 export async function googleGenerate(opts: GenerateOptions) {
-  const { modelId, apiKey, prompt, numImages, aspectRatio, imageRefs, imageSize, thinkingLevel, debugRunId, onVariationReady, onVariationFailed, onVariationBlocked } = opts;
+  const { modelId, prompt, numImages, aspectRatio, imageRefs, imageSize, thinkingLevel, debugRunId, onVariationReady, onVariationFailed, onVariationBlocked } = opts;
   
   const arMap: Record<string, string> = { '1:1': '1:1', '16:9': '16:9', '9:16': '9:16', '4:3': '4:3', '3:4': '3:4' };
   const ar = arMap[aspectRatio] || '1:1';
@@ -85,20 +83,13 @@ export async function googleGenerate(opts: GenerateOptions) {
   }
 
   const generationConfig: GenerateContentConfig = {
-    responseModalities: ['IMAGE'],
+    responseModalities: ['TEXT', 'IMAGE'],
     imageConfig: {
       aspectRatio: ar,
       imageSize: imageSize || '1K',
       outputMimeType: 'image/png'
     },
-    safetySettings: GENERATION_SAFETY_SETTINGS,
-    systemInstruction: [
-      'Follow the user prompt and attached reference images.',
-      'The inline images are supplied in the same Image N order named in the prompt.',
-      'Use each image according to its label, folder, and any direct user instruction.',
-      'Do not create a collage, pasted cutout, side-by-side composite, contact sheet, or flat overlay.',
-      'Generate one coherent final image with matching perspective, lighting, shadows, scale, and physical integration.'
-    ].join(' ')
+    safetySettings: GENERATION_SAFETY_SETTINGS
   };
   
   const sdkThinkingLevel = toThinkingLevel(thinkingLevel);
@@ -112,12 +103,11 @@ export async function googleGenerate(opts: GenerateOptions) {
     config: generationConfig
   };
   const serializedBody = JSON.stringify(request);
-  const ai = createGenAIClient(apiKey);
 
   patchGenerationDebug({
     request: {
-      transport: '@google/genai',
-      apiMode: 'vertex-express',
+      transport: 'next-server-vertex',
+      apiMode: 'vertex-adc',
       modelId,
       numImages,
       aspectRatio: ar,
@@ -131,15 +121,17 @@ export async function googleGenerate(opts: GenerateOptions) {
 
   console.log('[CafeAPI] → POST', modelId, '| ar:', ar, '| size:', imageSize, '| thinking:', thinkingLevel || 'none', '| image refs:', imageRefs?.length || 0);
 
-  const calls = Array.from({ length: numImages }).map(async (_, idx) => {
+  const results: PromiseSettledResult<Awaited<ReturnType<typeof sendGenerationRequest>>>[] = [];
+
+  for (let idx = 0; idx < numImages; idx += 1) {
     try {
-      const result = await sendGenerationRequest(ai, request);
+      const result = await sendGenerationRequest(request);
       const prediction = findImagePrediction(result);
       let blockedReason = result.promptFeedback?.blockReason
         ? String(result.promptFeedback.blockReason)
         : null;
       const finishReasons: string[] = [];
-      
+
       (result.candidates || []).forEach((candidate) => {
         if (candidate.finishReason && candidate.finishReason !== 'STOP') {
           finishReasons.push(candidate.finishReason);
@@ -156,7 +148,7 @@ export async function googleGenerate(opts: GenerateOptions) {
       } else if (onVariationFailed) {
         onVariationFailed(idx, finishReasons[0] || 'FAILED');
       }
-      return result;
+      results.push({ status: 'fulfilled', value: result });
     } catch (err) {
       patchGenerationDebug({
         lastApiError: {
@@ -166,17 +158,16 @@ export async function googleGenerate(opts: GenerateOptions) {
         }
       }, debugRunId);
       if (onVariationFailed) onVariationFailed(idx, classifyGenerationError(err));
-      throw err;
+      results.push({ status: 'rejected', reason: err });
     }
-  });
+  }
 
-  const settled = await Promise.allSettled(calls);
   const predictions: {mimeType: string, bytesBase64Encoded: string}[] = [];
   let blockReason = null;
   const finishReasons: string[] = [];
   let firstError: Error | null = null;
 
-  settled.forEach(outcome => {
+  results.forEach(outcome => {
     if (outcome.status === 'rejected') {
       if (!firstError) firstError = outcome.reason;
       console.warn('[CafeAPI] Variation call failed:', outcome.reason?.message || outcome.reason);
@@ -251,64 +242,65 @@ function normalizeRole(file: Record<string, any>): ReferenceRole {
   return 'UNASSIGNED';
 }
 
-function describeRoleInstruction(role: ReferenceRole) {
-  const instructions: Record<ReferenceRole, string> = {
-    SUBJECT: 'Use as the main subject reference.',
-    SCENE: 'Use as the environment, layout, props, lighting, and spatial context.',
-    STYLE: 'Use only for visual treatment: palette, lens, lighting quality, texture, and mood.',
-    UNASSIGNED: 'Use as a general visual reference.'
-  };
-  return instructions[role];
-}
-
-function describeSubjectInstruction(
-  imageNumber: number,
-  label: string,
-  strength: unknown
-) {
-  const focus = label && label !== 'UNASSIGNED'
-    ? `, with particular attention to "${label}"`
-    : '';
-
-  const instructions = {
-    trace: `Take only faint inspiration from the subject in Image ${imageNumber}${focus}; keep the final subject otherwise flexible.`,
-    subtle: `Use Image ${imageNumber} as light subject inspiration${focus}; borrow a few recognizable qualities while keeping identity and details flexible.`,
-    standard: `Use Image ${imageNumber} as the main subject reference${focus}; carry over its recognizable identity and important visible details while adapting it naturally to the task.`,
-    strong: `Closely follow the subject in Image ${imageNumber}${focus}; preserve its identity, silhouette, proportions, and important visible details unless the task asks for a change.`,
-    locked: `Treat the subject in Image ${imageNumber} as near-locked${focus}; preserve its identity and visible details as faithfully as possible except where the task explicitly requests a change.`
-  };
-
-  return instructions[getStrengthBand(strength)];
-}
-
 export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, any>[]) {
   const task = rawPrompt.trim() || 'Create one finished image from the provided references.';
   const lines = ['Task:', task];
 
   if (imageFiles.length) {
     lines.push('', 'References:');
+
     imageFiles.forEach((file, index) => {
       const label = file.label || file.name || 'UNASSIGNED';
       const role = normalizeRole(file);
-      if (role === 'SUBJECT') {
-        lines.push(describeSubjectInstruction(index + 1, label, file.strength));
-        return;
-      }
-      lines.push(`Image ${index + 1} - ${label}`);
-      lines.push(`Role: ${role}`);
-      lines.push(describeRoleInstruction(role));
+      const perf = describeReferenceStrength(file.strength, role, label);
+
+      lines.push(
+        `- Image ${index + 1} (${role}, label: "${label}", strength: ${perf.uiValue >= 0 ? '+' : ''}${perf.uiValue}): ${perf.intent}`
+      );
     });
+
+    lines.push('', 'Rules:');
+    
+    if (imageFiles.length === 1) {
+      const single = imageFiles[0];
+      const semantic = classifyLabel(single.label || single.name || 'UNASSIGNED');
+      const role = normalizeRole(single);
+      if (role === 'SUBJECT') {
+        lines.push(`- Place the ${semantic} from Image 1 into the scene with natural lighting/perspective.`);
+      } else if (role === 'SCENE') {
+        lines.push(`- Use Image 1 layout/composition as the stage design.`);
+      } else if (role === 'STYLE') {
+        lines.push(`- Apply Image 1 style/medium. Do not copy content.`);
+      } else {
+        lines.push(`- Use Image 1 as a general reference.`);
+      }
+    } else {
+      const subjects = imageFiles.filter(f => normalizeRole(f) === 'SUBJECT');
+      const scenes = imageFiles.filter(f => normalizeRole(f) === 'SCENE');
+      const styles = imageFiles.filter(f => normalizeRole(f) === 'STYLE');
+      const subNoun = subjects.length > 1 ? "subjects" : "subject";
+
+      let rule = "- Combine references: ";
+      if (subjects.length && scenes.length && styles.length) {
+        rule += `Place ${subNoun} from Subject Image(s) into Scene Image(s) layout with Style Image(s) style.`;
+      } else if (subjects.length && scenes.length) {
+        rule += `Place ${subNoun} from Subject Image(s) into Scene Image(s) layout.`;
+      } else if (subjects.length && styles.length) {
+        rule += `Render ${subNoun} from Subject Image(s) using Style Image(s) style.`;
+      } else if (scenes.length && styles.length) {
+        rule += `Build Scene Image(s) layout using Style Image(s) style.`;
+      } else {
+        rule += `Blend references together.`;
+      }
+      rule += " Ensure completely natural lighting, shadows, scale, and integration.";
+      lines.push(rule);
+    }
   }
 
   return lines.join('\n');
 }
 
-export async function generate(payload: GenerationPayload, settings: GenerationSettings, apiKey: string, callbacks: GenerationCallbacks, files?: Record<string, any>[]) {
-  if (!apiKey) {
-    callbacks.onError(new Error('API key is required'));
-    return;
-  }
-
+export async function generate(payload: GenerationPayload, settings: GenerationSettings, callbacks: GenerationCallbacks, files?: Record<string, any>[]) {
   const model = settings.activeModel;
   const ratio = payload.settings?.aspectRatio || '1:1';
   const numImages = payload.settings?.variation || 1;
@@ -345,6 +337,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
     const imageSize = settings.activeResolution || '1K';
     const thinkingLevel = settings.activeThinkingLevel;
     const startedAt = new Date().toISOString();
+    const startTimeMs = Date.now();
 
     storeGenerationDebug({
       runId: debugRunId,
@@ -396,13 +389,13 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
           aspectRatio: ratio,
           imageSize,
           thinkingLevel: thinkingLevel || null
-        }
+        },
+        generationTimeMs: Date.now() - startTimeMs
       };
     }
 
     await googleGenerate({
       modelId: model!.id,
-      apiKey,
       prompt: effectivePrompt,
       numImages,
       aspectRatio: ratio,
@@ -448,7 +441,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
         }, debugRunId);
         const runRetry = (newLid: string) => {
           void googleGenerate({
-            modelId: model!.id, apiKey, prompt: effectivePrompt, numImages: 1, aspectRatio: ratio, imageRefs, imageSize, thinkingLevel: thinkingLevel || undefined, debugRunId,
+            modelId: model!.id, prompt: effectivePrompt, numImages: 1, aspectRatio: ratio, imageRefs, imageSize, thinkingLevel: thinkingLevel || undefined, debugRunId,
             onVariationReady: (dataUrl) => {
               const retryResults = getGenerationDebug()?.results;
               patchGenerationDebug({
@@ -498,7 +491,6 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
 
 export type StudioGenerateOptions = {
   modelId: string;
-  apiKey: string;
   prompt: string;
   baseImageUrl: string;
   annotationImageUrl?: string;
@@ -508,7 +500,7 @@ export type StudioGenerateOptions = {
 };
 
 export async function studioGenerate(opts: StudioGenerateOptions): Promise<string> {
-  const { modelId, apiKey, prompt, baseImageUrl, annotationImageUrl, references, imageSize, aspectRatio } = opts;
+  const { modelId, prompt, baseImageUrl, annotationImageUrl, references, imageSize, aspectRatio } = opts;
 
   const fullPrompt = (prompt + (annotationImageUrl ? ' Focus on the annotated area.' : '')).trim();
   const parts: Part[] = [];
@@ -550,7 +542,7 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
 
   console.log('[CafeAPI] → POST (Studio)', modelId, '| refs:', references?.length || 0);
 
-  const result = await sendGenerationRequest(createGenAIClient(apiKey), request);
+  const result = await sendGenerationRequest(request);
   const prediction = findImagePrediction(result);
 
   if (!prediction) {

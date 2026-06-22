@@ -852,10 +852,10 @@ export default function ModulePanel() {
             )}
             <span>{f.dims}</span>
             {!f.eye && <span>HIDDEN</span>}
-            <span className="cmp-mini-strength">
-              <i style={{ width: `${f.strength}%` }}></i>
+            <span className="cmp-mini-strength" style={{ position: "relative" }}>
+              <i style={{ position: "absolute", left: `${f.strength < 50 ? f.strength : 50}%`, width: `${Math.abs(f.strength - 50)}%` }}></i>
             </span>
-            <span>{f.strength}%</span>
+            <span>{f.strength - 50 >= 0 ? "+" : ""}{f.strength - 50}</span>
           </div>
         </div>
         <button
@@ -1408,7 +1408,7 @@ export default function ModulePanel() {
           <div className="cmp-detail-section">
             <h4>STRENGTH</h4>
             <div className="cmp-strength-head">
-              <b>{strengthInfo.value}% &middot; {strengthInfo.strengthLabel.toUpperCase()}</b>
+              <b>{strengthInfo.uiValue >= 0 ? "+" : ""}{strengthInfo.uiValue} &middot; {strengthInfo.strengthLabel.toUpperCase()}</b>
             </div>
             <div
               className="cmp-strength"
@@ -1423,15 +1423,15 @@ export default function ModulePanel() {
               onPointerMove={handleStrengthPointerMove}
               onKeyDown={handleStrengthKeyDown}
             >
-              <i style={{ width: `${strengthInfo.value}%` }}></i>
+              <i style={{ position: "absolute", left: `${strengthInfo.uiValue < 0 ? strengthInfo.value : 50}%`, width: `${Math.abs(strengthInfo.uiValue)}%` }}></i>
               <span style={{ left: "25%" }}></span>
               <span style={{ left: "50%" }}></span>
               <span style={{ left: "75%" }}></span>
             </div>
             <div className="cmp-scale">
-              <span>SUBTLE</span>
-              <span>STANDARD</span>
-              <span>FORCEFUL</span>
+              <span>IMPROVISE</span>
+              <span>FAITHFUL</span>
+              <span>EXPRESSIVE</span>
             </div>
           </div>
 
@@ -1551,7 +1551,7 @@ export default function ModulePanel() {
             INFO {showInfo ? "\u25b2" : "\u25bc"}
           </button>
           <span>
-            {f.strength}% &middot; {moduleRole(f.mode)}
+            {f.strength - 50 >= 0 ? "+" : ""}{f.strength - 50} &middot; {moduleRole(f.mode)}
           </span>
         </div>
       </div>

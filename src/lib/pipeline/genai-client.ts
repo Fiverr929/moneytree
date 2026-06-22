@@ -1,6 +1,4 @@
 import {
-  ApiError,
-  GoogleGenAI,
   HarmBlockThreshold,
   HarmCategory,
   ThinkingLevel,
@@ -22,12 +20,16 @@ export const GENERATION_SAFETY_SETTINGS = [
   { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
-export function createGenAIClient(apiKey: string) {
-  return new GoogleGenAI({
-    vertexai: true,
-    apiKey,
-    apiVersion: "v1",
-  });
+class VertexGenerationError extends Error {
+  status: number;
+  details?: unknown;
+
+  constructor(message: string, status: number, details?: unknown) {
+    super(message);
+    this.name = "VertexGenerationError";
+    this.status = status;
+    this.details = details;
+  }
 }
 
 export function toThinkingLevel(value?: string) {
@@ -41,21 +43,28 @@ export function toThinkingLevel(value?: string) {
 }
 
 export async function sendGenerationRequest(
-  ai: GoogleGenAI,
   request: GenAIRequest,
-  timeoutMs = 90_000,
-) {
+  timeoutMs = 95_000,
+): Promise<GenerateContentResponse> {
   const controller = new AbortController();
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    return await ai.models.generateContent({
-      ...request,
-      config: {
-        ...request.config,
-        abortSignal: controller.signal,
-      },
+    const response = await fetch("/api/image/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+      signal: controller.signal,
     });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new VertexGenerationError(
+        typeof data.error === "string" ? data.error : `Vertex image generation failed (${response.status}).`,
+        response.status,
+        data.details,
+      );
+    }
+    return data as GenerateContentResponse;
   } finally {
     globalThis.clearTimeout(timer);
   }
@@ -76,14 +85,12 @@ export function findImagePrediction(result: GenerateContentResponse) {
 }
 
 export function describeGenAIError(error: unknown) {
-  if (error instanceof ApiError) {
+  if (error instanceof VertexGenerationError) {
     return {
       name: error.name,
       message: error.message,
       status: error.status,
-      details: Object.fromEntries(
-        Object.entries(error).filter(([key]) => !["name", "message", "stack"].includes(key)),
-      ),
+      details: error.details,
     };
   }
 
@@ -94,7 +101,7 @@ export function describeGenAIError(error: unknown) {
 }
 
 export function isQuotaError(error: unknown) {
-  return error instanceof ApiError && error.status === 429;
+  return error instanceof VertexGenerationError && error.status === 429;
 }
 
 export type { GenerateContentConfig, Part };

@@ -11,7 +11,7 @@ import { collectPayload } from "@/lib/pipeline/prompt-builder";
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
 
 export default function PromptBar() {
-  const { setSettingsOpen, activeProjectId } = useApp();
+  const { activeProjectId } = useApp();
   const settings = useSettings();
   const gallery = useGallery();
   const moduleContext = useModule();
@@ -94,12 +94,6 @@ export default function PromptBar() {
 
   const handleGenerate = async () => {
     if (!activeProjectId) return;
-    if (!settings.googleApiKey.trim()) {
-      setSettingsOpen(true);
-      setDropdownOpen(false);
-      return;
-    }
-
     const trimmed = promptText.trim();
     if (!trimmed && moduleContext.files.length === 0) {
       setGenerationError("Add a prompt or at least one module image.");
@@ -149,7 +143,7 @@ export default function PromptBar() {
 
     setActiveGenerationCount((count) => count + 1);
     try {
-      await generate(payload, fullSettings, settings.googleApiKey, {
+      await generate(payload, fullSettings, {
         onStart: () => {},
         onLoadingIds: (ids) => {
           ids.forEach(id => gallery.addLoading(
