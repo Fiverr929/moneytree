@@ -31,7 +31,6 @@ export default function StudioModule() {
       if (!target.closest('.studio-module-panel')) {
         setHeaderMenuOpen(false);
         setActionDrawerId(null);
-        setEditingGroupId(null);
       }
     };
     document.addEventListener('mousedown', handleDocClick);
@@ -42,7 +41,11 @@ export default function StudioModule() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !pendingUpload) return;
+    if (!file || !pendingUpload) {
+      setPendingUpload(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
@@ -247,7 +250,9 @@ export default function StudioModule() {
                           fileInputRef.current?.click();
                         }}
                       >
-                        <span aria-hidden="true"></span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h8V3l-3.35 3.35Z" />
+                        </svg>
                       </button>
                       <div className="clr-main img-a">
                         <img src={img.url} style={{width: '100%', height: '100%', objectFit: 'cover'}} alt="image" />

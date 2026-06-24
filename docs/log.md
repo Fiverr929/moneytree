@@ -13,6 +13,27 @@ Track component work, decisions, and session continuations here.
 ---
 
 ## Sessions
+### 2026-06-24 - Module Reference Card Polish
+
+**Status:** COMPLETED
+
+**What Was Done:**
+- Rebuilt the Module detail reference image area as a separate `ModuleReferenceCard` component based on the Studio card pattern.
+- Added role selection and image-name editing inside the image card, with orange role styling and cleaner hover behavior.
+- Added upload-time role selection so new images are no longer created as unassigned references by default.
+- Kept image label and file name in sync when uploaded or renamed.
+- Fixed replace-image targeting so card-level replace updates the selected image.
+- Removed stale module inspector/image-card CSS and dead menu state left from the old UI.
+- Tightened Studio upload cancel handling and preserved name edits on outside clicks.
+
+**Files Touched:**
+- `src/components/ModulePanel.tsx`
+- `src/components/ModuleReferenceCard.tsx`
+- `src/components/StudioModule.tsx`
+- `src/app/globals.css`
+- `docs/CafeHTML.md`
+- `docs/log.md`
+
 ### 2026-06-20 - Subject Strength Evaluation and Research Export
 
 **Status:** COMPLETED

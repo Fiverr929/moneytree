@@ -137,6 +137,13 @@ Current Next.js Module ordering behavior:
 - Folder/file movement still uses native drag/drop.
 - Ordering currently persists through the existing `modified` sort field. A dedicated `order` field would be cleaner later, but was not added in this polish pass.
 
+Current Next.js Module reference-card behavior:
+- The Module detail image area uses `src/components/ModuleReferenceCard.tsx`, separate from Studio code but visually based on the Studio card pattern.
+- Role and image-name controls live inside the card header and push the image area down when expanded.
+- Uploading a brief image now asks for a role before adding it; the default is `SUBJECT`.
+- Image label and stored file name stay matched on upload and rename.
+- Card-level replace targets the selected card image, not whichever module row is currently active.
+
 ---
 
 ## Legacy VisionScan Pipeline

@@ -8,6 +8,7 @@ import DB from "@/lib/db";
 import { deriveEditedName, loadImageMetadata } from "@/lib/imageMeta";
 import { sortModuleFilesByLayerOrder } from "@/lib/pipeline/module-order";
 import { describeReferenceStrength, normalizeStrength, type ReferenceRole } from "@/lib/pipeline/strength";
+import ModuleReferenceCard from "./ModuleReferenceCard";
 
 const ACCENTS = [
   "#ea3a8a",
@@ -27,6 +28,11 @@ const MODULE_PRESETS = [
 const moduleRole = (mode: string) => {
   const role = String(mode || "").trim().toUpperCase();
   return MODES.includes(role) ? role : "UNASSIGNED";
+};
+
+const moduleRoleLabel = (mode: string) => {
+  const role = moduleRole(mode);
+  return role === "UNASSIGNED" ? "REF" : role;
 };
 
 export default function ModulePanel() {
@@ -67,8 +73,6 @@ export default function ModulePanel() {
     setAddingFolder,
     dragOver,
     setDragOver,
-    inspectorMenuOpen,
-    setInspectorMenuOpen,
     renamingFileId,
     setRenamingFileId,
     labelEditOpen,
@@ -114,6 +118,10 @@ export default function ModulePanel() {
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [draggedFileId, setDraggedFileId] = useState<number | null>(null);
   const [dragPlaceholderIndex, setDragPlaceholderIndex] = useState<number | null>(null);
+  const [roleDrawerFileId, setRoleDrawerFileId] = useState<number | null>(null);
+  const [pendingReplaceFileId, setPendingReplaceFileId] = useState<number | null>(null);
+  const [uploadRole, setUploadRole] = useState(MODES[0]);
+  const [uploadRoleOpen, setUploadRoleOpen] = useState(false);
 
   const [folderFormName, setFolderFormName] = useState("");
   const [folderFormAccent, setFolderFormAccent] = useState(
@@ -145,8 +153,8 @@ export default function ModulePanel() {
         }
         if (folderMenuId) setFolderMenuId(null);
       }
-      if (inspectorMenuOpen && !target.closest(".cmp-inspector-menu-wrap")) {
-        setInspectorMenuOpen(false);
+      if (roleDrawerFileId && !target.closest(".mrc-card")) {
+        setRoleDrawerFileId(null);
       }
     };
     document.addEventListener("mousedown", handleDocClick);
@@ -155,9 +163,8 @@ export default function ModulePanel() {
     menuFileId,
     moveFileId,
     folderMenuId,
-    inspectorMenuOpen,
+    roleDrawerFileId,
     setFolderMenuId,
-    setInspectorMenuOpen,
     setMenuFileId,
     setMoveFileId,
   ]);
@@ -279,9 +286,15 @@ export default function ModulePanel() {
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const uploadedFiles = Array.from(e.target.files || []);
-    if (!uploadedFiles.length) return;
+    if (!uploadedFiles.length) {
+      setPendingReplaceFileId(null);
+      setUploadRoleOpen(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
 
-    const replaceMode = view === "file" && activeFileId !== null;
+    const replaceMode = pendingReplaceFileId !== null || (view === "file" && activeFileId !== null);
+    const replaceTargetId = pendingReplaceFileId ?? activeFileId;
     let filesToProcess = uploadedFiles;
     if (replaceMode) filesToProcess = filesToProcess.slice(0, 1);
 
@@ -295,14 +308,15 @@ export default function ModulePanel() {
         });
       }),
     ).then((uploads) => {
-      if (replaceMode && activeFileId !== null) {
+      if (replaceMode && replaceTargetId !== null) {
         const upload = uploads[0];
-        updateFile(activeFileId, {
+        updateFile(replaceTargetId, {
           url: upload.url,
           name: upload.file.name,
           size: Math.round(upload.file.size / 1024) + " KB",
           uuid: crypto.randomUUID(),
         });
+        setPendingReplaceFileId(null);
       } else {
         const queue = [...uploads];
         const next = queue.shift() || null;
@@ -315,7 +329,8 @@ export default function ModulePanel() {
         setMenuFileId(null);
         setMoveFileId(null);
         setFolderMenuId(null);
-        setInspectorMenuOpen(false);
+        setUploadRole(MODES[0]);
+        setUploadRoleOpen(false);
       }
       if (fileInputRef.current) fileInputRef.current.value = "";
     });
@@ -327,6 +342,8 @@ export default function ModulePanel() {
     setPendingUploadQueue(nextQueue);
     setPendingUpload(next);
     setShowUpload(!!next);
+    setUploadRole(MODES[0]);
+    setUploadRoleOpen(false);
   };
 
   const handleUploadConfirm = (collapseAfter = false) => {
@@ -335,6 +352,8 @@ export default function ModulePanel() {
       "cmp-upload-label",
     ) as HTMLInputElement;
     const label = (labelInput?.value || "UNLABELED").trim();
+    const displayName = label.toUpperCase() || "UNLABELED";
+    const role = moduleRole(uploadRole || MODES[0]);
 
     const uuid = crypto.randomUUID();
     const id = parseInt(uuid.replace(/-/g, "").slice(0, 12), 16);
@@ -344,14 +363,14 @@ export default function ModulePanel() {
       uuid,
       folder: null,
       kind: "IMG",
-      label: label.toUpperCase(),
-      name: pendingUpload.file.name,
+      label: displayName,
+      name: displayName,
       size: Math.round(pendingUpload.file.size / 1024) + " KB",
       dims: "IMAGE",
       modified: new Date().toLocaleTimeString(),
       eye: true,
       strength: 50,
-      mode: "REFERENCE",
+      mode: role,
       url: pendingUpload.url,
     };
 
@@ -365,6 +384,8 @@ export default function ModulePanel() {
     if (collapseAfter) {
       setPendingUpload(null);
       setShowUpload(false);
+      setUploadRole(MODES[0]);
+      setUploadRoleOpen(false);
       setCollapsed(true);
       return;
     }
@@ -383,19 +404,48 @@ export default function ModulePanel() {
         <label>
           NAME THIS BRIEF IMAGE {remaining ? `(${remaining + 1} SELECTED)` : ""}
         </label>
-        <input
-          id="cmp-upload-label"
-          defaultValue={pendingUpload.file.name
-            .replace(/\.[^.]+$/, "")
-            .replace(/[_-]+/g, " ")
-            .trim()
-            .toUpperCase()}
-          placeholder="CHARACTER - LOCATION - CAMERA LOOK..."
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleUploadConfirm();
-          }}
-          autoFocus
-        />
+        <div className="cmp-upload-meta">
+          <input
+            id="cmp-upload-label"
+            defaultValue={pendingUpload.file.name
+              .replace(/\.[^.]+$/, "")
+              .replace(/[_-]+/g, " ")
+              .trim()
+              .toUpperCase()}
+            placeholder="CHARACTER - LOCATION - CAMERA LOOK..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleUploadConfirm();
+            }}
+            autoFocus
+          />
+          <div className="cmp-upload-role-picker">
+            <button
+              type="button"
+              className={`cmp-upload-role-trigger mode-${uploadRole} ${uploadRoleOpen ? "open" : ""}`}
+              onClick={() => setUploadRoleOpen(!uploadRoleOpen)}
+            >
+              {uploadRole}
+            </button>
+          </div>
+        </div>
+        {uploadRoleOpen && (
+          <div className="cmp-upload-role-list">
+            {MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={mode === uploadRole ? "active" : ""}
+                onClick={() => {
+                  setUploadRole(mode);
+                  setUploadRoleOpen(false);
+                }}
+              >
+                <i className={`mode-${mode}`}></i>
+                <span>{mode}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="cmp-upload-actions">
           <button onClick={() => handleUploadConfirm()}>ADD</button>
           <button onClick={showNextPendingUpload}>CANCEL</button>
@@ -827,8 +877,10 @@ export default function ModulePanel() {
               className="cmp-inline-rename"
               defaultValue={f.label}
               onBlur={(e) => {
+                const nextName = e.target.value.toUpperCase() || "UNLABELED";
                 updateFile(f.id, {
-                  label: e.target.value.toUpperCase() || "UNLABELED",
+                  label: nextName,
+                  name: nextName,
                 });
                 setRenamingFileId(null);
               }}
@@ -1285,7 +1337,10 @@ export default function ModulePanel() {
           <div className="cmp-actions-left">
             <button
               className="cmp-icon-btn"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => {
+                setPendingReplaceFileId(null);
+                fileInputRef.current?.click();
+              }}
               title="Load brief image"
             >
               <span className="cmp-plus-icon"></span>
@@ -1363,15 +1418,6 @@ export default function ModulePanel() {
       }
     };
 
-    const modeHelp = (mode: string) => {
-      const msgs: Record<string, string> = {
-        SUBJECT: "use as the main person, product, object, or wardrobe",
-        SCENE: "use as the scene, set, props, lighting, or layout",
-        STYLE: "use only the look, not content",
-      };
-      return msgs[mode] || "";
-    };
-
     return (
       <div className="cmp-panel">
         <div className="cmp-detail-nav">
@@ -1389,22 +1435,6 @@ export default function ModulePanel() {
           </span>
         </div>
         <div className="cmp-detail-body">
-          <div className="cmp-detail-section">
-            <h4>CANVAS ROLE</h4>
-            <div className="cmp-segments">
-              {MODES.map((m) => (
-                <button
-                  key={m}
-                  className={moduleRole(f.mode) === m ? "active" : ""}
-                  onClick={() => setFileRole(f.id, m)}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-            <p>{modeHelp(f.mode)}</p>
-          </div>
-
           <div className="cmp-detail-section">
             <h4>STRENGTH</h4>
             <div className="cmp-strength-head">
@@ -1435,70 +1465,39 @@ export default function ModulePanel() {
             </div>
           </div>
 
-          <div className="cmp-image-card-stack">
-            <div className="cmp-image-card-actions">
-              <div className="cmp-inspector-menu-wrap">
-                <button
-                  className={`cmp-dot ${inspectorMenuOpen ? "open" : ""}`}
-                  onClick={() => setInspectorMenuOpen(!inspectorMenuOpen)}
-                  title="Image actions"
-                >
-                  &#8943;
-                </button>
-                {inspectorMenuOpen && (
-                  <div className="cmp-menu cmp-inspector-menu">
-                    <div className="cmp-menu-title">{f.label || "UNLABELED"}</div>
-                    <button
-                      className="primary"
-                      onClick={() => {
-                        openStudio({
-                          uuid: f.uuid,
-                          imgUrl: f.url,
-                          caller: 'module',
-                          onDone: (url) => {
-                            if (url) applyStudioResult(f, url);
-                          }
-                        });
-                        setInspectorMenuOpen(false);
-                      }}
-                    >
-                      STUDIO
-                    </button>
-                    <button
-                      onClick={() => {
-                        setInspectorMenuOpen(false);
-                        fileInputRef.current?.click();
-                      }}
-                    >
-                      REPLACE
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div className="cmp-image-card-actions-right">
-                <button
-                  className={`cmp-image-eye ${!f.eye ? "off" : ""}`}
-                  title={f.eye ? "Hide image" : "Show image"}
-                  onClick={() => updateFile(f.id, { eye: !f.eye })}
-                >
-                  <img
-                    src={f.eye ? "assets/icon-eye-on.svg" : "assets/icon-eye-off.svg"}
-                    alt={f.eye ? "visible" : "hidden"}
-                  />
-                </button>
-                <button
-                  className="cmp-image-remove"
-                  title="Remove image"
-                  onClick={() => removeFile(f.id)}
-                >
-                  <img src="assets/icon-trash.svg" alt="remove" />
-                </button>
-              </div>
-            </div>
-            <div
-              className="cmp-big-thumb"
-              title="Open in Studio"
-              onClick={() => openStudio({
+          <div className="cmp-detail-reference-card">
+            <ModuleReferenceCard
+              action={moduleRoleLabel(f.mode)}
+              name={f.label || "UNLABELED"}
+              images={[{ uuid: f.uuid, url: f.url, visible: f.eye }]}
+              actionOptions={MODES}
+              isActionOpen={roleDrawerFileId === f.id}
+              isEditingName={labelEditOpen}
+              editingName={f.label || ""}
+              onToggleAction={() => {
+                setRoleDrawerFileId(roleDrawerFileId === f.id ? null : f.id);
+                setLabelEditOpen(false);
+              }}
+              onSelectAction={(mode) => {
+                setFileRole(f.id, mode);
+                setRoleDrawerFileId(null);
+              }}
+              onStartNameEdit={() => {
+                setRoleDrawerFileId(null);
+                setLabelEditOpen(true);
+              }}
+              onEditingNameChange={(name) => {
+                const nextName = name.toUpperCase() || "UNLABELED";
+                updateFile(f.id, { label: nextName, name: nextName });
+              }}
+              onCommitName={() => setLabelEditOpen(false)}
+              onToggleImageVisibility={() => updateFile(f.id, { eye: !f.eye })}
+              onRemoveImage={() => removeFile(f.id)}
+              onReplaceImage={() => {
+                setPendingReplaceFileId(f.id);
+                fileInputRef.current?.click();
+              }}
+              onOpenImage={() => openStudio({
                 uuid: f.uuid,
                 imgUrl: f.url,
                 caller: 'module',
@@ -1506,33 +1505,7 @@ export default function ModulePanel() {
                   if (url) applyStudioResult(f, url);
                 }
               })}
-            >
-              {renderThumb(f)}
-              <span>{f.dims}</span>
-              <b className={`mode-${moduleRole(f.mode)}`}>{moduleRole(f.mode)}</b>
-            </div>
-            <div className="cmp-label-card">
-              <input
-                className="cmp-label-input"
-                readOnly={!labelEditOpen}
-                defaultValue={f.label}
-                onBlur={(e) => {
-                  updateFile(f.id, {
-                    label: e.target.value.toUpperCase() || "UNLABELED",
-                  });
-                  setLabelEditOpen(false);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") e.currentTarget.blur();
-                }}
-              />
-              <button
-                className="cmp-label-edit"
-                onClick={() => setLabelEditOpen(true)}
-              >
-                EDIT
-              </button>
-            </div>
+            />
           </div>
         </div>
 
