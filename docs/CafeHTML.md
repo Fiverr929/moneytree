@@ -51,8 +51,8 @@ Docs: `docs/` folder
 
 ```
 1. collectPayload()         - captures the user prompt, settings, module snapshot, and provenance
-2. buildSimplePrompt()      - writes the minimal Task / References / Role prompt
-3. googleGenerate()         - sends prompt and ordered inline images through @google/genai
+2. buildSimplePrompt()      - writes the Task / reference-strength contract / role prompt
+3. googleGenerate()         - sends prompt plus per-image control text and ordered inline images through @google/genai
 4. Promise.allSettled()     - runs one SDK call per variation and preserves successful siblings
 5. Gallery.resolveLoading() - resolves the matching tile and persists it to the launch project
 ```
@@ -61,11 +61,16 @@ The current transport uses the official SDK in Vertex Express mode. HTTP 429 res
 
 ## Subject Prompt Evaluation System
 
-The active Subject compiler is versioned as `subject-v1-strength`.
+The active Subject compiler is versioned as `subject-v4-scene-reframe`.
 
-- Subject prompt wording is selected from five strength bands: trace, subtle, standard, strong, and locked.
-- The image label is included as the requested focus, while Scene and Style still use their fixed role instructions.
-- Strength currently changes prompt language only; the Gemini API does not receive a separate numeric image-weight parameter.
+- Strength is role-axis control, not whole-image influence.
+- Slider direction is left-to-right: locked/subtle -> balanced -> expressive/strong.
+- Subject strength controls pose/expression/action or object orientation/placement freedom while subject identity/type, shape, wardrobe/materials, and distinctive details remain locked.
+- Scene strength controls locked view -> reframe -> new shot. It must preserve the same event, environment, background, scale, lighting direction, and visible anchors instead of inventing a 360-degree orbit from a single 2D image.
+- Style strength controls rendering intensity: medium, palette, texture, lighting mood, and finish. Style must not supply people, objects, background, layout, or composition.
+- Single Subject references use a preservation prompt. If the source has a plain/solid background, the prompt tells the model to keep the background plain/neutral unless the user explicitly asks for a scene.
+- The image label is included as the requested focus for semantic classification, so labels like `MODEL`, `ROOM`, and `STYLE` change which details the role-axis contract protects.
+- Strength controls two prompt surfaces: the global module-role contract and a per-image instruction inserted immediately before that inline image. Gemini still does not receive a separate numeric image-weight parameter.
 - New generated gallery records store the pipeline version, model ID, generation settings, effective prompt, references, and optional evaluation.
 
 Completed generations enter a debounced evaluation queue. The HUD star opens the same evaluator manually; an empty star means unrated and a filled orange star means rated. Evaluation fields are:

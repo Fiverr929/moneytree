@@ -19,18 +19,31 @@
       --gallery-right: 34px;
     }
 
+    body.agent-console-open {
+      --agent-console-offset: 218px;
+    }
+
     button, input, textarea, select { font-family: inherit; }
 
     /* ── PROMPT BAR ── */
     .prompt-bar {
       --accent: #ea5823;
+      --agent-console-height: 0px;
       position: absolute;
       left: 18px;
       top: 45px;
       right: 324px;
       display: flex;
+      flex-direction: column;
       gap: 0;
+      align-items: stretch;
+      z-index: 160;
+    }
+
+    .prompt-bar-row {
+      display: flex;
       align-items: center;
+      width: 100%;
     }
 
     .btn-upload-ref {
@@ -337,6 +350,54 @@
       justify-content: space-between;
       overflow: hidden;
       border: 1.134px solid var(--accent);
+    }
+
+    .agent-console {
+      width: 100%;
+      height: 0;
+      overflow: hidden;
+      background: #ea5823;
+      color: #c7c7c7;
+      transition: height 0.18s ease;
+    }
+
+    .agent-console.open {
+      height: 206px;
+    }
+
+    .agent-console-scroll {
+      height: 206px;
+      padding: 11px 18px 13px;
+      overflow-y: auto;
+      scrollbar-width: none;
+      font-family: "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #c7c7c7;
+    }
+
+    .agent-console-scroll::-webkit-scrollbar {
+      display: none;
+    }
+
+    .agent-line {
+      min-height: 18px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .agent-line mark {
+      background: #5271ff;
+      color: #c7c7c7;
+      padding: 0 4px;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+    }
+
+    .agent-muted {
+      color: rgba(199, 199, 199, 0.72);
     }
 
     .prompt-text-field {
@@ -2899,14 +2960,14 @@
     #gallery-panel {
       position: absolute;
       left: 18px;
-      top: 124px;
+      top: calc(124px + var(--agent-console-offset, 0px));
       right: var(--gallery-right);
       bottom: 36px;
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      transition: right 0.22s ease;
-      will-change: right;
+      transition: right 0.22s ease, top 0.18s ease;
+      will-change: right, top;
     }
 
     /* ───────────────────────────── CONTROLS BAR ── */

@@ -905,7 +905,7 @@ export default function ModulePanel() {
             <span>{f.dims}</span>
             {!f.eye && <span>HIDDEN</span>}
             <span className="cmp-mini-strength" style={{ position: "relative" }}>
-              <i style={{ position: "absolute", left: `${f.strength < 50 ? f.strength : 50}%`, width: `${Math.abs(f.strength - 50)}%` }}></i>
+              <i style={{ position: "absolute", left: 0, width: `${normalizeStrength(f.strength)}%` }}></i>
             </span>
             <span>{f.strength - 50 >= 0 ? "+" : ""}{f.strength - 50}</span>
           </div>
@@ -1380,6 +1380,9 @@ export default function ModulePanel() {
     const folder = getFolder(f.folder);
     const activeRole = moduleRole(f.mode) as ReferenceRole;
     const strengthInfo = describeReferenceStrength(f.strength, activeRole);
+    const strengthScaleLabels = activeRole === "SCENE"
+      ? ["LOCK", "REFRAME", "NEW SHOT"]
+      : ["LOCK", "BALANCED", "EXPRESS"];
 
     const updateStrengthFromClientX = (clientX: number, element: HTMLDivElement) => {
       const r = element.getBoundingClientRect();
@@ -1453,15 +1456,15 @@ export default function ModulePanel() {
               onPointerMove={handleStrengthPointerMove}
               onKeyDown={handleStrengthKeyDown}
             >
-              <i style={{ position: "absolute", left: `${strengthInfo.uiValue < 0 ? strengthInfo.value : 50}%`, width: `${Math.abs(strengthInfo.uiValue)}%` }}></i>
+              <i style={{ position: "absolute", left: 0, width: `${strengthInfo.value}%` }}></i>
               <span style={{ left: "25%" }}></span>
               <span style={{ left: "50%" }}></span>
               <span style={{ left: "75%" }}></span>
             </div>
             <div className="cmp-scale">
-              <span>IMPROVISE</span>
-              <span>FAITHFUL</span>
-              <span>EXPRESSIVE</span>
+              {strengthScaleLabels.map((label) => (
+                <span key={label}>{label}</span>
+              ))}
             </div>
           </div>
 

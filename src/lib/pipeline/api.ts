@@ -23,7 +23,7 @@ import {
   classifyLabel
 } from './strength';
 
-export const IMAGE_PIPELINE_VERSION = 'subject-v1-strength';
+export const IMAGE_PIPELINE_VERSION = 'subject-v4-scene-reframe';
 
 function parseDataUrl(dataUrl: string) {
   const base64 = dataUrl.split(',')[1];
@@ -37,13 +37,18 @@ type GenerateOptions = {
   prompt: string;
   numImages: number;
   aspectRatio: string;
-  imageRefs?: string[];
+  imageRefs?: ImageReferenceInput[];
   imageSize?: string;
   thinkingLevel?: string;
   debugRunId?: string;
   onVariationReady?: (dataUrl: string, idx: number) => void;
   onVariationFailed?: (idx: number, statusLabel?: string) => void;
   onVariationBlocked?: (idx: number, statusLabel?: string) => void;
+};
+
+type ImageReferenceInput = {
+  url: string;
+  instruction?: string;
 };
 
 const BLOCKED_FINISH_REASONS = new Set([
@@ -76,8 +81,13 @@ export async function googleGenerate(opts: GenerateOptions) {
 
   const parts: Part[] = [{ text: prompt }];
   if (imageRefs && imageRefs.length) {
-    imageRefs.forEach(ref => {
-      const parsed = parseDataUrl(ref);
+    imageRefs.forEach((ref, index) => {
+      if (ref.instruction) {
+        parts.push({ text: ref.instruction });
+      } else {
+        parts.push({ text: `Reference Image ${index + 1}: use according to the prompt instructions.` });
+      }
+      const parsed = parseDataUrl(ref.url);
       parts.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } });
     });
   }
@@ -243,7 +253,7 @@ function normalizeRole(file: Record<string, any>): ReferenceRole {
 }
 
 export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, any>[]) {
-  const task = rawPrompt.trim() || 'Create one finished image from the provided references.';
+  const task = rawPrompt.trim() || defaultTaskForReferences(imageFiles);
   const lines = ['Task:', task];
 
   if (imageFiles.length) {
@@ -255,7 +265,7 @@ export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, 
       const perf = describeReferenceStrength(file.strength, role, label);
 
       lines.push(
-        `- Image ${index + 1} (${role}, label: "${label}", strength: ${perf.uiValue >= 0 ? '+' : ''}${perf.uiValue}): ${perf.intent}`
+        `- Image ${index + 1} (${role}, "${label}", ${perf.strengthLabel}): ${perf.contract}`
       );
     });
 
@@ -266,11 +276,12 @@ export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, 
       const semantic = classifyLabel(single.label || single.name || 'UNASSIGNED');
       const role = normalizeRole(single);
       if (role === 'SUBJECT') {
-        lines.push(`- Place the ${semantic} from Image 1 into the scene with natural lighting/perspective.`);
+        lines.push(`- Preserve the same ${semantic}; strength changes only pose/action/orientation.`);
+        lines.push(`- Keep a plain source background plain unless the Task asks for a scene.`);
       } else if (role === 'SCENE') {
-        lines.push(`- Use Image 1 layout/composition as the stage design.`);
+        lines.push(`- Use Image 1 only as the stage/background. Do not add a main subject unless the Task asks.`);
       } else if (role === 'STYLE') {
-        lines.push(`- Apply Image 1 style/medium. Do not copy content.`);
+        lines.push(`- Apply only Image 1's visual treatment; ignore its content/background/layout.`);
       } else {
         lines.push(`- Use Image 1 as a general reference.`);
       }
@@ -280,24 +291,58 @@ export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, 
       const styles = imageFiles.filter(f => normalizeRole(f) === 'STYLE');
       const subNoun = subjects.length > 1 ? "subjects" : "subject";
 
-      let rule = "- Combine references: ";
+      let rule = "- ";
       if (subjects.length && scenes.length && styles.length) {
-        rule += `Place ${subNoun} from Subject Image(s) into Scene Image(s) layout with Style Image(s) style.`;
+        rule += `Use Subject for ${subNoun}, Scene for background/camera/layout, Style only for rendering.`;
       } else if (subjects.length && scenes.length) {
-        rule += `Place ${subNoun} from Subject Image(s) into Scene Image(s) layout.`;
+        rule += `Use Subject for ${subNoun} and Scene for background/camera/layout.`;
       } else if (subjects.length && styles.length) {
-        rule += `Render ${subNoun} from Subject Image(s) using Style Image(s) style.`;
+        rule += `Use Subject for ${subNoun}; apply Style only as rendering, not content/background.`;
       } else if (scenes.length && styles.length) {
-        rule += `Build Scene Image(s) layout using Style Image(s) style.`;
+        rule += `Use Scene for background/camera/layout; apply Style only as rendering, not content/background.`;
       } else {
-        rule += `Blend references together.`;
+        rule += `Respect each image's assigned module role; do not blend whole images together.`;
       }
-      rule += " Ensure completely natural lighting, shadows, scale, and integration.";
+      rule += " Keep lighting, shadows, scale, and integration natural.";
       lines.push(rule);
     }
   }
 
   return lines.join('\n');
+}
+
+function defaultTaskForReferences(imageFiles: Record<string, any>[]) {
+  if (imageFiles.length === 1) {
+    const role = normalizeRole(imageFiles[0]);
+    if (role === 'SUBJECT') {
+      return 'Create a reference-preserving image of the same subject. Only adjust the controlled subject axis if needed; do not redesign the subject or change the background.';
+    }
+    if (role === 'SCENE') {
+      return 'Create a new view of the same scene.';
+    }
+    if (role === 'STYLE') {
+      return 'Create an image using only the visual style of the reference. Do not copy its content, background, layout, or objects.';
+    }
+  }
+  return 'Create one finished image from the provided module references while respecting each image role.';
+}
+
+function buildImageReferenceInputs(imageFiles: Record<string, any>[]): ImageReferenceInput[] {
+  return imageFiles.map((file, index) => {
+    const label = file.label || file.name || 'UNASSIGNED';
+    const role = normalizeRole(file);
+    const strength = describeReferenceStrength(file.strength, role, label);
+    return {
+      url: file.url as string,
+      instruction: [
+        `Reference Image ${index + 1}`,
+        `Role: ${role}`,
+        `Label: ${label}`,
+        `Control: ${strength.strengthLabel} (${strength.controlAxis})`,
+        `Rule: ${strength.contract}`
+      ].join('\n')
+    };
+  });
 }
 
 export async function generate(payload: GenerationPayload, settings: GenerationSettings, callbacks: GenerationCallbacks, files?: Record<string, any>[]) {
@@ -318,9 +363,8 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
 
   try {
     const effectivePrompt = buildSimplePrompt(userPrompt, imageFiles);
-    const imageRefs = imageFiles.map(file => file.url as string);
+    const imageRefs = buildImageReferenceInputs(imageFiles);
     const manifest = imageFiles.map((file, index) => ({
-      ...describeReferenceStrength(file.strength, normalizeRole(file)),
       kind: 'image',
       position: index + 1,
       imgUrl: file.url,
@@ -328,6 +372,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
       label: file.label || file.name || 'UNASSIGNED',
       folder: file.folder || null,
       role: normalizeRole(file),
+      ...describeReferenceStrength(file.strength, normalizeRole(file), file.label || file.name || 'UNASSIGNED'),
       strength: normalizeStrength(file.strength)
     }));
 
@@ -553,14 +598,6 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
 
   return `data:${prediction.mimeType};base64,${prediction.bytesBase64Encoded}`;
 }
-
-
-
-
-
-
-
-
 
 
 

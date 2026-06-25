@@ -30,7 +30,9 @@ export default function PromptBar() {
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [draftProjectId, setDraftProjectId] = useState<number | null>(null);
+  const [agentConsoleOpen, setAgentConsoleOpen] = useState(false);
   const inputRef = useRef<HTMLDivElement>(null);
+  const promptBarRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -38,10 +40,18 @@ export default function PromptBar() {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setDropdownOpen(false);
       }
+      if (promptBarRef.current && !promptBarRef.current.contains(e.target as Node)) {
+        setAgentConsoleOpen(false);
+      }
     };
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle("agent-console-open", agentConsoleOpen);
+    return () => document.body.classList.remove("agent-console-open");
+  }, [agentConsoleOpen]);
 
   // Sync state from custom events (like HUD reuse)
   useEffect(() => {
@@ -212,166 +222,179 @@ export default function PromptBar() {
   };
 
   const placeholderText = "What are we making today?";
+  const activeModuleCount = moduleContext.files.filter((file) => file.eye !== false && file.url && !file.folder).length;
 
   return (
-    <div className="prompt-bar" id="promptBar" data-state="FRAME">
-      <button
-        className="btn-upload-ref" 
-        id="moduleQuickUpload" 
-        type="button"
-        title="Add module image"
-        aria-label="Add module image"
-        onClick={() => document.getElementById("mp-file-input")?.click()}
-      ></button>
-      
-      <div className="settings-anchor" ref={dropdownRef}>
+    <div className="prompt-bar" id="promptBar" data-state="FRAME" ref={promptBarRef}>
+      <div className="prompt-bar-row">
         <button
-          className={`btn-settings ${dropdownOpen ? "open" : ""}`} 
-          id="settingsBtn"
+          className="btn-upload-ref"
+          id="moduleQuickUpload"
           type="button"
-          title="Image settings"
-          aria-label="Image settings"
-          onClick={() => setDropdownOpen(!dropdownOpen)}
-        >
-          <img src="assets/icon-settings.svg" alt="settings" />
-        </button>
+          title="Add module image"
+          aria-label="Add module image"
+          onClick={() => document.getElementById("mp-file-input")?.click()}
+        ></button>
         
-        <div className="cmp-menu settings-dropdown" id="settingsDropdown" hidden={!dropdownOpen}>
-          <div className="cmp-menu-title">MODEL</div>
-          {Object.entries(MODELS).map(([modelKey, model]) => (
-            <button
-              key={modelKey}
-              className={settings.activeModelKey === modelKey ? "primary" : ""}
-              type="button"
-              onClick={() => settings.setActiveModelKey(modelKey)}
-            >
-              <span>{model.label}</span>
-            </button>
-          ))}
+        <div className="settings-anchor" ref={dropdownRef}>
+          <button
+            className={`btn-settings ${dropdownOpen ? "open" : ""}`}
+            id="settingsBtn"
+            type="button"
+            title="Image settings"
+            aria-label="Image settings"
+            onClick={() => setDropdownOpen(!dropdownOpen)}
+          >
+            <img src="assets/icon-settings.svg" alt="settings" />
+          </button>
 
-          <div className="cmp-menu-title">ASPECT RATIO</div>
-          {settings.activeModel.aspectRatios.map((ratio) => {
-            const labels: Record<string, string> = {
-              "1:1": "SQUARE",
-              "16:9": "LANDSCAPE",
-              "9:16": "PORTRAIT",
-              "4:3": "LANDSCAPE",
-              "3:4": "PORTRAIT",
-            };
-            return (
+          <div className="cmp-menu settings-dropdown" id="settingsDropdown" hidden={!dropdownOpen}>
+            <div className="cmp-menu-title">MODEL</div>
+            {Object.entries(MODELS).map(([modelKey, model]) => (
               <button
-                key={ratio}
-                className={frameRatio === ratio ? "primary" : ""}
+                key={modelKey}
+                className={settings.activeModelKey === modelKey ? "primary" : ""}
                 type="button"
-                onClick={() => setFrameRatio(ratio)}
+                onClick={() => settings.setActiveModelKey(modelKey)}
               >
-                <span>{ratio}</span>
-                <span>{labels[ratio]}</span>
+                <span>{model.label}</span>
               </button>
-            );
-          })}
+            ))}
 
-          <div className="cmp-menu-title">RESOLUTION</div>
-          {settings.activeModel.resolutions.length ? (
-            <div className="image-settings-options">
-              {settings.activeModel.resolutions.map((resolution) => (
+            <div className="cmp-menu-title">ASPECT RATIO</div>
+            {settings.activeModel.aspectRatios.map((ratio) => {
+              const labels: Record<string, string> = {
+                "1:1": "SQUARE",
+                "16:9": "LANDSCAPE",
+                "9:16": "PORTRAIT",
+                "4:3": "LANDSCAPE",
+                "3:4": "PORTRAIT",
+              };
+              return (
                 <button
-                  key={resolution}
-                  className={settings.activeResolution === resolution ? "primary" : ""}
+                  key={ratio}
+                  className={frameRatio === ratio ? "primary" : ""}
                   type="button"
-                  onClick={() => settings.setActiveResolution(resolution)}
+                  onClick={() => setFrameRatio(ratio)}
                 >
-                  {resolution}
+                  <span>{ratio}</span>
+                  <span>{labels[ratio]}</span>
                 </button>
-              ))}
-            </div>
-          ) : (
-            <button className="primary" type="button">
-              <span>DEFAULT</span>
-            </button>
-          )}
+              );
+            })}
 
-          {settings.activeModel.thinkingLevels && settings.activeModel.thinkingLevels.length > 0 && (
-            <>
-              <div className="cmp-menu-title">THINKING</div>
+            <div className="cmp-menu-title">RESOLUTION</div>
+            {settings.activeModel.resolutions.length ? (
               <div className="image-settings-options">
-                {settings.activeModel.thinkingLevels.map((level) => (
+                {settings.activeModel.resolutions.map((resolution) => (
                   <button
-                    key={level}
-                    className={settings.thinkingLevel === level ? "primary" : ""}
+                    key={resolution}
+                    className={settings.activeResolution === resolution ? "primary" : ""}
                     type="button"
-                    onClick={() => settings.setThinkingLevel(level)}
+                    onClick={() => settings.setActiveResolution(resolution)}
                   >
-                    {level.toUpperCase()}
+                    {resolution}
                   </button>
                 ))}
               </div>
-            </>
-          )}
+            ) : (
+              <button className="primary" type="button">
+                <span>DEFAULT</span>
+              </button>
+            )}
 
-          <div className="cmp-menu-title">VARIATIONS</div>
-          <div className="image-settings-stepper">
-            <button
-              type="button"
-              title="Decrease variations"
-              disabled={parseInt(frameVar.toString(), 10) <= 1}
-              onClick={() => {
-                const value = parseInt(frameVar.toString(), 10);
-                if (value > 1) setFrameVar(value - 1);
-              }}
-            >
-              -
-            </button>
-            <span>
-              {frameVar} IMAGE{parseInt(frameVar.toString(), 10) === 1 ? "" : "S"}
-            </span>
-            <button
-              type="button"
-              title="Increase variations"
-              disabled={parseInt(frameVar.toString(), 10) >= 10}
-              onClick={() => {
-                const value = parseInt(frameVar.toString(), 10);
-                if (value < 10) setFrameVar(value + 1);
-              }}
-            >
-              +
-            </button>
+            {settings.activeModel.thinkingLevels && settings.activeModel.thinkingLevels.length > 0 && (
+              <>
+                <div className="cmp-menu-title">THINKING</div>
+                <div className="image-settings-options">
+                  {settings.activeModel.thinkingLevels.map((level) => (
+                    <button
+                      key={level}
+                      className={settings.thinkingLevel === level ? "primary" : ""}
+                      type="button"
+                      onClick={() => settings.setThinkingLevel(level)}
+                    >
+                      {level.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="cmp-menu-title">VARIATIONS</div>
+            <div className="image-settings-stepper">
+              <button
+                type="button"
+                title="Decrease variations"
+                disabled={parseInt(frameVar.toString(), 10) <= 1}
+                onClick={() => {
+                  const value = parseInt(frameVar.toString(), 10);
+                  if (value > 1) setFrameVar(value - 1);
+                }}
+              >
+                -
+              </button>
+              <span>
+                {frameVar} IMAGE{parseInt(frameVar.toString(), 10) === 1 ? "" : "S"}
+              </span>
+              <button
+                type="button"
+                title="Increase variations"
+                disabled={parseInt(frameVar.toString(), 10) >= 10}
+                onClick={() => {
+                  const value = parseInt(frameVar.toString(), 10);
+                  if (value < 10) setFrameVar(value + 1);
+                }}
+              >
+                +
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      {generationError && (
-        <button
-          className="prompt-inline-error"
-          type="button"
-          title={generationError}
-          onClick={() => setGenerationError("")}
-        >
-          {generationError}
-        </button>
-      )}
-      <div className="prompt-input-area">
-        <div 
-          className={`prompt-text-field ${promptText === "" ? "has-placeholder" : ""}`} 
-          id="promptText" 
-          contentEditable="true"
-          role="textbox"
-          aria-label="Image prompt"
-          data-placeholder={placeholderText}
-          ref={inputRef}
-          onInput={(e) => setPromptText(e.currentTarget.textContent || "")}
-          onKeyDown={handleKeyDown}
-          suppressContentEditableWarning={true}
-        ></div>
-        <button
-          className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`}
-          id="generateBtn"
-          type="button"
-          disabled={!activeProjectId}
-          onClick={handleGenerate}
-        >
-          FRAME
-        </button>
+        {generationError && (
+          <button
+            className="prompt-inline-error"
+            type="button"
+            title={generationError}
+            onClick={() => setGenerationError("")}
+          >
+            {generationError}
+          </button>
+        )}
+        <div className="prompt-input-area">
+          <div
+            className={`prompt-text-field ${promptText === "" ? "has-placeholder" : ""}`}
+            id="promptText"
+            contentEditable="true"
+            role="textbox"
+            aria-label="Image prompt"
+            data-placeholder={placeholderText}
+            ref={inputRef}
+            onFocus={() => setAgentConsoleOpen(true)}
+            onInput={(e) => setPromptText(e.currentTarget.textContent || "")}
+            onKeyDown={handleKeyDown}
+            suppressContentEditableWarning={true}
+          ></div>
+          <button
+            className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`}
+            id="generateBtn"
+            type="button"
+            disabled={!activeProjectId}
+            onClick={handleGenerate}
+          >
+            FRAME
+          </button>
+        </div>
+      </div>
+      <div className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
+        <div className="agent-console-scroll">
+          <div className="agent-line">&gt; <mark>CAFE AGENT / BRIEF DRAFT</mark></div>
+          <div className="agent-line">&gt; <mark>MODULES: {activeModuleCount} ACTIVE</mark></div>
+          <div className="agent-line">&gt; USER: {promptText.trim() || "WAITING FOR INSTRUCTION"}</div>
+          <div className="agent-line">&gt; PLAN: <mark>READ MODULE ROLES, PRESERVE ROLE BOUNDARIES, DRAFT PROMPT BEFORE EXECUTE.</mark></div>
+          <div className="agent-line agent-muted">&gt; STATUS: <mark>MOCK CONSOLE ONLY. AGENT ROUTE NOT CONNECTED YET.</mark></div>
+        </div>
       </div>
     </div>
   );

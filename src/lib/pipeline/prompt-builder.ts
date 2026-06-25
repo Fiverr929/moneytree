@@ -23,7 +23,7 @@ export function collectPayload(
       .filter(f => f.eye !== false && f.url && !f.folder && ['SUBJECT', 'SCENE', 'STYLE'].includes(String(f.mode || '').toUpperCase()))
       .map(f => {
         const role = normalizeRole(f.mode);
-        const strength = describeReferenceStrength(f.strength, role);
+        const strength = describeReferenceStrength(f.strength, role, f.label || f.name || 'UNASSIGNED');
         return {
           uuid: f.uuid,
           imgUrl: f.url,
@@ -31,12 +31,11 @@ export function collectPayload(
           label: f.label,
           strength: strength.value,
           strengthBand: strength.band,
+          strengthAxis: strength.controlAxis,
         };
       })
   };
 }
-
-
 
 
 
