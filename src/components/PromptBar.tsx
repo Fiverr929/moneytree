@@ -1,12 +1,19 @@
 "use client";
 
-import React, { useState, useEffect, useRef, KeyboardEvent } from "react";
+import React, { useState, useEffect, useRef, useMemo, KeyboardEvent } from "react";
 import { useApp } from "@/context/AppContext";
 import { MODELS, useSettings } from "@/context/SettingsContext";
 import { useGallery, GalleryCell } from "@/context/GalleryContext";
 import { useModule } from "@/context/ModuleContext";
 import { generate, storeGenerationDebug } from "@/lib/pipeline/api";
 import { collectPayload } from "@/lib/pipeline/prompt-builder";
+import {
+  createMockBriefDraft,
+  createReferenceSnapshot,
+  fingerprintModuleFiles,
+} from "@/lib/brief-agent/mockPlanner";
+import { requestBriefAgent } from "@/lib/brief-agent/client";
+import type { AgentMessage } from "@/lib/brief-agent/types";
 
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
 
@@ -31,6 +38,10 @@ export default function PromptBar() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [draftProjectId, setDraftProjectId] = useState<number | null>(null);
   const [agentConsoleOpen, setAgentConsoleOpen] = useState(false);
+  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  const [agentPending, setAgentPending] = useState(false);
+  const [agentError, setAgentError] = useState("");
+  const [referenceSnapshot, setReferenceSnapshot] = useState(() => createReferenceSnapshot([]));
   const inputRef = useRef<HTMLDivElement>(null);
   const promptBarRef = useRef<HTMLDivElement>(null);
 
@@ -83,6 +94,8 @@ export default function PromptBar() {
   useEffect(() => {
     setDraftProjectId(null);
     setGenerationError("");
+    setAgentMessages([]);
+    setAgentError("");
     try {
       const savedDraft = window.localStorage.getItem(`${PROMPT_DRAFT_STORAGE_KEY}:${activeProjectId || "none"}`);
       setPromptText(savedDraft || "");
@@ -193,10 +206,76 @@ export default function PromptBar() {
     }
   };
 
+  const referenceFingerprint = useMemo(
+    () => fingerprintModuleFiles(moduleContext.files),
+    [moduleContext.files],
+  );
+
+  useEffect(() => {
+    setReferenceSnapshot((current) => {
+      if (current.sourceFingerprint === referenceFingerprint) return current;
+      return createReferenceSnapshot(moduleContext.files);
+    });
+  }, [moduleContext.files, referenceFingerprint]);
+
+  const briefDraft = useMemo(
+    () => createMockBriefDraft(referenceSnapshot, agentMessages),
+    [referenceSnapshot, agentMessages],
+  );
+
+  const formatAgentTime = (value: string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "--:--";
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const submitAgentMessage = async () => {
+    const trimmed = promptText.trim();
+    if (!trimmed || agentPending) return;
+    const createdAt = new Date().toISOString();
+    const userMessage: AgentMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      text: trimmed,
+      createdAt,
+    };
+    const nextUserMessages = [...agentMessages, userMessage];
+    setAgentMessages(nextUserMessages);
+    setAgentPending(true);
+    setAgentError("");
+    if (trimmed && promptHistory[0] !== trimmed) {
+      setPromptHistory([trimmed, ...promptHistory]);
+    }
+    setHistoryIndex(-1);
+    setPromptText("");
+    try {
+      const response = await requestBriefAgent({
+        referenceSnapshot,
+        messages: nextUserMessages,
+      });
+      setAgentMessages([...nextUserMessages, response.message]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Brief agent failed.";
+      setAgentError(message);
+      setAgentMessages([
+        ...nextUserMessages,
+        {
+          id: crypto.randomUUID(),
+          role: "system",
+          text: `AGENT ERROR: ${message}`,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    } finally {
+      setAgentPending(false);
+    }
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleGenerate();
+      if (agentConsoleOpen) void submitAgentMessage();
+      else handleGenerate();
     } else if (e.key === "Escape") {
       setPromptText("");
       setHistoryIndex(-1);
@@ -223,6 +302,7 @@ export default function PromptBar() {
 
   const placeholderText = "What are we making today?";
   const activeModuleCount = moduleContext.files.filter((file) => file.eye !== false && file.url && !file.folder).length;
+  const newestMessages = [...agentMessages].reverse();
 
   return (
     <div className="prompt-bar" id="promptBar" data-state="FRAME" ref={promptBarRef}>
@@ -372,6 +452,7 @@ export default function PromptBar() {
             data-placeholder={placeholderText}
             ref={inputRef}
             onFocus={() => setAgentConsoleOpen(true)}
+            onClick={() => setAgentConsoleOpen(true)}
             onInput={(e) => setPromptText(e.currentTarget.textContent || "")}
             onKeyDown={handleKeyDown}
             suppressContentEditableWarning={true}
@@ -389,11 +470,74 @@ export default function PromptBar() {
       </div>
       <div className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
         <div className="agent-console-scroll">
-          <div className="agent-line">&gt; <mark>CAFE AGENT / BRIEF DRAFT</mark></div>
-          <div className="agent-line">&gt; <mark>MODULES: {activeModuleCount} ACTIVE</mark></div>
-          <div className="agent-line">&gt; USER: {promptText.trim() || "WAITING FOR INSTRUCTION"}</div>
-          <div className="agent-line">&gt; PLAN: <mark>READ MODULE ROLES, PRESERVE ROLE BOUNDARIES, DRAFT PROMPT BEFORE EXECUTE.</mark></div>
-          <div className="agent-line agent-muted">&gt; STATUS: <mark>MOCK CONSOLE ONLY. AGENT ROUTE NOT CONNECTED YET.</mark></div>
+          <div className="agent-section">
+            <div className="agent-line">&gt; <mark>CAFE AGENT / BRIEF DRAFT</mark></div>
+            <div className="agent-line">&gt; STATE: <mark>{briefDraft.status.toUpperCase()}</mark></div>
+            <div className="agent-line">&gt; ROUTE: <mark>{agentPending ? "THINKING" : "CONNECTED / MOCK BRAIN"}</mark></div>
+          </div>
+          {promptText.trim() && (
+            <div className="agent-section">
+              <div className="agent-line">&gt; INPUT: {promptText.trim()}</div>
+            </div>
+          )}
+          <div className="agent-section agent-transcript">
+            <div className="agent-line">&gt; <mark>LATEST FIRST</mark></div>
+            {newestMessages.length ? (
+              newestMessages.map((message) => (
+                <div className="agent-turn" key={message.id}>
+                  <div className="agent-line">
+                    &gt; <mark>{formatAgentTime(message.createdAt)} / {message.role.toUpperCase()}</mark>
+                  </div>
+                  {message.text.split("\n").map((line, index) => (
+                    <div className="agent-line" key={`${message.id}-${index}`}>&gt; {line}</div>
+                  ))}
+                </div>
+              ))
+            ) : (
+              <div className="agent-line agent-muted">&gt; NO CONVERSATION YET. TYPE A DIRECTION AND PRESS ENTER.</div>
+            )}
+            {agentPending && (
+              <div className="agent-line agent-muted">&gt; WAITING FOR AGENT RESPONSE.</div>
+            )}
+            {agentError && (
+              <div className="agent-line agent-muted">&gt; ERROR: <mark>{agentError}</mark></div>
+            )}
+          </div>
+          <div className="agent-section agent-reference">
+            <div className="agent-line">&gt; <mark>REFERENCE SNAPSHOT</mark></div>
+            <div className="agent-line">&gt; READ ONCE: {formatAgentTime(referenceSnapshot.createdAt)} / {activeModuleCount} ACTIVE</div>
+            {referenceSnapshot.observations.map((observation, index) => (
+              <div className="agent-line" key={observation.imageId}>
+                &gt; REF {index + 1}: <mark>{observation.role} / {observation.label}</mark> PRESERVE {observation.mustPreserve.join(", ")}.
+              </div>
+            ))}
+          </div>
+          <div className="agent-section">
+            {briefDraft.clarification.needed && !newestMessages.length && (
+              <>
+                <div className="agent-line">&gt; CLARIFY: <mark>{briefDraft.clarification.reason}</mark></div>
+                {briefDraft.clarification.questions.map((question, index) => (
+                  <div className="agent-line" key={question}>&gt; Q{index + 1}: {question}</div>
+                ))}
+              </>
+            )}
+            <div className="agent-line">&gt; PLAN: <mark>{briefDraft.plan.intent}</mark></div>
+            <div className="agent-line">&gt; SUBJECT: {briefDraft.plan.subjectPolicy}</div>
+            <div className="agent-line">&gt; SCENE: {briefDraft.plan.scenePolicy}</div>
+            <div className="agent-line">&gt; STYLE: {briefDraft.plan.stylePolicy}</div>
+            {briefDraft.warnings.map((warning) => (
+              <div className="agent-line agent-muted" key={warning}>&gt; WARNING: <mark>{warning}</mark></div>
+            ))}
+          </div>
+          <div className="agent-section">
+            <div className="agent-line">&gt; FINAL PROMPT:</div>
+            {briefDraft.finalPrompt
+              ? briefDraft.finalPrompt.split("\n").map((line, index) => (
+                <div className="agent-line agent-muted" key={`${line}-${index}`}>&gt; {line}</div>
+              ))
+              : <div className="agent-line agent-muted">&gt; WAITING FOR CLARIFICATION.</div>}
+            <div className="agent-line agent-muted">&gt; STATUS: <mark>AGENT ROUTE CONNECTED. MODEL BRAIN NOT CONNECTED YET.</mark></div>
+          </div>
         </div>
       </div>
     </div>

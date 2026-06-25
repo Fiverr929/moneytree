@@ -39,6 +39,13 @@ Debug capture:
 - Generation runs write a local debug payload to `window.__cafeLastGenerationDebug`.
 - The payload is runtime-scoped to the current browser tab and is meant for checking the latest prompt, settings, module files, manifest, request size, result status, and structured HTTP error details without manual copy/paste.
 
+Brief Agent:
+- The prompt bar owns the first mock Brief Agent console. It opens on prompt focus, collapses on outside click, and shifts the Gallery down while open.
+- `src/lib/brief-agent/types.ts` defines the first `BriefDraft` contract. `src/lib/brief-agent/mockPlanner.ts` fills that contract from active module files until a real planner API is added.
+- `src/app/api/brief-agent/route.ts` is the first agent harness boundary. The prompt bar calls it through `src/lib/brief-agent/client.ts`; the route still uses the mock planner, but the UI no longer depends on local-only agent responses.
+- Brief drafts include a clarification state. When the user instruction is empty or too broad, the console asks role-specific questions and withholds the final prompt preview.
+- While the console is open, Enter submits a mock agent message instead of generating. The transcript renders newest-first with timestamps. Active references are read into a snapshot separately from the conversation and are reused until modules change.
+
 Legacy files:
 Main file: `CafeHTML-v2.html`
 Styles: `style.css`

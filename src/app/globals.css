@@ -388,6 +388,33 @@
       overflow-wrap: anywhere;
     }
 
+    .agent-section {
+      padding: 2px 0 8px;
+      border-bottom: 1px solid rgba(82, 113, 255, 0.35);
+      margin-bottom: 7px;
+    }
+
+    .agent-section:last-child {
+      border-bottom: 0;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .agent-transcript {
+      padding-top: 4px;
+    }
+
+    .agent-reference {
+      color: rgba(199, 199, 199, 0.82);
+    }
+
+    .agent-turn {
+      margin: 8px 0 10px;
+    }
+
+    .agent-turn:last-child {
+      margin-bottom: 0;
+    }
     .agent-line mark {
       background: #5271ff;
       color: #c7c7c7;
