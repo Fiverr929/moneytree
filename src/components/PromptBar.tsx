@@ -12,10 +12,59 @@ import {
   createReferenceSnapshot,
   fingerprintModuleFiles,
 } from "@/lib/brief-agent/mockPlanner";
-import { requestBriefAgent } from "@/lib/brief-agent/client";
-import type { AgentMessage } from "@/lib/brief-agent/types";
+import { requestBriefAgent, requestReferenceRead } from "@/lib/brief-agent/client";
+import { applySkillContract } from "@/lib/brief-agent/skillContract";
+import type { AgentMessage, BriefDraft, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot } from "@/lib/brief-agent/types";
 
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
+const REFERENCE_SNAPSHOT_CACHE_KEY = "cafehtml-brief-reference-cache-v1";
+const REFERENCE_SNAPSHOT_CACHE_LIMIT = 20;
+const GENERATE_COMMAND = "/Generate";
+
+type ReferenceSnapshotCacheEntry = {
+  sourceFingerprint: string;
+  snapshot: BriefReferenceSnapshot;
+  model: string | null;
+  cachedAt: string;
+};
+
+function readReferenceSnapshotCache(): ReferenceSnapshotCacheEntry[] {
+  try {
+    const raw = window.localStorage.getItem(REFERENCE_SNAPSHOT_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function findReferenceSnapshotCache(sourceFingerprint: string) {
+  return readReferenceSnapshotCache().find((entry) => entry.sourceFingerprint === sourceFingerprint) || null;
+}
+
+function writeReferenceSnapshotCache(entry: ReferenceSnapshotCacheEntry) {
+  try {
+    const next = [
+      entry,
+      ...readReferenceSnapshotCache().filter((item) => item.sourceFingerprint !== entry.sourceFingerprint),
+    ].slice(0, REFERENCE_SNAPSHOT_CACHE_LIMIT);
+    window.localStorage.setItem(REFERENCE_SNAPSHOT_CACHE_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore storage access issues in embedded browsers.
+  }
+}
+
+function flattenPromptArtifact(text: string) {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function parseGenerateCommand(text: string) {
+  const trimmed = text.trim();
+  const commandMatch = trimmed.match(/^\/generate(?:\s+|$)/i);
+  if (!commandMatch) return null;
+  return trimmed.slice(commandMatch[0].length).trim();
+}
 
 export default function PromptBar() {
   const { activeProjectId } = useApp();
@@ -41,6 +90,11 @@ export default function PromptBar() {
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [agentPending, setAgentPending] = useState(false);
   const [agentError, setAgentError] = useState("");
+  const [agentBrain, setAgentBrain] = useState<"model" | "mock">("mock");
+  const [agentModel, setAgentModel] = useState<string | null>(null);
+  const [agentDraft, setAgentDraft] = useState<BriefDraft | null>(null);
+  const [referenceReadError, setReferenceReadError] = useState("");
+  const [referenceReadModel, setReferenceReadModel] = useState<string | null>(null);
   const [referenceSnapshot, setReferenceSnapshot] = useState(() => createReferenceSnapshot([]));
   const inputRef = useRef<HTMLDivElement>(null);
   const promptBarRef = useRef<HTMLDivElement>(null);
@@ -96,6 +150,11 @@ export default function PromptBar() {
     setGenerationError("");
     setAgentMessages([]);
     setAgentError("");
+    setAgentBrain("mock");
+    setAgentModel(null);
+    setAgentDraft(null);
+    setReferenceReadError("");
+    setReferenceReadModel(null);
     try {
       const savedDraft = window.localStorage.getItem(`${PROMPT_DRAFT_STORAGE_KEY}:${activeProjectId || "none"}`);
       setPromptText(savedDraft || "");
@@ -118,8 +177,27 @@ export default function PromptBar() {
   const handleGenerate = async () => {
     if (!activeProjectId) return;
     const trimmed = promptText.trim();
-    if (!trimmed && moduleContext.files.length === 0) {
-      setGenerationError("Add a prompt or at least one module image.");
+    const agentFinalPrompt = agentDraft?.finalPrompt.trim() || "";
+    const commandPrompt = parseGenerateCommand(trimmed);
+    if (agentPending) {
+      setGenerationError("Wait for the agent response before framing.");
+      return;
+    }
+    if (commandPrompt === null) {
+      setGenerationError("Use /Generate to frame, or press Enter to talk to the agent.");
+      return;
+    }
+    if (!commandPrompt) {
+      setGenerationError("Add a prompt after /Generate.");
+      return;
+    }
+    const executionPrompt = commandPrompt;
+    const stagedPromptArtifact = findPromptArtifactByPrompt(executionPrompt);
+    const executionSource = stagedPromptArtifact
+      ? "agent-final-prompt"
+      : "generate-command";
+    if (!executionPrompt) {
+      setGenerationError("Add a prompt after /Generate.");
       return;
     }
     setGenerationError("");
@@ -134,11 +212,27 @@ export default function PromptBar() {
       variation: parseInt(frameVar.toString(), 10)
     };
 
-    const payload = collectPayload(
-      trimmed,
-      moduleContext.files,
-      fullSettings
-    );
+    const payload = {
+      ...collectPayload(
+        executionPrompt,
+        moduleContext.files,
+        fullSettings
+      ),
+      executionSource,
+      effectivePrompt: executionPrompt,
+      agentDraft: stagedPromptArtifact
+        ? {
+          id: stagedPromptArtifact.sourceDraftId || agentDraft?.id || null,
+          promptArtifactId: stagedPromptArtifact.id,
+          sourceFingerprint: stagedPromptArtifact.sourceFingerprint || null,
+          refCount: stagedPromptArtifact.refCount ?? null,
+          brain: agentBrain,
+          model: agentModel,
+          skillChecks: agentDraft?.skillChecks || [],
+          warnings: agentDraft?.warnings || [],
+        }
+        : null,
+    };
 
     const debugStartedAt = new Date().toISOString();
     const promptBarDebug = {
@@ -146,8 +240,12 @@ export default function PromptBar() {
       startedAt: debugStartedAt,
       updatedAt: debugStartedAt,
       source: 'PromptBar.handleGenerate',
-      userPrompt: trimmed,
+      executionSource,
+      userPrompt: executionPrompt,
       rawPrompt: trimmed,
+      agentFinalPrompt: agentFinalPrompt || null,
+      agentBrain,
+      agentModel,
       payload,
       settings: {
         mode: "FRAME",
@@ -212,21 +310,107 @@ export default function PromptBar() {
   );
 
   useEffect(() => {
+    let cancelled = false;
+    const fallbackSnapshot = createReferenceSnapshot(moduleContext.files);
     setReferenceSnapshot((current) => {
       if (current.sourceFingerprint === referenceFingerprint) return current;
-      return createReferenceSnapshot(moduleContext.files);
+      return fallbackSnapshot;
     });
-  }, [moduleContext.files, referenceFingerprint]);
+    setAgentDraft(null);
+    setReferenceReadError("");
+    setReferenceReadModel(null);
 
-  const briefDraft = useMemo(
-    () => createMockBriefDraft(referenceSnapshot, agentMessages),
-    [referenceSnapshot, agentMessages],
-  );
+    const images: BriefReferenceImageInput[] = moduleContext.files
+      .filter((file) => file.eye !== false && file.url && !file.folder)
+      .map((file) => {
+        const role = String(file.mode || "").toUpperCase();
+        return {
+          imageId: file.uuid || String(file.id),
+          role: role === "SUBJECT" || role === "SCENE" || role === "STYLE" ? role as BriefReferenceRole : "UNASSIGNED",
+          label: file.label || file.name || "UNLABELED",
+          strength: Number.isFinite(file.strength) ? file.strength : 0,
+          dataUrl: file.url,
+        };
+      });
+
+    if (!images.length) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const cached = findReferenceSnapshotCache(referenceFingerprint);
+    if (cached) {
+      setReferenceSnapshot(cached.snapshot);
+      setReferenceReadModel(cached.model);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    requestReferenceRead({
+      sourceFingerprint: referenceFingerprint,
+      images,
+    }).then((response) => {
+      if (cancelled) return;
+      setReferenceSnapshot(response.snapshot);
+      setReferenceReadModel(response.model);
+      writeReferenceSnapshotCache({
+        sourceFingerprint: referenceFingerprint,
+        snapshot: response.snapshot,
+        model: response.model,
+        cachedAt: new Date().toISOString(),
+      });
+    }).catch((error) => {
+      if (cancelled) return;
+      const message = error instanceof Error ? error.message : "Reference reader failed.";
+      setReferenceReadError(message);
+      setReferenceSnapshot(fallbackSnapshot);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleContext.files, referenceFingerprint]);
 
   const formatAgentTime = (value: string) => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "--:--";
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const currentReferenceContext = (): NonNullable<AgentMessage["context"]> => ({
+    refCount: activeModuleCount,
+  });
+
+  const formatMessageHeader = (message: AgentMessage) => {
+    const parts = [formatAgentTime(message.createdAt), message.role.toUpperCase()];
+    if (message.role === "agent" && message.context) {
+      parts.push(
+        `${message.context.refCount} REFS`,
+      );
+    }
+    return parts.join(" / ");
+  };
+
+  function findPromptArtifactByPrompt(prompt: string) {
+    const normalized = flattenPromptArtifact(prompt);
+    return [...agentMessages].reverse().find((message) => (
+      message.promptArtifact
+      && flattenPromptArtifact(message.promptArtifact.prompt) === normalized
+    ))?.promptArtifact || null;
+  }
+
+  const stagePromptArtifact = (artifact: NonNullable<AgentMessage["promptArtifact"]>) => {
+    const text = artifact.prompt.trim();
+    if (!text) return;
+    setPromptText(`${GENERATE_COMMAND} ${flattenPromptArtifact(text)}`);
+    setGenerationError(
+      artifact.sourceFingerprint && artifact.sourceFingerprint !== referenceFingerprint
+        ? "This prompt was drafted for an older reference set."
+        : ""
+    );
+    requestAnimationFrame(() => inputRef.current?.focus());
   };
 
   const submitAgentMessage = async () => {
@@ -241,6 +425,7 @@ export default function PromptBar() {
     };
     const nextUserMessages = [...agentMessages, userMessage];
     setAgentMessages(nextUserMessages);
+    setAgentDraft(applySkillContract(createMockBriefDraft(referenceSnapshot, nextUserMessages)));
     setAgentPending(true);
     setAgentError("");
     if (trimmed && promptHistory[0] !== trimmed) {
@@ -253,7 +438,16 @@ export default function PromptBar() {
         referenceSnapshot,
         messages: nextUserMessages,
       });
-      setAgentMessages([...nextUserMessages, response.message]);
+      setAgentBrain(response.brain);
+      setAgentModel(response.model);
+      setAgentDraft(response.draft);
+      setAgentMessages([
+        ...nextUserMessages,
+        {
+          ...response.message,
+          context: currentReferenceContext(),
+        },
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Brief agent failed.";
       setAgentError(message);
@@ -274,8 +468,12 @@ export default function PromptBar() {
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (agentConsoleOpen) void submitAgentMessage();
-      else handleGenerate();
+      if (parseGenerateCommand(promptText) !== null) void handleGenerate();
+      else if (agentConsoleOpen) void submitAgentMessage();
+      else {
+        setAgentConsoleOpen(true);
+        void submitAgentMessage();
+      }
     } else if (e.key === "Escape") {
       setPromptText("");
       setHistoryIndex(-1);
@@ -303,6 +501,18 @@ export default function PromptBar() {
   const placeholderText = "What are we making today?";
   const activeModuleCount = moduleContext.files.filter((file) => file.eye !== false && file.url && !file.folder).length;
   const newestMessages = [...agentMessages].reverse();
+  const hasAgentFinalPrompt = !!agentDraft?.finalPrompt.trim();
+  const stagedGeneratePrompt = parseGenerateCommand(promptText);
+  const frameExecutionState = agentPending
+    ? "WAITING FOR AGENT"
+    : stagedGeneratePrompt !== null
+    ? "READY: /GENERATE COMMAND"
+    : hasAgentFinalPrompt
+    ? "USE STAGES /GENERATE"
+    : "TEXT GOES TO AGENT";
+  const footerModelSummary = agentModel && referenceReadModel && agentModel !== referenceReadModel
+    ? `PLANNER ${agentModel} / READER ${referenceReadModel}`
+    : `MODEL ${agentModel || referenceReadModel || "NO MODEL"}`;
 
   return (
     <div className="prompt-bar" id="promptBar" data-state="FRAME" ref={promptBarRef}>
@@ -470,73 +680,59 @@ export default function PromptBar() {
       </div>
       <div className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
         <div className="agent-console-scroll">
-          <div className="agent-section">
-            <div className="agent-line">&gt; <mark>CAFE AGENT / BRIEF DRAFT</mark></div>
-            <div className="agent-line">&gt; STATE: <mark>{briefDraft.status.toUpperCase()}</mark></div>
-            <div className="agent-line">&gt; ROUTE: <mark>{agentPending ? "THINKING" : "CONNECTED / MOCK BRAIN"}</mark></div>
-          </div>
-          {promptText.trim() && (
-            <div className="agent-section">
-              <div className="agent-line">&gt; INPUT: {promptText.trim()}</div>
-            </div>
-          )}
           <div className="agent-section agent-transcript">
-            <div className="agent-line">&gt; <mark>LATEST FIRST</mark></div>
             {newestMessages.length ? (
               newestMessages.map((message) => (
                 <div className="agent-turn" key={message.id}>
                   <div className="agent-line">
-                    &gt; <mark>{formatAgentTime(message.createdAt)} / {message.role.toUpperCase()}</mark>
+                    &gt; <mark>{formatMessageHeader(message)}</mark>
                   </div>
                   {message.text.split("\n").map((line, index) => (
                     <div className="agent-line" key={`${message.id}-${index}`}>&gt; {line}</div>
                   ))}
+                  {message.promptArtifact && (
+                    <div className="agent-prompt-draft agent-turn-artifact">
+                      <div className="agent-artifact-head">
+                        <span>&gt; <mark>{message.promptArtifact.title}</mark></span>
+                        <button type="button" onClick={() => stagePromptArtifact(message.promptArtifact!)}>USE</button>
+                      </div>
+                      <div className="agent-prompt-box">
+                        {message.promptArtifact.prompt}
+                      </div>
+                      {message.promptArtifact.sourceFingerprint && message.promptArtifact.sourceFingerprint !== referenceFingerprint && (
+                        <div className="agent-line agent-muted">&gt; REFS CHANGED SINCE THIS PROMPT.</div>
+                      )}
+                      <div className="agent-line agent-muted">&gt; USE STAGES /GENERATE FROM THIS TURN.</div>
+                    </div>
+                  )}
                 </div>
               ))
             ) : (
-              <div className="agent-line agent-muted">&gt; NO CONVERSATION YET. TYPE A DIRECTION AND PRESS ENTER.</div>
+              <div className="agent-line agent-muted">&gt; TYPE A DIRECTION AND PRESS ENTER.</div>
             )}
             {agentPending && (
-              <div className="agent-line agent-muted">&gt; WAITING FOR AGENT RESPONSE.</div>
+              <div className="agent-line">&gt; <mark>THINKING...</mark></div>
             )}
             {agentError && (
               <div className="agent-line agent-muted">&gt; ERROR: <mark>{agentError}</mark></div>
             )}
           </div>
-          <div className="agent-section agent-reference">
-            <div className="agent-line">&gt; <mark>REFERENCE SNAPSHOT</mark></div>
-            <div className="agent-line">&gt; READ ONCE: {formatAgentTime(referenceSnapshot.createdAt)} / {activeModuleCount} ACTIVE</div>
-            {referenceSnapshot.observations.map((observation, index) => (
-              <div className="agent-line" key={observation.imageId}>
-                &gt; REF {index + 1}: <mark>{observation.role} / {observation.label}</mark> PRESERVE {observation.mustPreserve.join(", ")}.
-              </div>
-            ))}
-          </div>
+          {promptText.trim() && parseGenerateCommand(promptText) === null && (
+            <div className="agent-section">
+              <div className="agent-line">&gt; <mark>UNSENT CHANGE</mark></div>
+              <div className="agent-line agent-muted">&gt; PRESS ENTER TO UPDATE THE DRAFT.</div>
+            </div>
+          )}
           <div className="agent-section">
-            {briefDraft.clarification.needed && !newestMessages.length && (
-              <>
-                <div className="agent-line">&gt; CLARIFY: <mark>{briefDraft.clarification.reason}</mark></div>
-                {briefDraft.clarification.questions.map((question, index) => (
-                  <div className="agent-line" key={question}>&gt; Q{index + 1}: {question}</div>
-                ))}
-              </>
-            )}
-            <div className="agent-line">&gt; PLAN: <mark>{briefDraft.plan.intent}</mark></div>
-            <div className="agent-line">&gt; SUBJECT: {briefDraft.plan.subjectPolicy}</div>
-            <div className="agent-line">&gt; SCENE: {briefDraft.plan.scenePolicy}</div>
-            <div className="agent-line">&gt; STYLE: {briefDraft.plan.stylePolicy}</div>
-            {briefDraft.warnings.map((warning) => (
-              <div className="agent-line agent-muted" key={warning}>&gt; WARNING: <mark>{warning}</mark></div>
-            ))}
+            <div className="agent-line agent-muted">&gt; {frameExecutionState}</div>
           </div>
-          <div className="agent-section">
-            <div className="agent-line">&gt; FINAL PROMPT:</div>
-            {briefDraft.finalPrompt
-              ? briefDraft.finalPrompt.split("\n").map((line, index) => (
-                <div className="agent-line agent-muted" key={`${line}-${index}`}>&gt; {line}</div>
-              ))
-              : <div className="agent-line agent-muted">&gt; WAITING FOR CLARIFICATION.</div>}
-            <div className="agent-line agent-muted">&gt; STATUS: <mark>AGENT ROUTE CONNECTED. MODEL BRAIN NOT CONNECTED YET.</mark></div>
+          {referenceReadError && (
+            <div className="agent-section agent-reference">
+              <div className="agent-line agent-muted">&gt; READER ERROR: <mark>{referenceReadError}</mark></div>
+            </div>
+          )}
+          <div className="agent-footer">
+            &gt; CAFE AGENT / {footerModelSummary}
           </div>
         </div>
       </div>

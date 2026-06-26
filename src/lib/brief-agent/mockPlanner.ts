@@ -46,6 +46,7 @@ function observationForFile(file: ModuleFile): ReferenceObservation {
       mustPreserve: ["identity/type", "shape", "wardrobe/materials", "distinctive details"],
       canChange: ["pose", "expression", "action", "orientation"],
       mustAvoid: ["new identity", "new object type", "using subject background as scene"],
+      readSource: "mock",
     };
   }
 
@@ -59,6 +60,7 @@ function observationForFile(file: ModuleFile): ReferenceObservation {
       mustPreserve: ["event/location", "background", "scale", "lighting direction", "visible anchors"],
       canChange: ["crop", "framing", "lens feel", "modest alternate shot"],
       mustAvoid: ["different event", "redesigned location", "unrelated subject"],
+      readSource: "mock",
     };
   }
 
@@ -72,6 +74,7 @@ function observationForFile(file: ModuleFile): ReferenceObservation {
       mustPreserve: ["medium", "palette", "texture", "lighting mood", "finish"],
       canChange: ["style intensity"],
       mustAvoid: ["copying style image content", "using style background", "importing style composition"],
+      readSource: "mock",
     };
   }
 
@@ -84,6 +87,7 @@ function observationForFile(file: ModuleFile): ReferenceObservation {
     mustPreserve: ["useful visual context"],
     canChange: ["supporting interpretation"],
     mustAvoid: ["overriding Subject, Scene, or Style modules"],
+    readSource: "mock",
   };
 }
 
@@ -209,6 +213,7 @@ export function createMockBriefDraft(
     plan,
     finalPrompt,
     warnings: observations.length ? [] : ["No active module references found."],
+    skillChecks: [],
     readyToExecute: false,
   };
 }

@@ -76,6 +76,23 @@ export default function HUD() {
     return null;
   }, []);
 
+  const promptTextForCell = useCallback((cell: ActiveHudCell) => (
+    cell?.effectivePrompt || cell?.prompt || cell?.userPrompt || ""
+  ), []);
+
+  const promptCommandForCell = useCallback((cell: ActiveHudCell) => {
+    const prompt = promptTextForCell(cell).trim();
+    if (!prompt) return "";
+    return /^\/generate(?:\s+|$)/i.test(prompt) ? prompt : `/Generate ${prompt}`;
+  }, [promptTextForCell]);
+
+  const promptSourceText = useCallback((cell: ActiveHudCell) => {
+    if (!cell) return null;
+    if (cell.executionSource === "agent-final-prompt") return "Agent draft";
+    if (cell.executionSource === "generate-command") return "/Generate";
+    return null;
+  }, []);
+
   const applyGalleryStudioResult = useCallback((cell: ActiveHudCell, url: string) => {
     if (!cell) return;
     const updatedAt = new Date().toISOString();
@@ -246,7 +263,7 @@ export default function HUD() {
   };
 
   const handleReusePrompt = () => {
-    const promptToReuse = activeCell.userPrompt ?? activeCell.prompt;
+    const promptToReuse = promptCommandForCell(activeCell);
     if (!promptToReuse) return;
     window.dispatchEvent(new CustomEvent("set-prompt", { detail: promptToReuse }));
     setThreeDotOpen(false);
@@ -254,7 +271,7 @@ export default function HUD() {
   };
 
   const handleCopyPrompt = async () => {
-    const promptToCopy = activeCell.effectivePrompt || activeCell.prompt || activeCell.userPrompt;
+    const promptToCopy = promptTextForCell(activeCell);
     if (!promptToCopy) return;
 
     const markCopyResult = (title: string) => {
@@ -299,7 +316,7 @@ export default function HUD() {
     if (activeCell.moduleSnapshot?.files) {
       setFiles(activeCell.moduleSnapshot.files);
     }
-    const promptToLoad = activeCell.userPrompt ?? activeCell.prompt;
+    const promptToLoad = promptCommandForCell(activeCell);
     if (promptToLoad) {
       window.dispatchEvent(new CustomEvent("set-prompt", { detail: promptToLoad }));
     }
@@ -448,17 +465,12 @@ export default function HUD() {
           )}
 
           <div className="info-section-header">
-            <span className="info-section-title">User Prompt</span>
-          </div>
-          <div className="prompt-text" id="info-user-prompt">{activeCell.userPrompt || '-'}</div>
-
-          <div className="info-section-header">
-            <span className="info-section-title">Effective Prompt</span>
+            <span className="info-section-title">Prompt{promptSourceText(activeCell) ? ` / ${promptSourceText(activeCell)}` : ""}</span>
             <button className="info-icon-btn" id="btn-copy-prompt" title={copyPromptTitle} onClick={handleCopyPrompt}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
           </div>
-          <div className="prompt-text" id="info-effective-prompt">{activeCell.effectivePrompt || activeCell.prompt || '-'}</div>
+          <div className="prompt-text" id="info-prompt">{promptTextForCell(activeCell) || '-'}</div>
         </div>
       </div>
 

@@ -232,6 +232,8 @@ export type GenerationPayload = {
   prompt?: string;
   userPrompt?: string;
   effectivePrompt?: string;
+  executionSource?: string;
+  agentDraft?: any;
   settings?: GenerationSettings;
   moduleSnapshot?: any;
   usedImages?: any[];
@@ -345,12 +347,25 @@ function buildImageReferenceInputs(imageFiles: Record<string, any>[]): ImageRefe
   });
 }
 
+function buildCleanReferenceInputs(imageFiles: Record<string, any>[]): ImageReferenceInput[] {
+  return imageFiles.map((file, index) => {
+    return {
+      url: file.url as string,
+      instruction: `Reference Image ${index + 1}`
+    };
+  });
+}
+
 export async function generate(payload: GenerationPayload, settings: GenerationSettings, callbacks: GenerationCallbacks, files?: Record<string, any>[]) {
   const model = settings.activeModel;
   const ratio = payload.settings?.aspectRatio || '1:1';
   const numImages = payload.settings?.variation || 1;
   const userPrompt = payload.userPrompt ?? payload.prompt ?? '';
   const imageFiles = getVisibleImageFiles(files);
+  const cleanPromptManaged = (
+    payload.executionSource === 'agent-final-prompt' ||
+    payload.executionSource === 'generate-command'
+  ) && !!payload.effectivePrompt?.trim();
 
   if (!userPrompt.trim() && !imageFiles.length) {
     callbacks.onError(new Error('No prompt and no images - type something or add module layers.'));
@@ -362,8 +377,12 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
   const debugRunId = crypto.randomUUID();
 
   try {
-    const effectivePrompt = buildSimplePrompt(userPrompt, imageFiles);
-    const imageRefs = buildImageReferenceInputs(imageFiles);
+    const effectivePrompt = cleanPromptManaged
+      ? payload.effectivePrompt!.trim()
+      : buildSimplePrompt(userPrompt, imageFiles);
+    const imageRefs = cleanPromptManaged
+      ? buildCleanReferenceInputs(imageFiles)
+      : buildImageReferenceInputs(imageFiles);
     const manifest = imageFiles.map((file, index) => ({
       kind: 'image',
       position: index + 1,
@@ -393,6 +412,8 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
       effectivePrompt,
       rawPrompt: userPrompt,
       finalPrompt: effectivePrompt,
+      executionSource: payload.executionSource || 'prompt-bar',
+      agentDraft: payload.agentDraft || null,
       manifest: manifest.map(({ imgUrl, ...item }) => ({
         ...item,
         hasImage: !!imgUrl
@@ -428,6 +449,8 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
         generated: true,
         moduleSnapshot: payload.moduleSnapshot || null,
         usedImages: payload.usedImages || [],
+        executionSource: payload.executionSource || 'prompt-bar',
+        agentDraft: payload.agentDraft || null,
         pipelineVersion: IMAGE_PIPELINE_VERSION,
         modelId: model?.id,
         generationSettings: {
@@ -598,8 +621,6 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
 
   return `data:${prediction.mimeType};base64,${prediction.bytesBase64Encoded}`;
 }
-
-
 
 
 

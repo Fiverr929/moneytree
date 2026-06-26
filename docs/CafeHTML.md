@@ -42,9 +42,14 @@ Debug capture:
 Brief Agent:
 - The prompt bar owns the first mock Brief Agent console. It opens on prompt focus, collapses on outside click, and shifts the Gallery down while open.
 - `src/lib/brief-agent/types.ts` defines the first `BriefDraft` contract. `src/lib/brief-agent/mockPlanner.ts` fills that contract from active module files until a real planner API is added.
-- `src/app/api/brief-agent/route.ts` is the first agent harness boundary. The prompt bar calls it through `src/lib/brief-agent/client.ts`; the route still uses the mock planner, but the UI no longer depends on local-only agent responses.
+- `src/app/api/brief-agent/route.ts` is the first agent harness boundary. The prompt bar calls it through `src/lib/brief-agent/client.ts`; the route tries a Vertex text planner first and falls back to the mock planner if `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` or model access is unavailable.
+- `src/lib/brief-agent/skillContract.ts` holds the reusable Subject/Scene/Style and strength contract. Drafts pass through this compiler/check layer before returning to the UI, so role-boundary repairs and warnings are visible as checks.
+- `src/app/api/brief-agent/read-references/route.ts` is the first image reader. The prompt bar sends active module images, roles, labels, and strengths; the route returns vision-backed `ReferenceObservation` facts before planning.
+- Vision reference snapshots are cached in browser storage by module fingerprint. The console reports `CACHE: HIT`, `MISS`, `SAVED`, or `UNAVAILABLE`.
 - Brief drafts include a clarification state. When the user instruction is empty or too broad, the console asks role-specific questions and withholds the final prompt preview.
 - While the console is open, Enter submits a mock agent message instead of generating. The transcript renders newest-first with timestamps. Active references are read into a snapshot separately from the conversation and are reused until modules change.
+- FRAME uses the agent final prompt when a clean `BriefDraft.finalPrompt` exists. If the user types after that draft, the console marks `UNSUBMITTED CHANGE` and blocks FRAME until Enter sends the new text to the agent.
+- Agent-managed FRAME runs bypass the legacy `buildSimplePrompt()` wrapper. The pipeline uses `BriefDraft.finalPrompt` directly and sends only lean role/label reference instructions so the old strength prompt text does not re-wrap the agent prompt.
 
 Legacy files:
 Main file: `CafeHTML-v2.html`

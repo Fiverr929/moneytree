@@ -28,6 +28,17 @@ export type GalleryCell = {
   userPrompt?: string;
   effectivePrompt?: string;
   prompt?: string;
+  executionSource?: "agent-final-prompt" | "generate-command" | "prompt-bar" | string;
+  agentDraft?: {
+    id?: string | null;
+    promptArtifactId?: string;
+    sourceFingerprint?: string | null;
+    refCount?: number | null;
+    brain?: "model" | "mock";
+    model?: string | null;
+    skillChecks?: unknown[];
+    warnings?: string[];
+  } | null;
   date?: string;
   type?: string;
   kind?: "image";
@@ -328,7 +339,6 @@ export function useGallery() {
   }
   return context;
 }
-
 
 
 

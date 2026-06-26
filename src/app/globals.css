@@ -408,6 +408,43 @@
       color: rgba(199, 199, 199, 0.82);
     }
 
+    .agent-artifact-head {
+      min-height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .agent-artifact-head button {
+      height: 18px;
+      border: 0;
+      background: #5271ff;
+      color: #c7c7c7;
+      padding: 0 8px;
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .agent-prompt-box {
+      margin-top: 5px;
+      padding: 8px 10px;
+      background: #5271ff;
+      color: #c7c7c7;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      text-transform: none;
+      line-height: 1.45;
+    }
+
+    .agent-footer {
+      color: rgba(199, 199, 199, 0.62);
+      font-size: 11px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
     .agent-turn {
       margin: 8px 0 10px;
     }
@@ -6962,6 +6999,11 @@ body.module-collapsed .module-panel {
 }
 
 .studio-module-panel .clr-main {
+  border-color: #c7c7c7;
+}
+
+.studio-module-panel .reference-hidden .clr-main {
+  background: #c7c7c7;
   border-color: #c7c7c7;
 }
 
