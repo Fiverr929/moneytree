@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useState, useEffect, ReactNode } from "react";
 
 export type ModelConfig = {
   id: string;
@@ -115,25 +115,38 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const costPerImage = costs[activeResolution] || costs['default'] || (activeModel.defaultResolution && costs[activeModel.defaultResolution]) || 0;
 
   // Intercept setter to also update defaults when changing models
-  const handleSetActiveModelKey = (key: string) => {
+  const handleSetActiveModelKey = useCallback((key: string) => {
     const model = MODELS[key];
     if (!model) return;
     setActiveModelKey(key);
     setActiveResolution(model.defaultResolution || (model.resolutions && model.resolutions[0]) || '1K');
-  };
+  }, []);
+
+  const value = useMemo(() => ({
+    geminiApiKey,
+    setGeminiApiKey,
+    activeModelKey,
+    setActiveModelKey: handleSetActiveModelKey,
+    activeResolution,
+    setActiveResolution,
+    thinkingLevel,
+    setThinkingLevel,
+    activeModel,
+    activeThinkingLevel,
+    costPerImage
+  }), [
+    activeModel,
+    activeModelKey,
+    activeResolution,
+    activeThinkingLevel,
+    costPerImage,
+    geminiApiKey,
+    handleSetActiveModelKey,
+    thinkingLevel,
+  ]);
 
   return (
-    <SettingsContext.Provider
-      value={{
-        geminiApiKey, setGeminiApiKey,
-        activeModelKey, setActiveModelKey: handleSetActiveModelKey,
-        activeResolution, setActiveResolution,
-        thinkingLevel, setThinkingLevel,
-        activeModel,
-        activeThinkingLevel,
-        costPerImage
-      }}
-    >
+    <SettingsContext.Provider value={value}>
       {children}
     </SettingsContext.Provider>
   );

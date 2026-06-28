@@ -13,6 +13,56 @@ Track component work, decisions, and session continuations here.
 ---
 
 ## Sessions
+### 2026-06-28 - Backend Hardening, Recovery, and Performance Polish
+
+**Status:** COMPLETED
+
+**What Was Done:**
+- Stabilized shared React provider values and reduced unnecessary Gallery, HUD, Module, Studio, and settings re-renders.
+- Made Gallery load large projects more gently with progressive hydration, lazy tile image mounting, and loading skeletons.
+- Kept heavy image data in `DB.images` and stripped duplicate data URLs from gallery/module metadata where possible.
+- Added the IndexedDB `generation-jobs` store and project index so in-flight image/video generations leave durable recovery markers.
+- Restored interrupted image jobs as explicit Gallery error placeholders and interrupted video jobs as failed sequence clips after refresh/crash.
+- Persisted image prompt aspect ratio and variation count in local storage alongside the existing video settings.
+- Hardened the Veo server route so Vertex URI-backed videos are downloaded server-side, empty downloads fail clearly, and blank video responses are not returned.
+- Changed image and video generation startup so recovery records are written before the model request begins.
+- Excluded local sandbox experiments from the app TypeScript build so unrelated prototype code cannot break CafeHTML production builds.
+- Updated `docs/CafeHTML.md` to reflect the current FRAME/SCENE scope, storage rules, and recovery behavior.
+
+**Verification:**
+- Focused lint was run against the changed app/API/storage files.
+- Full `src` lint passes after tightening the older music realtime timer type.
+- Production `next build` passes.
+- Home and Video routes were smoke-checked on the running local server.
+
+**Known Notes:**
+- Interrupted browser-side jobs cannot resume the exact remote Vertex operation yet; they restore as clear retry states.
+- True Veo resume would need server-side operation IDs and a resumable job service.
+- `sandbox/MUSIC-CODE-DJ/` remains local/unrelated and is ignored.
+
+**Files Touched:**
+- `src/app/api/video/generate/route.ts`
+- `src/app/video/page.tsx`
+- `src/components/Gallery.tsx`
+- `src/components/HUD.tsx`
+- `src/components/ModulePanel.tsx`
+- `src/components/PromptBar.tsx`
+- `src/components/Studio.tsx`
+- `src/context/AppContext.tsx`
+- `src/context/GalleryContext.tsx`
+- `src/context/ModuleContext.tsx`
+- `src/context/SettingsContext.tsx`
+- `src/context/StudioContext.tsx`
+- `src/lib/db.ts`
+- `src/lib/galleryCells.ts`
+- `src/lib/music/lyriaRealtime.ts`
+- `src/lib/moduleFiles.ts`
+- `src/lib/pipeline/api.ts`
+- `.gitignore`
+- `tsconfig.json`
+- `docs/CafeHTML.md`
+- `docs/log.md`
+
 ### 2026-06-24 - Module Reference Card Polish
 
 **Status:** COMPLETED

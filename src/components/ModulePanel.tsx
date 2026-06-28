@@ -6,6 +6,7 @@ import { useStudio } from "@/context/StudioContext";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
 import { deriveEditedName, loadImageMetadata } from "@/lib/imageMeta";
+import { moduleFileForStorage } from "@/lib/moduleFiles";
 import { sortModuleFilesByLayerOrder } from "@/lib/pipeline/module-order";
 import { describeReferenceStrength, normalizeStrength, type ReferenceRole } from "@/lib/pipeline/strength";
 import ModuleReferenceCard from "./ModuleReferenceCard";
@@ -86,7 +87,7 @@ export default function ModulePanel() {
 
   const persistReference = useCallback((file: ModuleFile) => {
     if (!activeProjectId) return;
-    void DB.references.put({ ...file, project_id: activeProjectId })
+    void DB.references.put({ ...moduleFileForStorage(file), project_id: activeProjectId })
       .catch((error) => console.error("Failed to persist module reference", error));
   }, [activeProjectId]);
 

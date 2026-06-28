@@ -14,6 +14,9 @@ type StudioPromptCommand =
   | { kind: "upscale"; prompt: string; imageSize: "2K" | "4K" }
   | { kind: "invalid-upscale"; message: string };
 
+const MAX_STUDIO_HISTORY = 20;
+const limitStudioHistory = (items: string[]) => items.slice(0, MAX_STUDIO_HISTORY);
+
 const parseStudioPromptCommand = (rawPrompt: string): StudioPromptCommand => {
   const trimmed = rawPrompt.trim();
   if (!trimmed.toLowerCase().startsWith("/upscale")) {
@@ -61,6 +64,7 @@ export default function Studio() {
   const currentStroke = useRef<Stroke | null>(null);
   const [undoStack, setUndoStack] = useState<Stroke[]>([]);
   const [redoStack, setRedoStack] = useState<Stroke[]>([]);
+  const undoStackRef = useRef<Stroke[]>([]);
 
   // Crop state
   const cropDrag = useRef<{startX: number, startY: number, origLeft: number, origTop: number} | null>(null);
@@ -78,6 +82,10 @@ export default function Studio() {
     }
   }, [isOpen, history, activeUrl, setActiveUrl]);
 
+  useEffect(() => {
+    undoStackRef.current = undoStack;
+  }, [undoStack]);
+
   const redrawStrokeList = useCallback((strokes: Stroke[]) => {
     const layer = drawLayerRef.current;
     if (!layer) return;
@@ -93,14 +101,17 @@ export default function Studio() {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-      stroke.points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+      for (let i = 1; i < stroke.points.length; i += 1) {
+        const p = stroke.points[i];
+        ctx.lineTo(p.x, p.y);
+      }
       ctx.stroke();
     });
   }, []);
 
   const redrawStrokes = useCallback(() => {
-    redrawStrokeList(undoStack);
-  }, [redrawStrokeList, undoStack]);
+    redrawStrokeList(undoStackRef.current);
+  }, [redrawStrokeList]);
 
   const syncDrawLayer = useCallback(() => {
     const layer = drawLayerRef.current;
@@ -123,6 +134,13 @@ export default function Studio() {
       img.src = activeUrl;
     }
   }, [activeUrl, isOpen, syncDrawLayer]);
+
+  useEffect(() => {
+    if (!isOpen || !canvasRef.current) return;
+    const resizeObserver = new ResizeObserver(syncDrawLayer);
+    resizeObserver.observe(canvasRef.current);
+    return () => resizeObserver.disconnect();
+  }, [isOpen, syncDrawLayer]);
 
   useEffect(() => { redrawStrokes(); }, [redrawStrokes]);
 
@@ -272,7 +290,7 @@ export default function Studio() {
     if (ctx) {
       ctx.drawImage(img, bx, by, bw, bh, 0, 0, bw, bh);
       const url = offscreen.toDataURL('image/png');
-      setHistory([url, ...history]);
+      setHistory(prev => limitStudioHistory([url, ...prev]));
       setActiveUrl(url);
       setActiveTool(null);
     }
@@ -354,7 +372,7 @@ export default function Studio() {
           imageSize: isUpscale ? parsedCommand.imageSize : undefined,
         });
 
-        setHistory(prev => [generatedUrl, ...prev]);
+        setHistory(prev => limitStudioHistory([generatedUrl, ...prev]));
         
         const newUuid = crypto.randomUUID();
         const usedImages: GalleryImageUse[] = [{ imgUrl: currentActiveUrl, role: "BASE" }];

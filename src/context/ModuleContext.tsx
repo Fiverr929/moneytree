@@ -1,8 +1,9 @@
 "use client";
 
-import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import React, { createContext, useContext, useMemo, useState, ReactNode, useEffect } from "react";
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
+import { moduleFileForStorage } from "@/lib/moduleFiles";
 import { pruneProjectImages } from "@/lib/projectImageGc";
 export type ModuleFile = {
   id: number;
@@ -123,21 +124,42 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
 
     if (activeProjectId) {
       DB.references.getByProject(activeProjectId).then(async data => {
-        const files = data as ModuleFile[];
-        const withUrls = await Promise.all(files.map(async f => {
-          if (f.uuid) {
-            try {
-              const img = await DB.images.get(f.uuid);
-              if (img && img.dataUrl) return { ...f, url: img.dataUrl };
-            } catch (error) {
-              console.error("Failed to restore module image", error);
-            }
+        const storedFiles = data as ModuleFile[];
+        const visibleFiles = storedFiles.map((file) => ({ ...file, url: "" }));
+        if (!cancelled) setFiles(visibleFiles);
+
+        try {
+          const images = await DB.images.getMany(
+            visibleFiles.map((file) => file.uuid).filter(Boolean),
+          );
+          const imageUrlsByUuid = new Map(
+            images
+              .filter((image): image is { uuid: string; dataUrl: string } => Boolean(image?.uuid && image?.dataUrl))
+              .map((image) => [image.uuid, image.dataUrl]),
+          );
+          const originalsById = new Map(storedFiles.map((file) => [file.id, file]));
+          const hydratedFiles = visibleFiles.map((file) => ({
+            ...file,
+            url: imageUrlsByUuid.get(file.uuid) || originalsById.get(file.id)?.url || "",
+          }));
+
+          if (!cancelled) {
+            setFiles(hydratedFiles);
+            pruneProjectImages(activeProjectId).catch(console.error);
           }
-          return f;
-        }));
-        if (!cancelled) {
-          setFiles(withUrls);
-          pruneProjectImages(activeProjectId).catch(console.error);
+
+          await Promise.all(hydratedFiles.map(async (file) => {
+            const original = originalsById.get(file.id);
+            if (!file.uuid || !file.url || !original?.url) return;
+            await DB.images.put(file.uuid, file.url, activeProjectId);
+            await DB.references.put({ ...moduleFileForStorage(file), project_id: activeProjectId });
+          }));
+        } catch (error) {
+          console.error("Failed to restore module images", error);
+          if (!cancelled) {
+            setFiles(storedFiles);
+            pruneProjectImages(activeProjectId).catch(console.error);
+          }
         }
       }).catch(console.error);
     } else {
@@ -149,34 +171,56 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
     };
   }, [activeProjectId]);
 
+  const value = useMemo(() => ({
+    files, setFiles,
+    folders, setFolders,
+    openFolders, setOpenFolders,
+    view, setView,
+    activeFileId, setActiveFileId,
+    searchQuery, setSearchQuery,
+    showUpload, setShowUpload,
+    pendingUpload, setPendingUpload,
+    pendingUploadQueue, setPendingUploadQueue,
+    collapsed, setCollapsed,
+    selectMode, setSelectMode,
+    selectedIds, setSelectedIds,
+    menuFileId, setMenuFileId,
+    moveFileId, setMoveFileId,
+    folderMenuId, setFolderMenuId,
+    editingFolder, setEditingFolder,
+    addingFolder, setAddingFolder,
+    dragOver, setDragOver,
+    inspectorMenuOpen, setInspectorMenuOpen,
+    renamingFileId, setRenamingFileId,
+    labelEditOpen, setLabelEditOpen,
+    showInfo, setShowInfo
+  }), [
+    activeFileId,
+    addingFolder,
+    collapsed,
+    dragOver,
+    editingFolder,
+    files,
+    folderMenuId,
+    folders,
+    inspectorMenuOpen,
+    labelEditOpen,
+    menuFileId,
+    moveFileId,
+    openFolders,
+    pendingUpload,
+    pendingUploadQueue,
+    renamingFileId,
+    searchQuery,
+    selectMode,
+    selectedIds,
+    showInfo,
+    showUpload,
+    view,
+  ]);
+
   return (
-    <ModuleContext.Provider
-      value={{
-        files, setFiles,
-        folders, setFolders,
-        openFolders, setOpenFolders,
-        view, setView,
-        activeFileId, setActiveFileId,
-        searchQuery, setSearchQuery,
-        showUpload, setShowUpload,
-        pendingUpload, setPendingUpload,
-        pendingUploadQueue, setPendingUploadQueue,
-        collapsed, setCollapsed,
-        
-        selectMode, setSelectMode,
-        selectedIds, setSelectedIds,
-        menuFileId, setMenuFileId,
-        moveFileId, setMoveFileId,
-        folderMenuId, setFolderMenuId,
-        editingFolder, setEditingFolder,
-        addingFolder, setAddingFolder,
-        dragOver, setDragOver,
-        inspectorMenuOpen, setInspectorMenuOpen,
-        renamingFileId, setRenamingFileId,
-        labelEditOpen, setLabelEditOpen,
-        showInfo, setShowInfo
-      }}
-    >
+    <ModuleContext.Provider value={value}>
       {children}
     </ModuleContext.Provider>
   );

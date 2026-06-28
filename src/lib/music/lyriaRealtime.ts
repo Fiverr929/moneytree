@@ -92,7 +92,7 @@ export class LyriaRealtimeEngine {
   private prompts: LyriaPrompt[] = [];
   private config: LiveMusicGenerationConfig = {};
   private stopped = true;
-  private analyserTimer: any = null;
+  private analyserTimer: number | null = null;
 
   constructor(apiKey: string, callbacks: LyriaCallbacks) {
     this.client = new GoogleGenAI({ apiKey, apiVersion: "v1alpha" });

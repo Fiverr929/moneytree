@@ -48,6 +48,7 @@ mingit/
 mingit.zip
 
 # local mask sandbox outputs
+/sandbox/MUSIC-CODE-DJ/
 /sandbox/mask-test/input.png
 /sandbox/mask-test/input.jpg
 /sandbox/mask-test/mask.png

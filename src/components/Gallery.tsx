@@ -1,14 +1,98 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useGallery, GalleryCell } from "@/context/GalleryContext";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
-import { isHudImageCell } from "@/lib/galleryCells";
+import { galleryCellForStorage, isHudImageCell } from "@/lib/galleryCells";
+
+const SKELETON_RATIOS = ["1:1", "16:9", "1:1", "9:16", "4:3", "1:1", "3:4", "1:1", "16:9"];
+
+type GalleryTileProps = {
+  cell: GalleryCell;
+  isSelected: boolean;
+  isGalleryLoading: boolean;
+  onCellClick: (cellId: number) => void;
+  onRetry: (cell: GalleryCell) => void;
+};
+
+const GalleryTile = memo(function GalleryTile({
+  cell,
+  isSelected,
+  isGalleryLoading,
+  onCellClick,
+  onRetry,
+}: GalleryTileProps) {
+  const tileRef = useRef<HTMLDivElement>(null);
+  const [shouldLoadImage, setShouldLoadImage] = useState(false);
+  const isPendingImage = isGalleryLoading && !cell.imgUrl;
+
+  useEffect(() => {
+    if (!cell.imgUrl) {
+      setShouldLoadImage(false);
+      return;
+    }
+
+    const node = tileRef.current;
+    if (!node || !("IntersectionObserver" in window)) {
+      setShouldLoadImage(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setShouldLoadImage(true);
+        observer.disconnect();
+      },
+      { rootMargin: "700px 0px" },
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [cell.imgUrl]);
+
+  return (
+    <div
+      ref={tileRef}
+      className={`gallery-cell ${cell.imgUrl ? "has-image" : "is-pending-image"} ${isSelected ? "selected" : ""}`}
+      data-id={cell.id}
+      data-ratio={cell.ratio}
+      data-loading-id={cell.loadingId}
+      onClick={() => !cell.loadingId && onCellClick(cell.id)}
+    >
+      <div
+        className={`cell-inner ${cell.phClass || ""} ${((cell.loadingId && !cell.blocked && !cell.error) || isPendingImage) ? "cafe-loading" : ""} ${cell.blocked ? "cell-blocked" : ""} ${cell.error ? "cell-error" : ""}`}
+        style={{
+          backgroundColor: cell.loadingId ? "#ea5823" : (isPendingImage ? "#999997" : undefined),
+        }}
+      >
+        {shouldLoadImage && cell.imgUrl && (
+          <img className="cell-img" src={cell.imgUrl} alt="" loading="lazy" decoding="async" />
+        )}
+        {cell.blocked && <span className="cell-blocked-label">{cell.statusLabel || "BLOCKED"}</span>}
+        {cell.error && (
+          <span
+            className="cell-error-label"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetry(cell);
+            }}
+            style={{ cursor: cell.retryFn ? 'pointer' : 'default' }}
+          >
+            {cell.retryFn ? "RETRY" : (cell.statusLabel || "FAILED")}
+          </span>
+        )}
+      </div>
+      <div className="cell-check"></div>
+    </div>
+  );
+});
 
 export default function Gallery() {
   const { 
     cells, setCells,
+    isGalleryLoading,
     selectMode, setSelectMode,
     selectedIds, setSelectedIds,
     currentView, setCurrentView,
@@ -28,7 +112,7 @@ export default function Gallery() {
     if (!cell.uuid || !cell.imgUrl) return;
     if (!activeProjectId) return;
     await DB.images.put(cell.uuid, cell.imgUrl, activeProjectId);
-    await DB.gallery.put({ ...cell, project_id: activeProjectId, loadingId: undefined, retryFn: undefined });
+    await DB.gallery.put(galleryCellForStorage({ ...cell, project_id: activeProjectId }));
   };
 
   // Close dropdowns on click outside
@@ -53,15 +137,16 @@ export default function Gallery() {
   }, [activeProjectId, setHudOpen, setSelectMode, setSelectedIds]);
 
   // Filter and Sort Cells
-  const filteredCells = cells.filter(cell => {
-    if (ratioFilter === 'landscape') return ['16:9', '21:9', '4:3'].includes(cell.ratio);
-    if (ratioFilter === 'portrait')  return ['9:16', '3:4'].includes(cell.ratio);
-    if (ratioFilter === 'square')    return cell.ratio === '1:1';
-    return true;
-  });
-
-  const visibleCells = sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
-  const hudCells = visibleCells.filter(isHudImageCell);
+  const visibleCells = useMemo(() => {
+    const filteredCells = cells.filter(cell => {
+      if (ratioFilter === 'landscape') return ['16:9', '21:9', '4:3'].includes(cell.ratio);
+      if (ratioFilter === 'portrait')  return ['9:16', '3:4'].includes(cell.ratio);
+      if (ratioFilter === 'square')    return cell.ratio === '1:1';
+      return true;
+    });
+    return sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
+  }, [cells, ratioFilter, sortOrder]);
+  const hudCells = useMemo(() => visibleCells.filter(isHudImageCell), [visibleCells]);
 
   const handleCellClick = (cellId: number) => {
     if (selectMode) {
@@ -145,11 +230,29 @@ export default function Gallery() {
     setThreeDotDropdownOpen(false);
   };
 
+  const handleRetryCell = (cell: GalleryCell) => {
+    if (cell.retryFn && cell.loadingId) {
+      setCells((current) => current.map((entry) =>
+        entry.loadingId === cell.loadingId
+          ? { ...entry, error: false, blocked: false, statusLabel: undefined, phClass: "loading" }
+          : entry
+      ));
+      cell.retryFn(cell.loadingId);
+    }
+  };
+
   const hasSelected = selectedIds.size > 0;
   const isFilterActive = sortOrder === "oldest" || ratioFilter !== "all";
+  const skeletonCells = useMemo(() => (
+    Array.from({ length: currentView === "small" ? 18 : currentView === "large" ? 9 : 12 }, (_, index) => ({
+      id: index,
+      ratio: SKELETON_RATIOS[index % SKELETON_RATIOS.length],
+      delayMs: (index % 6) * 70,
+    }))
+  ), [currentView]);
 
   return (
-    <div id="gallery-panel">
+    <div id="gallery-panel" data-loading={isGalleryLoading ? "true" : "false"}>
       <div id="gallery-controls">
         <div id="threedot-wrap" className={selectMode ? "visible" : ""} ref={threeDotRef}>
           <button 
@@ -226,44 +329,27 @@ export default function Gallery() {
       </div>
       
       <div id="gallery-scroll" data-view={currentView} data-select={selectMode ? "on" : "off"}>
-        <div id="gallery-grid">
-          {visibleCells.map(cell => (
-            <div 
-              key={cell.loadingId || cell.id} 
-              className={`gallery-cell ${selectedIds.has(cell.id) ? "selected" : ""}`}
-              data-id={cell.id}
-              data-ratio={cell.ratio}
-              data-loading-id={cell.loadingId}
-              onClick={() => !cell.loadingId && handleCellClick(cell.id)}
+        <div id="gallery-grid" className={isGalleryLoading ? "is-hydrating" : ""}>
+          {isGalleryLoading && visibleCells.length === 0 && skeletonCells.map((skeleton) => (
+            <div
+              key={`gallery-skeleton-${skeleton.id}`}
+              className="gallery-cell gallery-skeleton"
+              data-ratio={skeleton.ratio}
+              style={{ animationDelay: `${skeleton.delayMs}ms` }}
+              aria-hidden="true"
             >
-              <div 
-                className={`cell-inner ${cell.phClass || ""} ${cell.loadingId && !cell.blocked && !cell.error ? "cafe-loading" : ""} ${cell.blocked ? "cell-blocked" : ""} ${cell.error ? "cell-error" : ""}`}
-                style={{
-                  backgroundColor: cell.loadingId ? "#ea5823" : undefined,
-                  backgroundImage: cell.imgUrl ? `url('${cell.imgUrl}')` : undefined,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center'
-                }}
-              >
-                {cell.blocked && <span className="cell-blocked-label">{cell.statusLabel || "BLOCKED"}</span>}
-                {cell.error && (
-                  <span className="cell-error-label" onClick={(e) => {
-                    e.stopPropagation();
-                    if (cell.retryFn && cell.loadingId) {
-                      setCells((current) => current.map((entry) =>
-                        entry.loadingId === cell.loadingId
-                          ? { ...entry, error: false, blocked: false, statusLabel: undefined, phClass: "loading" }
-                          : entry
-                      ));
-                      cell.retryFn(cell.loadingId);
-                    }
-                  }} style={{ cursor: cell.retryFn ? 'pointer' : 'default' }}>
-                    {cell.retryFn ? "RETRY" : (cell.statusLabel || "FAILED")}
-                  </span>
-                )}
-              </div>
-              <div className="cell-check"></div>
+              <div className="cell-inner cafe-loading"></div>
             </div>
+          ))}
+          {visibleCells.map(cell => (
+            <GalleryTile
+              key={cell.loadingId || cell.id}
+              cell={cell}
+              isSelected={selectedIds.has(cell.id)}
+              isGalleryLoading={isGalleryLoading}
+              onCellClick={handleCellClick}
+              onRetry={handleRetryCell}
+            />
           ))}
         </div>
       </div>

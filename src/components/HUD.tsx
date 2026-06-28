@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useCallback, useState, useEffect, useRef } from "react";
+import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { useGallery, type GalleryCell } from "@/context/GalleryContext";
 import { useStudio } from "@/context/StudioContext";
 import { useModule } from "@/context/ModuleContext";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
 import { dimensionsToRatio, loadImageMetadata } from "@/lib/imageMeta";
-import { isHudImageCell } from "@/lib/galleryCells";
+import { galleryCellForStorage, isHudImageCell } from "@/lib/galleryCells";
 
 export default function HUD() {
   const { 
@@ -32,20 +32,32 @@ export default function HUD() {
 
   // Derive visible cells before callbacks so selected cell state is initialized
   // before any closure setup that may reference it.
-  const filteredCells = cells.filter(cell => {
-    if (ratioFilter === 'landscape') return ['16:9', '21:9', '4:3'].includes(cell.ratio);
-    if (ratioFilter === 'portrait')  return ['9:16', '3:4'].includes(cell.ratio);
-    if (ratioFilter === 'square')    return cell.ratio === '1:1';
-    return true;
-  });
-  const sortedCells = sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
-  const visibleCells = sortedCells.filter(isHudImageCell);
+  const visibleCells = useMemo(() => {
+    const filteredCells = cells.filter(cell => {
+      if (ratioFilter === 'landscape') return ['16:9', '21:9', '4:3'].includes(cell.ratio);
+      if (ratioFilter === 'portrait')  return ['9:16', '3:4'].includes(cell.ratio);
+      if (ratioFilter === 'square')    return cell.ratio === '1:1';
+      return true;
+    });
+    const sortedCells = sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
+    return sortedCells.filter(isHudImageCell);
+  }, [cells, ratioFilter, sortOrder]);
   const activeCell = visibleCells[hudIndex];
+  const renderedSlides = useMemo(() => {
+    if (!hudOpen || !visibleCells.length) return [];
+    return visibleCells
+      .map((cell, i) => ({ cell, i }))
+      .filter(({ i }) => {
+        const distance = Math.abs(i - hudIndex);
+        const wrapDistance = visibleCells.length - distance;
+        return Math.min(distance, wrapDistance) <= 1;
+      });
+  }, [hudIndex, hudOpen, visibleCells]);
 
   const persistGalleryCell = useCallback(async (cell: ActiveHudCell) => {
     if (!activeProjectId || !cell?.uuid || !cell.imgUrl) return;
     await DB.images.put(cell.uuid, cell.imgUrl, activeProjectId);
-    await DB.gallery.put({ ...cell, project_id: activeProjectId, loadingId: undefined, retryFn: undefined });
+    await DB.gallery.put(galleryCellForStorage({ ...cell, project_id: activeProjectId }));
   }, [activeProjectId]);
 
   const formatInfoDate = useCallback((value?: string) => {
@@ -383,7 +395,7 @@ export default function HUD() {
       {/* Image viewport */}
       <div id="hud-image-area">
         <div id="hud-slide-track" style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
-          {visibleCells.map((cell, i) => (
+          {renderedSlides.map(({ cell, i }) => (
             <div 
               key={cell.id} 
               className="hud-slide" 

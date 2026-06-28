@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { getGenerationModuleImages } from './module-order';
+import DB from '@/lib/db';
 import {
   describeGenAIError,
   findImagePrediction,
@@ -226,7 +227,7 @@ export type GenerationCallbacks = {
   onError: (err: Error) => void;
 };
 
-export type GenerationSettings = { aspectRatio?: string, variation?: number, activeModel?: { label: string, id: string }, costPerImage?: number, activeResolution?: string, activeThinkingLevel?: string | null, [key: string]: any };
+export type GenerationSettings = { aspectRatio?: string, variation?: number, projectId?: number | null, activeModel?: { label: string, id: string }, costPerImage?: number, activeResolution?: string, activeThinkingLevel?: string | null, [key: string]: any };
 export type GenerationPayload = {
   mode?: string;
   prompt?: string;
@@ -402,6 +403,22 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
     const thinkingLevel = settings.activeThinkingLevel;
     const startedAt = new Date().toISOString();
     const startTimeMs = Date.now();
+    const persistentJobId = `image-job-${debugRunId}`;
+
+    if (settings.projectId) {
+      await DB.generationJobs.put({
+        id: persistentJobId,
+        project_id: settings.projectId,
+        kind: "image",
+        status: "running",
+        loadingIds,
+        prompt: effectivePrompt,
+        ratio,
+        mode: payload.mode || "FRAME",
+        createdAt: startedAt,
+        updatedAt: startedAt,
+      }).catch((error) => console.error("Failed to persist image generation job", error));
+    }
 
     storeGenerationDebug({
       runId: debugRunId,
@@ -537,6 +554,9 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
     });
 
     patchGenerationDebug({ status: 'complete', completedAt: new Date().toISOString() }, debugRunId);
+    if (settings.projectId) {
+      void DB.generationJobs.delete(persistentJobId).catch((error) => console.error("Failed to clear image generation job", error));
+    }
     callbacks.onComplete();
 
   } catch (err: any) {
@@ -551,6 +571,9 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
       status: 'error',
       error: describeGenAIError(err)
     }, debugRunId);
+    if (settings.projectId) {
+      void DB.generationJobs.delete(`image-job-${debugRunId}`).catch((error) => console.error("Failed to clear image generation job", error));
+    }
     if (!terminalOutcomeReported) {
       callbacks.onError(err instanceof Error ? err : new Error(String(err)));
     }
@@ -621,8 +644,6 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
 
   return `data:${prediction.mimeType};base64,${prediction.bytesBase64Encoded}`;
 }
-
-
 
 
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useState, ReactNode, useEffect, useRef } from "react";
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 
@@ -47,6 +47,9 @@ interface StudioContextType {
 }
 
 const StudioContext = createContext<StudioContextType | undefined>(undefined);
+const MAX_STUDIO_HISTORY = 20;
+
+const limitHistory = (items: string[]) => items.slice(0, MAX_STUDIO_HISTORY);
 
 export function StudioProvider({ children }: { children: ReactNode }) {
   const { activeProjectId } = useApp();
@@ -63,7 +66,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const openRequestRef = useRef(0);
 
   // Load state when a new image is opened
-  const openStudio = async (config: StudioConfig) => {
+  const openStudio = useCallback(async (config: StudioConfig) => {
     const requestId = ++openRequestRef.current;
     setActiveImage(config);
     setIsOpen(true);
@@ -79,7 +82,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         if (saved && saved.histories && saved.histories[config.uuid]) {
           const entry = saved.histories[config.uuid];
           if (entry.history && entry.history.length > 0) {
-            setHistory(entry.history);
+            setHistory(limitHistory(entry.history));
           }
           setActiveUrl(entry.activeUrl || entry.history?.[0] || config.imgUrl || null);
           if (entry.layers && entry.layers.groups) {
@@ -95,9 +98,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     } else {
       setGroups([]);
     }
-  };
+  }, [activeProjectId]);
 
-  const closeStudio = async (finalUrl?: string | null) => {
+  const closeStudio = useCallback(async (finalUrl?: string | null) => {
     openRequestRef.current += 1;
     setIsOpen(false);
     
@@ -107,7 +110,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         if (!saved.histories) saved.histories = {};
         
         saved.histories[activeImage.uuid] = {
-          history,
+          history: limitHistory(history),
           activeUrl: finalUrl || activeUrl || history[0],
           layers: { groups }
         };
@@ -124,7 +127,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setActiveUrl(null);
     setHistory([]);
     setGroups([]);
-  };
+  }, [activeImage, activeProjectId, activeUrl, groups, history]);
 
   // Autosave
   useEffect(() => {
@@ -136,7 +139,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           if (!saved.histories) saved.histories = {};
           
           saved.histories[uuid] = {
-            history,
+            history: limitHistory(history),
             activeUrl: activeUrl || history[0],
             layers: { groups }
           };
@@ -149,14 +152,28 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }
   }, [groups, history, activeUrl, isOpen, activeImage, activeProjectId]);
 
-  return (
-    <StudioContext.Provider value={{
+  const value = useMemo(() => ({
       isOpen, activeImage, history, setHistory, activeUrl, setActiveUrl,
       activeTool, setActiveTool, groups, setGroups,
       openStudio, closeStudio,
       strokeSize, setStrokeSize, strokeColor, setStrokeColor,
       cropRatio, setCropRatio
-    }}>
+  }), [
+    activeImage,
+    activeTool,
+    activeUrl,
+    closeStudio,
+    cropRatio,
+    groups,
+    history,
+    isOpen,
+    openStudio,
+    strokeColor,
+    strokeSize,
+  ]);
+
+  return (
+    <StudioContext.Provider value={value}>
       {children}
     </StudioContext.Provider>
   );

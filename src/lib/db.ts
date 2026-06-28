@@ -13,7 +13,8 @@ const S = {
   IMAGES: 'images',
   VIDEOS: 'videos',
   DESCRIPTIONS: 'descriptions',
-  STUDIO_STATE: 'studio-state'
+  STUDIO_STATE: 'studio-state',
+  GENERATION_JOBS: 'generation-jobs'
 };
 
 const ready = new Promise<IDBDatabase>((resolve, reject) => {
@@ -35,10 +36,13 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
                          !db.objectStoreNames.contains(S.IMAGES) ||
                          !db.objectStoreNames.contains(S.VIDEOS) ||
                          !db.objectStoreNames.contains(S.DESCRIPTIONS) ||
+                         !db.objectStoreNames.contains(S.GENERATION_JOBS) ||
                          !hasIndex(S.PROJECTS, 'by_modified') ||
                          !hasIndex(S.REFERENCES, 'by_project') ||
                          !hasIndex(S.GALLERY, 'by_project') ||
-                         !hasIndex(S.VIDEOS, 'by_project');
+                         !hasIndex(S.IMAGES, 'by_project') ||
+                         !hasIndex(S.VIDEOS, 'by_project') ||
+                         !hasIndex(S.GENERATION_JOBS, 'by_project');
     db.close();
 
     const targetVersion = needsUpgrade ? currentVersion + 1 : currentVersion;
@@ -72,7 +76,13 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
         const gs = e2.target.transaction.objectStore(S.GALLERY);
         if (!gs.indexNames.contains('by_project')) gs.createIndex('by_project', 'project_id');
       }
-      if (!db2.objectStoreNames.contains(S.IMAGES)) db2.createObjectStore(S.IMAGES, { keyPath: 'uuid' });
+      if (!db2.objectStoreNames.contains(S.IMAGES)) {
+        const is = db2.createObjectStore(S.IMAGES, { keyPath: 'uuid' });
+        is.createIndex('by_project', 'project_id');
+      } else {
+        const is = e2.target.transaction.objectStore(S.IMAGES);
+        if (!is.indexNames.contains('by_project')) is.createIndex('by_project', 'project_id');
+      }
       if (!db2.objectStoreNames.contains(S.VIDEOS)) {
         const vs = db2.createObjectStore(S.VIDEOS, { keyPath: 'id' });
         vs.createIndex('by_project', 'project_id');
@@ -81,6 +91,13 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
         if (!vs.indexNames.contains('by_project')) vs.createIndex('by_project', 'project_id');
       }
       if (!db2.objectStoreNames.contains(S.DESCRIPTIONS)) db2.createObjectStore(S.DESCRIPTIONS, { keyPath: 'uuid' });
+      if (!db2.objectStoreNames.contains(S.GENERATION_JOBS)) {
+        const js = db2.createObjectStore(S.GENERATION_JOBS, { keyPath: 'id' });
+        js.createIndex('by_project', 'project_id');
+      } else {
+        const js = e2.target.transaction.objectStore(S.GENERATION_JOBS);
+        if (!js.indexNames.contains('by_project')) js.createIndex('by_project', 'project_id');
+      }
     };
 
     req.onsuccess = (e2: any) => {
@@ -140,6 +157,7 @@ async function deleteProjectCascade(id: number) {
       S.VIDEOS,
       S.DESCRIPTIONS,
       S.STUDIO_STATE,
+      S.GENERATION_JOBS,
     ],
     "readwrite",
   );
@@ -163,6 +181,7 @@ async function deleteProjectCascade(id: number) {
   transaction.objectStore(S.SETTINGS).delete(id);
   transaction.objectStore(S.MODULE_STATE).delete(id);
   transaction.objectStore(S.STUDIO_STATE).delete(id);
+  deleteProjectRecordsByIndex(transaction.objectStore(S.GENERATION_JOBS), id);
   transaction.objectStore(S.PROJECTS).delete(id);
 
   await transactionDone(transaction);
@@ -188,11 +207,16 @@ const projects = {
 
 const images = {
   get: (uuid: string) => ready.then(() => wrap(tx(S.IMAGES).objectStore(S.IMAGES).get(uuid))),
-  getByProject: (projectId: number) => ready.then(() =>
-    wrap(tx(S.IMAGES).objectStore(S.IMAGES).getAll()).then((items: any[]) =>
-      items.filter((item) => item.project_id === projectId),
-    )
-  ),
+  getMany: (uuids: string[]) => ready.then(async () => {
+    const uniqueUuids = [...new Set(uuids.filter(Boolean))];
+    if (!uniqueUuids.length) return [];
+    const store = tx(S.IMAGES).objectStore(S.IMAGES);
+    return Promise.all(uniqueUuids.map((uuid) => wrap(store.get(uuid))));
+  }),
+  getByProject: (projectId: number) => ready.then(() => {
+    const idx = tx(S.IMAGES).objectStore(S.IMAGES).index('by_project');
+    return wrap(idx.getAll(projectId));
+  }),
   put: (uuid: string, dataUrl: string, projectId: number) => ready.then(() => 
     wrap(tx(S.IMAGES, 'readwrite').objectStore(S.IMAGES).put({ uuid, dataUrl, project_id: projectId }))
   ),
@@ -250,7 +274,20 @@ const descriptions = {
   )
 };
 
-const DB = { ready, projects, images, videos, studioState, gallery, references, descriptions };
+const generationJobs = {
+  getByProject: (projectId: number) => ready.then(() => {
+    const idx = tx(S.GENERATION_JOBS).objectStore(S.GENERATION_JOBS).index('by_project');
+    return wrap(idx.getAll(projectId));
+  }),
+  put: (data: any) => ready.then(() =>
+    wrap(tx(S.GENERATION_JOBS, 'readwrite').objectStore(S.GENERATION_JOBS).put(data))
+  ),
+  delete: (id: string) => ready.then(() =>
+    wrap(tx(S.GENERATION_JOBS, 'readwrite').objectStore(S.GENERATION_JOBS).delete(id))
+  ),
+};
+
+const DB = { ready, projects, images, videos, studioState, gallery, references, descriptions, generationJobs };
 export default DB;
 
 

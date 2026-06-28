@@ -3,8 +3,12 @@ import {
   VideoGenerationReferenceType,
   type GenerateVideosConfig,
   type Image,
+  type Video,
 } from "@google/genai";
 import { NextResponse } from "next/server";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { VeoGenerationRequest } from "@/lib/video/api";
 
 export const runtime = "nodejs";
@@ -107,6 +111,47 @@ function describeError(error: unknown) {
   return String(error);
 }
 
+function summarizeVideoOperation(operation: unknown) {
+  const value = operation as {
+    name?: string;
+    done?: boolean;
+    response?: { generatedVideos?: Array<{ video?: Video }> };
+  };
+  return {
+    name: value.name,
+    done: value.done,
+    generatedVideoCount: value.response?.generatedVideos?.length || 0,
+    firstVideo: value.response?.generatedVideos?.[0]?.video
+      ? {
+        hasVideoBytes: !!value.response.generatedVideos[0].video?.videoBytes,
+        hasUri: !!value.response.generatedVideos[0].video?.uri,
+        mimeType: value.response.generatedVideos[0].video?.mimeType,
+        uriPrefix: value.response.generatedVideos[0].video?.uri?.slice(0, 48),
+      }
+      : null,
+  };
+}
+
+async function downloadGeneratedVideo(ai: GoogleGenAI, video: Video) {
+  if (!video.uri) return null;
+
+  const dir = await mkdtemp(join(tmpdir(), "cafehtml-veo-"));
+  const filePath = join(dir, "generated-video");
+  try {
+    await ai.files.download({ file: video, downloadPath: filePath });
+    const bytes = await readFile(filePath);
+    if (!bytes.byteLength) {
+      throw new Error("Downloaded video file was empty.");
+    }
+    return bytes;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Vertex returned a video URI, but the server could not download it: ${message}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
@@ -174,17 +219,20 @@ export async function POST(request: Request) {
     }
 
     const video = operation.response?.generatedVideos?.[0]?.video;
-    if (!video?.videoBytes) {
-      throw new Error(
-        video?.uri
-          ? `Vertex returned a storage URI (${video.uri}) instead of inline video bytes.`
-          : "Vertex completed without returning a video.",
-      );
+    let videoBuffer = video?.videoBytes ? Buffer.from(video.videoBytes, "base64") : null;
+
+    if (!videoBuffer && video?.uri) {
+      videoBuffer = await downloadGeneratedVideo(ai, video);
     }
 
-    return new Response(Buffer.from(video.videoBytes, "base64"), {
+    if (!videoBuffer?.byteLength) {
+      console.error("[Veo Vertex] Completed without video payload:", summarizeVideoOperation(operation));
+      throw new Error("Vertex completed without returning a downloadable video.");
+    }
+
+    return new Response(videoBuffer, {
       headers: {
-        "Content-Type": video.mimeType || "video/mp4",
+        "Content-Type": video?.mimeType || "video/mp4",
         "Cache-Control": "no-store",
       },
     });

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, ReactNode, useEffect, useRef } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect, useMemo, useRef } from "react";
 import DB from "@/lib/db";
 
 interface AppContextType {
@@ -56,23 +56,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void initializeProject();
   }, []);
 
+  const value = useMemo(() => ({
+    menuOpen,
+    setMenuOpen,
+    projectsOpen,
+    setProjectsOpen,
+    projectCreateOpen,
+    setProjectCreateOpen,
+    settingsOpen,
+    setSettingsOpen,
+    promptSettingsOpen,
+    setPromptSettingsOpen,
+    activeProjectId,
+    setActiveProjectId,
+  }), [
+    activeProjectId,
+    menuOpen,
+    projectCreateOpen,
+    projectsOpen,
+    promptSettingsOpen,
+    settingsOpen,
+  ]);
+
   return (
-    <AppContext.Provider
-      value={{
-        menuOpen,
-        setMenuOpen,
-        projectsOpen,
-        setProjectsOpen,
-        projectCreateOpen,
-        setProjectCreateOpen,
-        settingsOpen,
-        setSettingsOpen,
-        promptSettingsOpen,
-        setPromptSettingsOpen,
-        activeProjectId,
-        setActiveProjectId,
-      }}
-    >
+    <AppContext.Provider value={value}>
       {children}
     </AppContext.Provider>
   );

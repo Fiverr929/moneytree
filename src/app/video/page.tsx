@@ -65,6 +65,19 @@ type StoredVideoRecord = {
   sequenceOrder: number;
 };
 
+type StoredGenerationJob = {
+  id: string;
+  project_id: number;
+  kind: "image" | "video";
+  status: "running" | "interrupted";
+  prompt?: string;
+  modelId?: string;
+  aspectRatio?: VideoRatio;
+  duration?: VideoDuration;
+  sequenceOrder?: number;
+  createdAt: string;
+};
+
 function readVideoAspectRatio(blob: Blob): Promise<VideoRatio> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(blob);
@@ -343,6 +356,35 @@ export default function VideoPage() {
         }
         setGeneratedClips(clips);
         setSelectedClipId(clips.find((clip) => clip.sequenceOrder >= 0)?.id || clips[0]?.id || null);
+        return DB.generationJobs.getByProject(activeProjectId);
+      })
+      .then(async (jobs) => {
+        if (cancelled || !jobs) return;
+        const interruptedVideoJobs = (jobs as StoredGenerationJob[])
+          .filter((job) => job.kind === "video" && job.status === "running");
+        if (!interruptedVideoJobs.length) return;
+        const restoredClips: GeneratedVideoClip[] = interruptedVideoJobs.map((job) => ({
+          id: job.id,
+          duration: job.duration || 8,
+          status: "failed",
+          error: "Interrupted by refresh. Generate again to retry.",
+          prompt: job.prompt,
+          modelId: job.modelId,
+          aspectRatio: job.aspectRatio,
+          createdAt: job.createdAt,
+          sequenceOrder: job.sequenceOrder ?? -1,
+        }));
+        setGeneratedClips((current) => {
+          const existingIds = new Set(current.map((clip) => clip.id));
+          return [
+            ...current,
+            ...restoredClips.filter((clip) => !existingIds.has(clip.id)),
+          ].sort((a, b) => (a.sequenceOrder ?? -1) - (b.sequenceOrder ?? -1));
+        });
+        setSelectedClipId((current) => current || restoredClips[0]?.id || null);
+        await Promise.all(interruptedVideoJobs.map((job) => (
+          DB.generationJobs.put({ ...job, status: "interrupted" })
+        )));
       })
       .catch((error) => {
         if (!cancelled) setGenerationError(error instanceof Error ? error.message : String(error));
@@ -480,6 +522,9 @@ export default function VideoPage() {
     void DB.videos.delete(id).catch((error) => {
       setGenerationError(error instanceof Error ? error.message : String(error));
     });
+    void DB.generationJobs.delete(id).catch((error) => {
+      setGenerationError(error instanceof Error ? error.message : String(error));
+    });
   };
 
   const removeClipFromSequence = (id: string) => {
@@ -594,21 +639,43 @@ export default function VideoPage() {
       const seed = videoSettings.seed
         ? Number(videoSettings.seed) + variationIndex
         : undefined;
+      const createdAt = new Date().toISOString();
 
-      generateVeoVideo({
-        modelId: modelConfig.id,
-        prompt: trimmedPrompt,
-        aspectRatio: videoSettings.ratio,
-        durationSeconds: videoSettings.duration,
-        resolution: videoSettings.resolution,
-        seed,
-        startFrame: videoSettings.inputMode === "frames" ? startFrame : undefined,
-        endFrame: videoSettings.inputMode === "frames" ? endFrame : undefined,
-        referenceImages: videoSettings.inputMode === "references" ? references : undefined,
-      })
+      const runVideoRequest = async () => {
+        await DB.generationJobs.put({
+          id: loadingClip.id,
+          project_id: launchProjectId,
+          kind: "video",
+          status: "running",
+          prompt: trimmedPrompt,
+          modelId: modelConfig.id,
+          aspectRatio: videoSettings.ratio,
+          duration: videoSettings.duration,
+          sequenceOrder: baseSequenceOrder + variationIndex,
+          createdAt,
+          updatedAt: createdAt,
+        }).catch((error) => console.error("Failed to persist video generation job", error));
+
+        return generateVeoVideo({
+          modelId: modelConfig.id,
+          prompt: trimmedPrompt,
+          aspectRatio: videoSettings.ratio,
+          durationSeconds: videoSettings.duration,
+          resolution: videoSettings.resolution,
+          seed,
+          startFrame: videoSettings.inputMode === "frames" ? startFrame : undefined,
+          endFrame: videoSettings.inputMode === "frames" ? endFrame : undefined,
+          referenceImages: videoSettings.inputMode === "references" ? references : undefined,
+        });
+      };
+
+      runVideoRequest()
         .then(async ({ blob }) => {
-          if (discardedClipIdsRef.current.has(loadingClip.id)) return;
-          const createdAt = new Date().toISOString();
+          if (discardedClipIdsRef.current.has(loadingClip.id)) {
+            await DB.generationJobs.delete(loadingClip.id);
+            return;
+          }
+          const completedAt = new Date().toISOString();
           await DB.videos.put({
             id: loadingClip.id,
             project_id: launchProjectId,
@@ -618,9 +685,10 @@ export default function VideoPage() {
             prompt: trimmedPrompt,
             modelId: modelConfig.id,
             aspectRatio: videoSettings.ratio,
-            createdAt,
+            createdAt: completedAt,
             sequenceOrder: baseSequenceOrder + variationIndex,
           } satisfies StoredVideoRecord);
+          await DB.generationJobs.delete(loadingClip.id);
           if (activeProjectIdRef.current !== launchProjectId) return;
           const readyClip: GeneratedVideoClip = {
             ...loadingClip,
@@ -630,7 +698,7 @@ export default function VideoPage() {
             prompt: trimmedPrompt,
             modelId: modelConfig.id,
             aspectRatio: videoSettings.ratio,
-            createdAt,
+            createdAt: completedAt,
             sequenceOrder: baseSequenceOrder + variationIndex,
           };
           setGeneratedClips((current) => (
@@ -652,6 +720,9 @@ export default function VideoPage() {
                 : clip
             )));
           }
+          void DB.generationJobs.delete(loadingClip.id).catch((deleteError) => {
+            console.error("Failed to clear failed video generation job", deleteError);
+          });
           console.error("[Veo] Generation failed:", error);
         })
         .finally(() => {
@@ -910,7 +981,7 @@ export default function VideoPage() {
                   ) : clip.url ? (
                     <video src={clip.url} muted preload="metadata" />
                   ) : (
-                    <div className="video-sequence-loading"></div>
+                    <div className="video-sequence-loading cafe-loading"></div>
                   )}
                   {clip.status === "failed" && <span className="video-sequence-error">FAILED</span>}
                   <span className="video-sequence-index">{String(index + 1).padStart(2, "0")}</span>

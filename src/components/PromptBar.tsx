@@ -17,9 +17,12 @@ import { applySkillContract } from "@/lib/brief-agent/skillContract";
 import type { AgentMessage, BriefDraft, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot } from "@/lib/brief-agent/types";
 
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
+const IMAGE_PROMPT_SETTINGS_KEY = "cafehtml-image-prompt-settings";
 const REFERENCE_SNAPSHOT_CACHE_KEY = "cafehtml-brief-reference-cache-v1";
 const REFERENCE_SNAPSHOT_CACHE_LIMIT = 20;
 const GENERATE_COMMAND = "/Generate";
+const DEFAULT_FRAME_RATIO = "1:1";
+const DEFAULT_FRAME_VARIATIONS = 1;
 
 type ReferenceSnapshotCacheEntry = {
   sourceFingerprint: string;
@@ -66,6 +69,12 @@ function parseGenerateCommand(text: string) {
   return trimmed.slice(commandMatch[0].length).trim();
 }
 
+function normalizeFrameVariations(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_FRAME_VARIATIONS;
+  return Math.min(10, Math.max(1, Math.round(parsed)));
+}
+
 export default function PromptBar() {
   const { activeProjectId } = useApp();
   const settings = useSettings();
@@ -78,8 +87,9 @@ export default function PromptBar() {
   const [generationError, setGenerationError] = useState("");
   
   // Prompt settings state
-  const [frameRatio, setFrameRatio] = useState("1:1");
-  const [frameVar, setFrameVar] = useState<string | number>("1");
+  const [frameRatio, setFrameRatio] = useState(DEFAULT_FRAME_RATIO);
+  const [frameVar, setFrameVar] = useState<string | number>(String(DEFAULT_FRAME_VARIATIONS));
+  const [imagePromptSettingsLoaded, setImagePromptSettingsLoaded] = useState(false);
   
   // Prompt Input state
   const [promptText, setPromptText] = useState("");
@@ -117,6 +127,34 @@ export default function PromptBar() {
     document.body.classList.toggle("agent-console-open", agentConsoleOpen);
     return () => document.body.classList.remove("agent-console-open");
   }, [agentConsoleOpen]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(IMAGE_PROMPT_SETTINGS_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as { frameRatio?: unknown; frameVar?: unknown };
+        if (typeof saved.frameRatio === "string") {
+          setFrameRatio(saved.frameRatio);
+        }
+        setFrameVar(String(normalizeFrameVariations(saved.frameVar)));
+      }
+    } catch {
+      // Ignore storage access issues in embedded browsers.
+    }
+    setImagePromptSettingsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!imagePromptSettingsLoaded) return;
+    try {
+      window.localStorage.setItem(IMAGE_PROMPT_SETTINGS_KEY, JSON.stringify({
+        frameRatio,
+        frameVar: normalizeFrameVariations(frameVar),
+      }));
+    } catch {
+      // Ignore storage access issues in embedded browsers.
+    }
+  }, [frameRatio, frameVar, imagePromptSettingsLoaded]);
 
   // Sync state from custom events (like HUD reuse)
   useEffect(() => {
@@ -209,7 +247,8 @@ export default function PromptBar() {
     const fullSettings = {
       ...settings,
       aspectRatio: frameRatio,
-      variation: parseInt(frameVar.toString(), 10)
+      variation: parseInt(frameVar.toString(), 10),
+      projectId: activeProjectId,
     };
 
     const payload = {

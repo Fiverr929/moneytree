@@ -8,14 +8,14 @@
 
 A structured AI media creation pipeline. Not a prompt box — a reference-based generation system where the user builds a scene from real images and the system writes the generation brief automatically.
 
-Current scope: Image generation (FRAME mode) and the initial Video workspace. Audio and the full Timeline remain future tabs.
+Current scope: Image generation (FRAME mode) and the active Video workspace (SCENE mode). Audio and the full Timeline remain future tabs.
 
 ---
 
 ## FRAME / SCENE — DO NOT CONFUSE
 
-- **FRAME mode** (orange `#ea5823`) — image generation. This is what's being actively built.
-- **SCENE mode** (blue `#5271ff`) — future video pipeline. **NOT being built yet — do not touch SCENE mode logic.**
+- **FRAME mode** (orange `#ea5823`) — image generation.
+- **SCENE mode** (blue `#5271ff`) — video generation workspace. Keep video changes isolated from FRAME unless the shared storage/API layer requires it.
 
 ---
 
@@ -31,6 +31,14 @@ Current files:
 - State: `src/context/*`
 - Pipeline: `src/lib/pipeline/*`
 - Storage: `src/lib/db.ts`
+
+Current storage/recovery notes:
+- `DB.images` is the single source of truth for image data URLs. Gallery, references, modules, and prompt manifests should store UUIDs and metadata, not duplicate base64 payloads.
+- Gallery hydration is intentionally progressive. Large image sets should be fetched in batches and mounted lazily so project load does not freeze the browser.
+- `generation-jobs` records are written before image/video generation requests start. On refresh or browser crash, running jobs are restored as interrupted placeholders instead of silently disappearing.
+- Image prompt settings persist under `cafehtml-image-prompt-settings`, including aspect ratio and variation count.
+- Video prompt/settings drafts persist separately under the video local-storage keys.
+- True server-side Veo resume is still a future improvement; the current browser-side job store prevents silent loss and gives the user a clear retry state after interruption.
 
 Local dev note:
 - The working dev-server launch in this Windows workspace is a hidden non-interactive `cmd /c npm run dev` start. `Start-Process npm` is unreliable here because PowerShell sees duplicate `Path` / `PATH` entries, and Next may need approval-backed startup because the sandbox can block child-process spawning with `spawn EPERM`.
@@ -70,6 +78,8 @@ Docs: `docs/` folder
 ```
 
 The current transport uses the official SDK in Vertex Express mode. HTTP 429 responses are not retried automatically; the Gallery exposes an in-memory manual retry instead.
+
+Veo video generation uses `src/app/api/video/generate/route.ts` as a Node route. The route validates request size, prompt length, model, aspect ratio, duration, resolution, start/end frame rules, and reference-image rules before calling Vertex. Completed Vertex operations may return inline `videoBytes` or a downloadable URI; the route supports both and rejects empty downloaded files instead of returning a blank video.
 
 ## Subject Prompt Evaluation System
 
@@ -728,16 +738,20 @@ Orange = active, expanded. `.collapsed` rotates arrow −90°. Collapsing hides 
 | 2026-05-28 | Module Panel S-C redesign | Visible module UI is now the image-reference manager with loose images, preset folders, per-image mode/strength/state, Image Inspector, row/inspector `...` action menus, and `cafeModule` persistence. Legacy `subject/stage/style` snapshots are generated as a PromptBuilder compatibility bridge. |
 | 2026-06-05 | Next.js migration baseline | Current implementation now lives in `src/` as a Next.js / React app. Legacy HTML docs remain useful for product architecture, but file paths and `window.*` implementation contracts are historical unless mirrored in `src/components`, `src/context`, or `src/lib/pipeline`. |
 | 2026-06-19 | Current Veo 3.1 model IDs | Video generation uses `veo-3.1-generate-001`, `veo-3.1-fast-generate-001`, and `veo-3.1-lite-generate-001`. The Standard and Fast preview endpoints were discontinued on April 2, 2026. |
+| 2026-06-28 | Durable generation jobs | Image and video generations write `generation-jobs` records before calling the model. Interrupted work restores as explicit retryable placeholders after refresh/crash instead of disappearing. |
+| 2026-06-28 | Lightweight gallery payloads | Gallery/reference/module records should keep UUID metadata only; image data belongs in `DB.images` and is hydrated progressively. |
+| 2026-06-28 | Veo URI download handling | The video API accepts both inline video bytes and Vertex URI-backed results, downloads URI files server-side, and treats empty downloads as failures. |
 
 ---
 
-*Last updated: 2026-06-20*
-## Video Workspace Update — 2026-06-20
+*Last updated: 2026-06-28*
+## Video Workspace Update — 2026-06-28
 
 - Responsive video workspace keeps the playback controls, sequence, and prompt controls visible while the preview contracts.
 - Sequence thumbnails are square; remove controls appear on hover or keyboard focus.
 - Removing a sequence clip detaches it without deleting the stored video.
 - Videos can be dragged from the VIDEO folder into the sequence, appended on empty space, or inserted before an existing clip.
 - Sequence membership and ordering persist per project.
-
-*Last updated: 2026-06-20*
+- Video generation loading clips now use the same loading language as image generation.
+- Video jobs survive refresh/crash as interrupted clips with a retry path.
+- The server route handles URI-backed Veo results in addition to inline video bytes.
