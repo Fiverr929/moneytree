@@ -3903,17 +3903,6 @@
     .prompt-text::-webkit-scrollbar-thumb {
       background: rgba(199, 199, 199, 0.25);
     }
-    .info-agent-review {
-      color: rgba(232, 230, 230, 0.86);
-      border-left: 1px solid rgba(82, 113, 255, 0.55);
-      padding-left: 8px;
-    }
-
-    .info-agent-review div + div {
-      margin-top: 5px;
-      color: rgba(234, 88, 35, 0.92);
-    }
-
     .info-section-header {
       display: flex;
       align-items: center;

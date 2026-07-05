@@ -81,6 +81,7 @@ export default function EvaluationDialog() {
         qualityMatch: scores.qualityMatch!,
         comment: comment.trim(),
         evaluatedAt: new Date().toISOString(),
+        reviewSource: "manual",
       });
     } finally {
       setSaving(false);
@@ -101,6 +102,7 @@ export default function EvaluationDialog() {
           <div className="evaluation-content">
             <div className="evaluation-meta">
               <span>{target.pipelineVersion || "legacy-unversioned"}</span>
+              {target.evaluation?.reviewSource === "ai" && <span>AI prefilled</span>}
               <span>{evaluationQueueLength} pending</span>
             </div>
             {SCORE_LABELS.map(({ key, label }) => (

@@ -4,8 +4,7 @@ import React, { createContext, useCallback, useContext, useMemo, useState, React
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 import { galleryCellForStorage } from "@/lib/galleryCells";
-import { requestGenerationReview } from "@/lib/evaluationReview";
-import type { GenerationAgentReview } from "@/lib/evaluationReview";
+import { requestGenerationEvaluation } from "@/lib/evaluationReview";
 import type { ModuleFile } from "@/context/ModuleContext";
 import type { StrengthBand } from "@/lib/pipeline/strength";
 export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string; strength?: number; strengthBand?: StrengthBand };
@@ -18,6 +17,8 @@ export type GenerationEvaluation = {
   qualityMatch: EvaluationScore;
   comment: string;
   evaluatedAt: string;
+  reviewSource?: "manual" | "ai";
+  reviewModel?: string | null;
 };
 export type GalleryCell = {
   id: number;
@@ -64,7 +65,6 @@ export type GalleryCell = {
     studioFlavor?: "normal" | "creative";
   };
   evaluation?: GenerationEvaluation;
-  agentReview?: GenerationAgentReview;
   generationTimeMs?: number;
   // Internal state for pending loads
   loadingId?: string;
@@ -345,7 +345,7 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
     void persistCell(normalized).catch((error) => console.error("Failed to persist generated image", error));
     scheduleEvaluation(normalized.id);
     if (normalized.imgUrl && normalized.origin === "generation") {
-      void requestGenerationReview({
+      void requestGenerationEvaluation({
         imageDataUrl: normalized.imgUrl,
         effectivePrompt: normalized.effectivePrompt || normalized.prompt || "",
         userPrompt: normalized.userPrompt || "",
@@ -356,19 +356,20 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
           strengthBand: image.strengthBand || null,
           dataUrl: image.imgUrl,
         })),
-      }).then((review) => {
-        let reviewedCell: GalleryCell | null = null;
+      }).then((evaluation) => {
+        let evaluatedCell: GalleryCell | null = null;
         setCells((current) => current.map((entry) => {
           if (entry.id !== normalized.id) return entry;
-          const reviewed = { ...entry, agentReview: review };
-          reviewedCell = reviewed;
-          return reviewed;
+          if (entry.evaluation?.reviewSource === "manual") return entry;
+          const evaluated = { ...entry, evaluation };
+          evaluatedCell = evaluated;
+          return evaluated;
         }));
-        if (reviewedCell) {
-          void persistCell(reviewedCell).catch((error) => console.error("Failed to persist generation review", error));
+        if (evaluatedCell) {
+          void persistCell(evaluatedCell).catch((error) => console.error("Failed to persist generation evaluation", error));
         }
       }).catch((error) => {
-        console.warn("Generation review failed", error);
+        console.warn("Generation evaluation failed", error);
       });
     }
   }, [normalizeCell, persistCell, scheduleEvaluation]);

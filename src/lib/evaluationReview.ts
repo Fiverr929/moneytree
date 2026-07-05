@@ -1,16 +1,15 @@
-export type ReviewScore = 1 | 2 | 3 | 4 | 5;
+export type EvaluationScoreValue = 1 | 2 | 3 | 4 | 5;
 
-export type GenerationAgentReview = {
-  promptMatch: ReviewScore;
-  subjectMatch: ReviewScore;
-  sceneMatch: ReviewScore;
-  styleMatch: ReviewScore;
-  qualityMatch: ReviewScore;
-  summary: string;
-  issues: string[];
-  suggestions: string[];
-  reviewedAt: string;
-  model: string | null;
+export type AiGenerationEvaluation = {
+  promptMatch: EvaluationScoreValue;
+  subjectMatch: EvaluationScoreValue;
+  sceneMatch: EvaluationScoreValue;
+  styleMatch: EvaluationScoreValue;
+  qualityMatch: EvaluationScoreValue;
+  comment: string;
+  evaluatedAt: string;
+  reviewSource: "ai";
+  reviewModel: string | null;
 };
 
 export type GenerationReviewRequest = {
@@ -26,7 +25,7 @@ export type GenerationReviewRequest = {
   }>;
 };
 
-export async function requestGenerationReview(input: GenerationReviewRequest): Promise<GenerationAgentReview> {
+export async function requestGenerationEvaluation(input: GenerationReviewRequest): Promise<AiGenerationEvaluation> {
   const response = await fetch("/api/evaluations/review", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -34,7 +33,7 @@ export async function requestGenerationReview(input: GenerationReviewRequest): P
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(typeof data?.error === "string" ? data.error : "Generation review failed.");
+    throw new Error(typeof data?.error === "string" ? data.error : "Generation evaluation failed.");
   }
-  return data.review as GenerationAgentReview;
+  return data.evaluation as AiGenerationEvaluation;
 }

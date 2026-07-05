@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { GENERATION_SAFETY_SETTINGS, type Part } from "@/lib/pipeline/genai-client";
-import type { GenerationAgentReview, ReviewScore } from "@/lib/evaluationReview";
+import type { AiGenerationEvaluation, EvaluationScoreValue } from "@/lib/evaluationReview";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -78,7 +78,7 @@ function validateRequest(request: Request, value: unknown): ReviewRequest {
   };
 }
 
-function score(value: unknown): ReviewScore {
+function score(value: unknown): EvaluationScoreValue {
   const numeric = Math.round(Number(value));
   if (numeric <= 1) return 1;
   if (numeric === 2) return 2;
@@ -121,18 +121,26 @@ function parseJsonObject(text: string) {
   }
 }
 
-function normalizeReview(value: Record<string, unknown>, model: string): GenerationAgentReview {
+function normalizeEvaluation(value: Record<string, unknown>, model: string): AiGenerationEvaluation {
+  const summary = stringValue(value.summary, "Evaluation completed.");
+  const issues = stringArray(value.issues);
+  const suggestions = stringArray(value.suggestions);
+  const commentParts = [
+    summary,
+    ...issues.map((issue) => `Issue: ${issue}`),
+    ...suggestions.map((suggestion) => `Next: ${suggestion}`),
+  ].filter(Boolean);
+
   return {
     promptMatch: score(value.promptMatch),
     subjectMatch: score(value.subjectMatch),
     sceneMatch: score(value.sceneMatch),
     styleMatch: score(value.styleMatch),
     qualityMatch: score(value.qualityMatch),
-    summary: stringValue(value.summary, "Review completed."),
-    issues: stringArray(value.issues),
-    suggestions: stringArray(value.suggestions),
-    reviewedAt: new Date().toISOString(),
-    model,
+    comment: commentParts.join("\n"),
+    evaluatedAt: new Date().toISOString(),
+    reviewSource: "ai",
+    reviewModel: model,
   };
 }
 
@@ -195,16 +203,16 @@ async function reviewGeneration(input: ReviewRequest) {
       safetySettings: GENERATION_SAFETY_SETTINGS,
     },
   });
-  return normalizeReview(parseJsonObject(extractResponseText(result)), model);
+  return normalizeEvaluation(parseJsonObject(extractResponseText(result)), model);
 }
 
 export async function POST(request: Request) {
   try {
     const input = validateRequest(request, await request.json());
-    const review = await reviewGeneration(input);
-    return NextResponse.json({ review });
+    const evaluation = await reviewGeneration(input);
+    return NextResponse.json({ evaluation });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Generation review failed.";
+    const message = error instanceof Error ? error.message : "Generation evaluation failed.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

@@ -22,7 +22,6 @@ export type EvaluationRecord = {
   settings: GalleryCell["generationSettings"] | null;
   result: { ratio: string; dimensions: string | null };
   evaluation: GalleryCell["evaluation"] | null;
-  agentReview: GalleryCell["agentReview"] | null;
   generationTimeMs: number | null;
 };
 
@@ -55,7 +54,6 @@ function toRecord(cell: GalleryCell, project: ProjectInfo): EvaluationRecord {
     settings: cell.generationSettings || null,
     result: { ratio: cell.ratio, dimensions: cell.dims || null },
     evaluation: cell.evaluation || null,
-    agentReview: cell.agentReview || null,
     generationTimeMs: typeof cell.generationTimeMs === "number" ? cell.generationTimeMs : null,
   };
 }

@@ -105,18 +105,6 @@ export default function HUD() {
     return null;
   }, []);
 
-  const agentReviewScoreText = useCallback((cell: ActiveHudCell) => {
-    const review = cell?.agentReview;
-    if (!review) return "";
-    return [
-      `P${review.promptMatch}`,
-      `S${review.subjectMatch}`,
-      `C${review.sceneMatch}`,
-      `Y${review.styleMatch}`,
-      `Q${review.qualityMatch}`,
-    ].join(" / ");
-  }, []);
-
   const applyGalleryStudioResult = useCallback((cell: ActiveHudCell, url: string) => {
     if (!cell) return;
     const updatedAt = new Date().toISOString();
@@ -496,22 +484,6 @@ export default function HUD() {
           </div>
           <div className="prompt-text" id="info-prompt">{promptTextForCell(activeCell) || '-'}</div>
 
-          {activeCell.agentReview && (
-            <>
-              <div className="info-section-header">
-                <span className="info-section-title">Agent Review / {agentReviewScoreText(activeCell)}</span>
-              </div>
-              <div className="prompt-text info-agent-review">
-                <div>{activeCell.agentReview.summary}</div>
-                {!!activeCell.agentReview.issues.length && (
-                  <div>ISSUE: {activeCell.agentReview.issues[0]}</div>
-                )}
-                {!!activeCell.agentReview.suggestions.length && (
-                  <div>NEXT: {activeCell.agentReview.suggestions[0]}</div>
-                )}
-              </div>
-            </>
-          )}
         </div>
       </div>
 
