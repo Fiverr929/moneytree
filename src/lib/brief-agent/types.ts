@@ -23,11 +23,8 @@ export type ReferenceObservation = {
   role: BriefReferenceRole;
   label: string;
   strength: number;
-  facts: string[];
-  mustPreserve: string[];
-  canChange: string[];
-  mustAvoid: string[];
-  readSource?: "mock" | "vision";
+  visualRead: string;
+  readSource?: "local" | "vision";
 };
 
 export type BriefReferenceSnapshot = {
@@ -35,6 +32,31 @@ export type BriefReferenceSnapshot = {
   createdAt: string;
   sourceFingerprint: string;
   observations: ReferenceObservation[];
+};
+
+export type VisualRoleUnderstanding = {
+  present: boolean;
+  labels: string[];
+  facts: string[];
+  anchors: string[];
+  allowedChanges: string[];
+  avoid: string[];
+};
+
+export type VisualUnderstanding = {
+  id: string;
+  createdAt: string;
+  sourceFingerprint: string;
+  subject: VisualRoleUnderstanding;
+  scene: VisualRoleUnderstanding;
+  style: VisualRoleUnderstanding;
+  unassigned: VisualRoleUnderstanding;
+  continuity: {
+    anchors: string[];
+    changeBoundaries: string[];
+    storySignals: string[];
+  };
+  uncertainties: string[];
 };
 
 export type BriefPlan = {
@@ -52,7 +74,7 @@ export type BriefClarification = {
 
 export type BriefSkillCheck = {
   id: string;
-  status: "pass" | "repaired" | "warning";
+  status: "pass" | "warning";
   message: string;
 };
 
@@ -63,6 +85,7 @@ export type BriefDraft = {
   messages: AgentMessage[];
   referenceSnapshot: BriefReferenceSnapshot;
   observations: ReferenceObservation[];
+  visualUnderstanding: VisualUnderstanding;
   clarification: BriefClarification;
   plan: BriefPlan;
   finalPrompt: string;
@@ -79,7 +102,7 @@ export type BriefAgentRequest = {
 export type BriefAgentResponse = {
   draft: BriefDraft;
   message: AgentMessage;
-  brain: "model" | "mock";
+  brain: "model";
   model: string | null;
 };
 

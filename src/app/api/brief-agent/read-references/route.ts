@@ -70,65 +70,18 @@ function validateRequest(request: Request, value: unknown): BriefReferenceReadRe
 }
 
 function defaultObservation(image: BriefReferenceImageInput): ReferenceObservation {
-  if (image.role === "SUBJECT") {
-    return {
-      imageId: image.imageId,
-      role: image.role,
-      label: image.label,
-      strength: image.strength,
-      facts: [`Subject reference labeled ${image.label}`],
-      mustPreserve: ["identity/type", "shape", "wardrobe/materials", "distinctive details"],
-      canChange: ["pose", "expression", "action", "orientation"],
-      mustAvoid: ["new identity", "new object type", "using subject background as scene"],
-      readSource: "mock",
-    };
-  }
-  if (image.role === "SCENE") {
-    return {
-      imageId: image.imageId,
-      role: image.role,
-      label: image.label,
-      strength: image.strength,
-      facts: [`Scene reference labeled ${image.label}`],
-      mustPreserve: ["event/location", "background", "scale", "lighting direction", "visible anchors"],
-      canChange: ["crop", "framing", "lens feel", "modest alternate shot"],
-      mustAvoid: ["different event", "redesigned location", "unrelated subject"],
-      readSource: "mock",
-    };
-  }
-  if (image.role === "STYLE") {
-    return {
-      imageId: image.imageId,
-      role: image.role,
-      label: image.label,
-      strength: image.strength,
-      facts: [`Style reference labeled ${image.label}`],
-      mustPreserve: ["medium", "palette", "texture", "lighting mood", "finish"],
-      canChange: ["style intensity"],
-      mustAvoid: ["copying style image content", "using style background", "importing style composition"],
-      readSource: "mock",
-    };
-  }
   return {
     imageId: image.imageId,
     role: image.role,
     label: image.label,
     strength: image.strength,
-    facts: [`Unassigned reference labeled ${image.label}`],
-    mustPreserve: ["useful visual context"],
-    canChange: ["supporting interpretation"],
-    mustAvoid: ["overriding Subject, Scene, or Style modules"],
-    readSource: "mock",
+    visualRead: "",
+    readSource: "local",
   };
 }
 
-function stringArray(value: unknown, fallback: string[]) {
-  if (!Array.isArray(value)) return fallback;
-  const strings = value
-    .filter((item): item is string => typeof item === "string" && !!item.trim())
-    .map((item) => item.trim())
-    .slice(0, 8);
-  return strings.length ? strings : fallback;
+function stringValue(value: unknown, fallback = "") {
+  return typeof value === "string" ? value.trim().slice(0, 1200) : fallback;
 }
 
 function extractResponseText(result: unknown) {
@@ -159,10 +112,7 @@ function mergeObservation(image: BriefReferenceImageInput, value: unknown): Refe
   const observation = value as Partial<ReferenceObservation>;
   return {
     ...fallback,
-    facts: stringArray(observation.facts, fallback.facts),
-    mustPreserve: stringArray(observation.mustPreserve, fallback.mustPreserve),
-    canChange: stringArray(observation.canChange, fallback.canChange),
-    mustAvoid: stringArray(observation.mustAvoid, fallback.mustAvoid),
+    visualRead: stringValue(observation.visualRead, fallback.visualRead),
     readSource: "vision",
   };
 }
@@ -170,13 +120,13 @@ function mergeObservation(image: BriefReferenceImageInput, value: unknown): Refe
 function buildInstruction(images: BriefReferenceImageInput[]) {
   return [
     "Inspect each reference image for CafeHTML's modular image generation agent.",
-    "Return visual observations only; do not draft the final generation prompt.",
+    "Return a neutral prose visual read only. Do not decide what to preserve, what can change, or how strong the reference should be used.",
     `Skill contract: ${JSON.stringify(BRIEF_AGENT_SKILL_CONTRACT)}`,
-    "For SUBJECT, describe identity/type, shape, wardrobe/materials, distinctive details, pose/action, and background risk.",
-    "For SCENE, describe environment, background, event/location, camera/framing/layout, lighting direction, scale, and visible anchors.",
-    "For STYLE, describe medium, palette, texture, lighting mood, finish, and content/background/composition bleed risk.",
+    "Write 2-5 concrete sentences about what is visibly present: subject/object appearance, shape, material, markings, pose/orientation, readable text, background, lighting, camera/framing, color, texture, and style.",
+    "Mention uncertainty inside the prose when something is unclear, occluded, unreadable, or inferred.",
+    "Avoid generic phrases like identity/type, distinctive details, use as source, preserve closely, must preserve, or can change.",
     "Return JSON only:",
-    "{\"observations\":[{\"imageId\":\"string\",\"facts\":[\"string\"],\"mustPreserve\":[\"string\"],\"canChange\":[\"string\"],\"mustAvoid\":[\"string\"]}]}",
+    "{\"observations\":[{\"imageId\":\"string\",\"visualRead\":\"string\"}]}",
     `Image metadata: ${JSON.stringify(images.map((image) => ({
       imageId: image.imageId,
       role: image.role,

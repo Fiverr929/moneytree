@@ -1,7 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
+import { readFileSync } from "fs";
+import path from "path";
 import { NextResponse } from "next/server";
-import { createMockBriefDraft } from "@/lib/brief-agent/mockPlanner";
 import { applySkillContract, BRIEF_AGENT_SKILL_CONTRACT } from "@/lib/brief-agent/skillContract";
+import { createVisualUnderstanding } from "@/lib/brief-agent/visualUnderstanding";
+import { getReferenceInfluence } from "@/lib/pipeline/strength";
 import type {
   AgentMessage,
   BriefAgentRequest,
@@ -19,6 +22,10 @@ const DEFAULT_BRIEF_AGENT_MODEL = "gemini-3.1-flash-lite";
 const MAX_MESSAGE_COUNT = 24;
 const MAX_MESSAGE_CHARS = 2_000;
 const MAX_FINAL_PROMPT_CHARS = 4_000;
+const REFERENCE_INFLUENCE_SKILL = readFileSync(
+  path.join(process.cwd(), "src/lib/brief-agent/skills/referenceInfluence.md"),
+  "utf8",
+);
 
 function validateMessage(value: unknown): AgentMessage {
   if (!value || typeof value !== "object") {
@@ -73,7 +80,7 @@ function validateRequest(request: Request, value: unknown): BriefAgentRequest {
   };
 }
 
-function formatAgentReply(draft: ReturnType<typeof createMockBriefDraft>) {
+function formatAgentReply(draft: BriefDraft) {
   const lines = [draft.reply];
   if (draft.clarification.needed) {
     draft.clarification.questions.forEach((question, index) => {
@@ -175,6 +182,34 @@ function draftFromModelJson(value: Record<string, unknown>, fallback: BriefDraft
   };
 }
 
+function createBaselineDraft(input: BriefAgentRequest): BriefDraft {
+  const visualUnderstanding = createVisualUnderstanding(input.referenceSnapshot);
+  return {
+    id: crypto.randomUUID(),
+    status: "empty",
+    reply: "",
+    messages: input.messages,
+    referenceSnapshot: input.referenceSnapshot,
+    observations: input.referenceSnapshot.observations,
+    visualUnderstanding,
+    clarification: {
+      needed: false,
+      reason: null,
+      questions: [],
+    },
+    plan: {
+      intent: latestUserText(input.messages),
+      subjectPolicy: "",
+      scenePolicy: "",
+      stylePolicy: "",
+    },
+    finalPrompt: "",
+    warnings: [],
+    skillChecks: [],
+    readyToExecute: false,
+  };
+}
+
 function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
   const conversation = input.messages.map((message) => ({
     role: message.role,
@@ -182,28 +217,38 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     createdAt: message.createdAt,
   }));
   const references = input.referenceSnapshot.observations.map((observation) => ({
+    imageId: observation.imageId,
     role: observation.role,
     label: observation.label,
-    strength: observation.strength,
-    facts: observation.facts,
-    mustPreserve: observation.mustPreserve,
-    canChange: observation.canChange,
-    mustAvoid: observation.mustAvoid,
+    influence: getReferenceInfluence(observation.strength),
+    visualRead: observation.visualRead,
+    readSource: observation.readSource || null,
   }));
 
   return [
     "You are CafeHTML Brief Agent, a prompt-planning agent for modular image generation.",
     "Work like a careful coding agent: discuss, clarify, draft, and never execute generation yourself.",
     `Skill contract: ${JSON.stringify(BRIEF_AGENT_SKILL_CONTRACT)}`,
-    "If the instruction is under-specified or risks changing subject identity/background/style content, ask concise clarification questions.",
-    "If clear enough, produce a concise finalPrompt that preserves role boundaries.",
+    `Reference influence skill:\n${REFERENCE_INFLUENCE_SKILL}`,
+    "First build a visual understanding from the references, then draft from that understanding. The raw user text is an instruction, not the final prompt.",
+    "Treat the latest user instruction as the creative brief. Use reference data to support that brief, not to automatically freeze the image.",
+    "Use visualUnderstanding as visual evidence. The visual scan tells you what is visible; the influence value tells you how much that evidence should shape the composed finalPrompt.",
+    "Use influence only for private prompt composition. Never include influence labels, strength, control axis, slider, percentage, or other UI mechanics in finalPrompt.",
+    "Do not invent subject features, wardrobe details, stage elements, camera view, lighting, palette, or style details that are not requested by the user or present in the visual scan.",
+    "When the visual scan is incomplete, use safe general language or ask only if the missing detail blocks a useful draft.",
+    "The finalPrompt should be one clean generation brief. Merge user intent, visual scans, roles, and influence into natural visual language; do not append checklist-like rule blocks.",
+    "If the user asks for a small edit and the relevant reference influence is LOCKED or CLOSE, keep the rest stable through natural prompt wording.",
+    "If the user asks for transformation, exploration, or a campaign concept, let FREE, LOOSE, or BALANCED references participate more flexibly.",
+    "Ask concise clarification questions only when the request lacks a necessary target or choosing one would likely betray the user's intent.",
+    "If a reasonable image can be drafted, produce a concise finalPrompt instead of asking.",
     "Return JSON only with this shape:",
     "{\"reply\":\"string\",\"clarification\":{\"needed\":boolean,\"reason\":string|null,\"questions\":[\"string\"]},\"plan\":{\"intent\":\"string\",\"subjectPolicy\":\"string\",\"scenePolicy\":\"string\",\"stylePolicy\":\"string\"},\"finalPrompt\":\"string\",\"warnings\":[\"string\"],\"readyToExecute\":false}",
     "",
     `Latest user instruction: ${JSON.stringify(latestUserText(input.messages))}`,
+    `Visual understanding: ${JSON.stringify(fallback.visualUnderstanding)}`,
     `Reference snapshot: ${JSON.stringify(references)}`,
     `Conversation: ${JSON.stringify(conversation)}`,
-    `Fallback draft to improve: ${JSON.stringify({
+    `Baseline draft shape: ${JSON.stringify({
       reply: fallback.reply,
       clarification: fallback.clarification,
       plan: fallback.plan,
@@ -213,11 +258,13 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
   ].join("\n");
 }
 
-async function createModelDraft(input: BriefAgentRequest, fallback: BriefDraft) {
+async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft) {
   const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
   const location = process.env.GOOGLE_CLOUD_LOCATION?.trim();
   const model = process.env.BRIEF_AGENT_MODEL?.trim() || DEFAULT_BRIEF_AGENT_MODEL;
-  if (!project || !location) return null;
+  if (!project || !location) {
+    throw new Error("Brief agent planner is not configured.");
+  }
 
   const ai = new GoogleGenAI({
     vertexai: true,
@@ -229,7 +276,7 @@ async function createModelDraft(input: BriefAgentRequest, fallback: BriefDraft) 
     model,
     contents: [{
       role: "user",
-      parts: [{ text: buildModelInstruction(input, fallback) }],
+      parts: [{ text: buildModelInstruction(input, baseline) }],
     }],
     config: {
       temperature: 0.25,
@@ -239,7 +286,7 @@ async function createModelDraft(input: BriefAgentRequest, fallback: BriefDraft) 
   const text = extractResponseText(result);
   const json = parseJsonObject(text);
   return {
-    draft: draftFromModelJson(json, fallback),
+    draft: draftFromModelJson(json, baseline),
     model,
   };
 }
@@ -247,24 +294,9 @@ async function createModelDraft(input: BriefAgentRequest, fallback: BriefDraft) 
 export async function POST(request: Request) {
   try {
     const input = validateRequest(request, await request.json());
-    let brain: BriefAgentResponse["brain"] = "mock";
-    let model: string | null = null;
-    let draft = applySkillContract(createMockBriefDraft(input.referenceSnapshot, input.messages));
-
-    try {
-      const modelResult = await createModelDraft(input, draft);
-      if (modelResult) {
-        draft = applySkillContract(modelResult.draft);
-        brain = "model";
-        model = modelResult.model;
-      }
-    } catch (error) {
-      console.warn("[Brief Agent] Model planner failed, using mock fallback:", error);
-      draft = {
-        ...draft,
-        warnings: [...draft.warnings, "Model planner unavailable; using mock fallback."],
-      };
-    }
+    const baseline = createBaselineDraft(input);
+    const modelResult = await createModelDraft(input, baseline);
+    const draft = applySkillContract(modelResult.draft);
 
     const message: AgentMessage = {
       id: crypto.randomUUID(),
@@ -282,7 +314,7 @@ export async function POST(request: Request) {
         }
         : undefined,
     };
-    const response: BriefAgentResponse = { draft, message, brain, model };
+    const response: BriefAgentResponse = { draft, message, brain: "model", model: modelResult.model };
     return NextResponse.json(response);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Brief agent failed.";

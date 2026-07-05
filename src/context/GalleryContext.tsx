@@ -4,6 +4,8 @@ import React, { createContext, useCallback, useContext, useMemo, useState, React
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 import { galleryCellForStorage } from "@/lib/galleryCells";
+import { requestGenerationReview } from "@/lib/evaluationReview";
+import type { GenerationAgentReview } from "@/lib/evaluationReview";
 import type { ModuleFile } from "@/context/ModuleContext";
 import type { StrengthBand } from "@/lib/pipeline/strength";
 export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string; strength?: number; strengthBand?: StrengthBand };
@@ -35,7 +37,7 @@ export type GalleryCell = {
     promptArtifactId?: string;
     sourceFingerprint?: string | null;
     refCount?: number | null;
-    brain?: "model" | "mock";
+    brain?: "model" | "local";
     model?: string | null;
     skillChecks?: unknown[];
     warnings?: string[];
@@ -59,8 +61,10 @@ export type GalleryCell = {
     aspectRatio?: string;
     imageSize?: string;
     thinkingLevel?: string | null;
+    studioFlavor?: "normal" | "creative";
   };
   evaluation?: GenerationEvaluation;
+  agentReview?: GenerationAgentReview;
   generationTimeMs?: number;
   // Internal state for pending loads
   loadingId?: string;
@@ -340,6 +344,33 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
     ));
     void persistCell(normalized).catch((error) => console.error("Failed to persist generated image", error));
     scheduleEvaluation(normalized.id);
+    if (normalized.imgUrl && normalized.origin === "generation") {
+      void requestGenerationReview({
+        imageDataUrl: normalized.imgUrl,
+        effectivePrompt: normalized.effectivePrompt || normalized.prompt || "",
+        userPrompt: normalized.userPrompt || "",
+        references: (normalized.usedImages || []).map((image) => ({
+          role: image.role || null,
+          label: image.label || null,
+          strength: typeof image.strength === "number" ? image.strength : null,
+          strengthBand: image.strengthBand || null,
+          dataUrl: image.imgUrl,
+        })),
+      }).then((review) => {
+        let reviewedCell: GalleryCell | null = null;
+        setCells((current) => current.map((entry) => {
+          if (entry.id !== normalized.id) return entry;
+          const reviewed = { ...entry, agentReview: review };
+          reviewedCell = reviewed;
+          return reviewed;
+        }));
+        if (reviewedCell) {
+          void persistCell(reviewedCell).catch((error) => console.error("Failed to persist generation review", error));
+        }
+      }).catch((error) => {
+        console.warn("Generation review failed", error);
+      });
+    }
   }, [normalizeCell, persistCell, scheduleEvaluation]);
 
   const failLoading = useCallback((id: string, retryFn?: (newId: string) => void, statusLabel = "FAILED") => {

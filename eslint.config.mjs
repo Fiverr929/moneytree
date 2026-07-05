@@ -18,6 +18,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "sandbox/**",
+    "evaluation-exports/**",
+    "mingit/**",
+    ".codex-study/**",
   ]),
 ]);
 

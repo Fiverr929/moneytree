@@ -1381,9 +1381,8 @@ export default function ModulePanel() {
     const folder = getFolder(f.folder);
     const activeRole = moduleRole(f.mode) as ReferenceRole;
     const strengthInfo = describeReferenceStrength(f.strength, activeRole);
-    const strengthScaleLabels = activeRole === "SCENE"
-      ? ["LOCK", "REFRAME", "NEW SHOT"]
-      : ["LOCK", "BALANCED", "EXPRESS"];
+    const strengthScaleLabels = ["LOCK", "BALANCED", "EXPRESS"];
+    const strengthUiValue = strengthInfo.value - 50;
 
     const updateStrengthFromClientX = (clientX: number, element: HTMLDivElement) => {
       const r = element.getBoundingClientRect();
@@ -1442,7 +1441,7 @@ export default function ModulePanel() {
           <div className="cmp-detail-section">
             <h4>STRENGTH</h4>
             <div className="cmp-strength-head">
-              <b>{strengthInfo.uiValue >= 0 ? "+" : ""}{strengthInfo.uiValue} &middot; {strengthInfo.strengthLabel.toUpperCase()}</b>
+              <b>{strengthUiValue >= 0 ? "+" : ""}{strengthUiValue} &middot; {strengthInfo.strengthLabel.toUpperCase()}</b>
             </div>
             <div
               className="cmp-strength"
@@ -1521,6 +1520,11 @@ export default function ModulePanel() {
             <b>{f.size}</b>
             <span>DIM</span>
             <b>{f.dims}</b>
+            <span>VISION</span>
+            <b className="cmp-info-read">
+              {f.visualRead?.trim() || "NO VISION READ YET"}
+              {f.visualReadSource === "vision" ? " / VISION" : ""}
+            </b>
           </div>
         )}
         <div className="cmp-status cmp-detail-status">
@@ -1539,7 +1543,7 @@ export default function ModulePanel() {
     <div className="right-sidebar">
       <div className={`mod-panel-wrap ${collapsed ? "collapsed" : ""}`}>
         <div className={`module-panel ${draggedFileId !== null || draggedFolderId !== null ? "dragging" : ""}`} ref={panelRef}>
-          {view === "file" ? renderInspector() : renderRoot()}
+          {collapsed || view !== "file" ? renderRoot() : renderInspector()}
         </div>
       </div>
       <input

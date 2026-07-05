@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo, KeyboardEvent } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, KeyboardEvent } from "react";
 import { useApp } from "@/context/AppContext";
 import { MODELS, useSettings } from "@/context/SettingsContext";
 import { useGallery, GalleryCell } from "@/context/GalleryContext";
@@ -8,17 +8,15 @@ import { useModule } from "@/context/ModuleContext";
 import { generate, storeGenerationDebug } from "@/lib/pipeline/api";
 import { collectPayload } from "@/lib/pipeline/prompt-builder";
 import {
-  createMockBriefDraft,
   createReferenceSnapshot,
   fingerprintModuleFiles,
-} from "@/lib/brief-agent/mockPlanner";
+} from "@/lib/brief-agent/referenceSnapshot";
 import { requestBriefAgent, requestReferenceRead } from "@/lib/brief-agent/client";
-import { applySkillContract } from "@/lib/brief-agent/skillContract";
 import type { AgentMessage, BriefDraft, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot } from "@/lib/brief-agent/types";
 
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
 const IMAGE_PROMPT_SETTINGS_KEY = "cafehtml-image-prompt-settings";
-const REFERENCE_SNAPSHOT_CACHE_KEY = "cafehtml-brief-reference-cache-v1";
+const REFERENCE_SNAPSHOT_CACHE_KEY = "cafehtml-brief-reference-cache-v2";
 const REFERENCE_SNAPSHOT_CACHE_LIMIT = 20;
 const GENERATE_COMMAND = "/Generate";
 const DEFAULT_FRAME_RATIO = "1:1";
@@ -100,7 +98,7 @@ export default function PromptBar() {
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [agentPending, setAgentPending] = useState(false);
   const [agentError, setAgentError] = useState("");
-  const [agentBrain, setAgentBrain] = useState<"model" | "mock">("mock");
+  const [agentBrain, setAgentBrain] = useState<"model" | "local">("local");
   const [agentModel, setAgentModel] = useState<string | null>(null);
   const [agentDraft, setAgentDraft] = useState<BriefDraft | null>(null);
   const [referenceReadError, setReferenceReadError] = useState("");
@@ -108,6 +106,7 @@ export default function PromptBar() {
   const [referenceSnapshot, setReferenceSnapshot] = useState(() => createReferenceSnapshot([]));
   const inputRef = useRef<HTMLDivElement>(null);
   const promptBarRef = useRef<HTMLDivElement>(null);
+  const referenceReadInFlightRef = useRef(new Set<string>());
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -188,7 +187,7 @@ export default function PromptBar() {
     setGenerationError("");
     setAgentMessages([]);
     setAgentError("");
-    setAgentBrain("mock");
+    setAgentBrain("local");
     setAgentModel(null);
     setAgentDraft(null);
     setReferenceReadError("");
@@ -348,6 +347,27 @@ export default function PromptBar() {
     [moduleContext.files],
   );
 
+  const applyReferenceSnapshotToModules = useCallback((snapshot: BriefReferenceSnapshot) => {
+    const observationsById = new Map(snapshot.observations.map((observation) => [observation.imageId, observation]));
+    moduleContext.setFiles((current) => {
+      let changed = false;
+      const next = current.map((file) => {
+        const observation = observationsById.get(file.uuid || String(file.id));
+        if (!observation) return file;
+        const visualRead = observation.visualRead || "";
+        const visualReadSource = observation.readSource || "local";
+        if (file.visualRead === visualRead && file.visualReadSource === visualReadSource) return file;
+        changed = true;
+        return {
+          ...file,
+          visualRead,
+          visualReadSource,
+        };
+      });
+      return changed ? next : current;
+    });
+  }, [moduleContext]);
+
   useEffect(() => {
     let cancelled = false;
     const fallbackSnapshot = createReferenceSnapshot(moduleContext.files);
@@ -382,10 +402,18 @@ export default function PromptBar() {
     if (cached) {
       setReferenceSnapshot(cached.snapshot);
       setReferenceReadModel(cached.model);
+      applyReferenceSnapshotToModules(cached.snapshot);
       return () => {
         cancelled = true;
       };
     }
+
+    if (referenceReadInFlightRef.current.has(referenceFingerprint)) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    referenceReadInFlightRef.current.add(referenceFingerprint);
 
     requestReferenceRead({
       sourceFingerprint: referenceFingerprint,
@@ -394,6 +422,7 @@ export default function PromptBar() {
       if (cancelled) return;
       setReferenceSnapshot(response.snapshot);
       setReferenceReadModel(response.model);
+      applyReferenceSnapshotToModules(response.snapshot);
       writeReferenceSnapshotCache({
         sourceFingerprint: referenceFingerprint,
         snapshot: response.snapshot,
@@ -405,12 +434,14 @@ export default function PromptBar() {
       const message = error instanceof Error ? error.message : "Reference reader failed.";
       setReferenceReadError(message);
       setReferenceSnapshot(fallbackSnapshot);
+    }).finally(() => {
+      referenceReadInFlightRef.current.delete(referenceFingerprint);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [moduleContext.files, referenceFingerprint]);
+  }, [applyReferenceSnapshotToModules, moduleContext.files, referenceFingerprint]);
 
   const formatAgentTime = (value: string) => {
     const date = new Date(value);
@@ -421,6 +452,19 @@ export default function PromptBar() {
   const currentReferenceContext = (): NonNullable<AgentMessage["context"]> => ({
     refCount: activeModuleCount,
   });
+
+  const formatUnderstandingSummary = (draft: BriefDraft | null) => {
+    if (!draft) return null;
+    const understanding = draft.visualUnderstanding;
+    const roleParts = [
+      understanding.subject.present ? `SUBJECT ${understanding.subject.labels.length || 1}` : "NO SUBJECT",
+      understanding.scene.present ? `SCENE ${understanding.scene.labels.length || 1}` : "NO SCENE",
+      understanding.style.present ? `STYLE ${understanding.style.labels.length || 1}` : "NO STYLE",
+    ];
+    const anchorCount = understanding.continuity.anchors.length;
+    const boundaryCount = understanding.continuity.changeBoundaries.length;
+    return `${roleParts.join(" / ")} / ${anchorCount} ANCHORS / ${boundaryCount} BOUNDARIES`;
+  };
 
   const formatMessageHeader = (message: AgentMessage) => {
     const parts = [formatAgentTime(message.createdAt), message.role.toUpperCase()];
@@ -464,7 +508,7 @@ export default function PromptBar() {
     };
     const nextUserMessages = [...agentMessages, userMessage];
     setAgentMessages(nextUserMessages);
-    setAgentDraft(applySkillContract(createMockBriefDraft(referenceSnapshot, nextUserMessages)));
+    setAgentDraft(null);
     setAgentPending(true);
     setAgentError("");
     if (trimmed && promptHistory[0] !== trimmed) {
@@ -542,6 +586,7 @@ export default function PromptBar() {
   const newestMessages = [...agentMessages].reverse();
   const hasAgentFinalPrompt = !!agentDraft?.finalPrompt.trim();
   const stagedGeneratePrompt = parseGenerateCommand(promptText);
+  const understandingSummary = formatUnderstandingSummary(agentDraft);
   const frameExecutionState = agentPending
     ? "WAITING FOR AGENT"
     : stagedGeneratePrompt !== null
@@ -765,6 +810,11 @@ export default function PromptBar() {
           <div className="agent-section">
             <div className="agent-line agent-muted">&gt; {frameExecutionState}</div>
           </div>
+          {understandingSummary && (
+            <div className="agent-section">
+              <div className="agent-line agent-muted">&gt; UNDERSTANDING: <mark>{understandingSummary}</mark></div>
+            </div>
+          )}
           {referenceReadError && (
             <div className="agent-section agent-reference">
               <div className="agent-line agent-muted">&gt; READER ERROR: <mark>{referenceReadError}</mark></div>

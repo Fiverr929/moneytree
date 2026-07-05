@@ -1,6 +1,7 @@
 export type ReferenceRole = "SUBJECT" | "SCENE" | "STYLE" | "UNASSIGNED";
 
 export type StrengthBand = "maxImprovise" | "improvise" | "faithful" | "expressive" | "maxExpressive";
+export type ReferenceInfluence = "FREE" | "LOOSE" | "BALANCED" | "CLOSE" | "LOCKED";
 
 export type SemanticType = "character" | "object" | "environment" | "aesthetic";
 
@@ -18,19 +19,19 @@ export type ReferenceStrength = {
 function labelForBand(role: ReferenceRole, band: StrengthBand): string {
   const generic: Record<StrengthBand, string> = {
     maxImprovise: "locked",
-    improvise: "slight",
+    improvise: "close",
     faithful: "balanced",
-    expressive: "expressive",
-    maxExpressive: "max express"
+    expressive: "loose",
+    maxExpressive: "express"
   };
 
   if (role === "STYLE") {
     return {
-      maxImprovise: "subtle",
-      improvise: "light",
+      maxImprovise: "locked",
+      improvise: "close",
       faithful: "balanced",
-      expressive: "strong",
-      maxExpressive: "max strong"
+      expressive: "loose",
+      maxExpressive: "express"
     }[band];
   }
 
@@ -83,6 +84,18 @@ export function getStrengthBand(value: unknown): StrengthBand {
   return "maxExpressive";
 }
 
+export function getReferenceInfluence(value: unknown): ReferenceInfluence {
+  const band = getStrengthBand(value);
+  const influenceByBand: Record<StrengthBand, ReferenceInfluence> = {
+    maxImprovise: "LOCKED",
+    improvise: "CLOSE",
+    faithful: "BALANCED",
+    expressive: "LOOSE",
+    maxExpressive: "FREE",
+  };
+  return influenceByBand[band];
+}
+
 export function describeReferenceStrength(value: unknown, role: ReferenceRole, label = "UNASSIGNED"): ReferenceStrength {
   const strength = normalizeStrength(value);
   const uiValue = strength - 50;
@@ -91,49 +104,49 @@ export function describeReferenceStrength(value: unknown, role: ReferenceRole, l
 
   const roleIntent: Record<ReferenceRole, Record<StrengthBand, string>> = {
     SUBJECT: {
-      maxImprovise: "Pose locked. Preserve the subject almost exactly as shown.",
-      improvise: "Small pose freedom. Keep the subject mostly as shown with only minor natural pose/expression changes.",
-      faithful: "Moderate pose freedom. Keep the same subject while allowing a natural pose/expression/action shift.",
-      expressive: "Strong pose freedom. Keep the same subject while allowing a clear pose/action change.",
-      maxExpressive: "Maximum pose freedom. Keep the same subject while allowing a dramatic pose/action change."
+      maxImprovise: "Locked subject reference. Match the subject, pose, expression, wardrobe, and visible details as closely as possible.",
+      improvise: "Close subject reference. Preserve the subject very closely, including posture and silhouette unless the user asks for a change.",
+      faithful: "Balanced subject reference. Preserve the subject closely while allowing a modest pose or expression adjustment.",
+      expressive: "Light subject reference. Preserve identity/type and distinctive details with natural pose or expression freedom.",
+      maxExpressive: "Loose subject reference. Preserve identity/type and distinctive details while allowing a new pose or action."
     },
     SCENE: {
-      maxImprovise: "Locked view. Preserve the same camera view, framing, and visible scene anchors.",
-      improvise: "Small reframe. Keep the same scene anchors with only a slight crop, lens, height, or framing change.",
-      faithful: "Balanced reframe. Keep the same scene anchors while changing the camera position modestly.",
-      expressive: "New shot. Recompose the view while keeping the same event, location, and visible anchors recognizable.",
-      maxExpressive: "Strong new shot. Use a clearly different shot angle, but only within what can be inferred from the reference."
+      maxImprovise: "Locked scene reference. Match the same camera view, composition, lighting, background, and visible anchors as closely as possible.",
+      improvise: "Close scene reference. Preserve the camera view, framing, lighting direction, and key anchors closely.",
+      faithful: "Balanced scene reference. Preserve the same event and anchors with only a natural camera adjustment.",
+      expressive: "Light scene reference. Preserve the location and key anchors while allowing a modest reframe.",
+      maxExpressive: "Loose scene reference. Preserve the environment idea while allowing a new camera view."
     },
     STYLE: {
-      maxImprovise: "Subtle style transfer. Borrow only a light touch of palette or finish.",
-      improvise: "Light style transfer. Apply some palette, lighting mood, or surface texture.",
+      maxImprovise: "Locked style treatment. Apply the strongest rendering treatment, palette, texture, and finish.",
+      improvise: "Close style treatment. Make the rendering medium, palette, texture, and finish clearly visible.",
       faithful: "Balanced style transfer. Apply the visual treatment without copying content.",
-      expressive: "Strong style transfer. Make the rendering medium, palette, texture, and finish clearly visible.",
-      maxExpressive: "Maximum style transfer. Let the rendering treatment dominate while still ignoring content and background."
+      expressive: "Light style transfer. Apply some palette, lighting mood, or surface texture.",
+      maxExpressive: "Free style transfer. Borrow only a light touch of palette or finish."
     },
     UNASSIGNED: {
-      maxImprovise: "Minimal reference control.",
-      improvise: "Light reference control.",
+      maxImprovise: "Locked reference control.",
+      improvise: "Close reference control.",
       faithful: "Balanced reference control.",
-      expressive: "Strong reference control.",
-      maxExpressive: "Maximum reference control."
+      expressive: "Loose reference control.",
+      maxExpressive: "Free reference control."
     }
   };
 
   if (role === "SUBJECT" && semantic === "object") {
-    roleIntent.SUBJECT.maxImprovise = "Object locked. Preserve the object almost exactly as shown.";
-    roleIntent.SUBJECT.improvise = "Small arrangement freedom. Keep the object mostly as shown with only minor orientation/placement changes.";
-    roleIntent.SUBJECT.faithful = "Moderate arrangement freedom. Keep the same object while allowing a natural orientation/placement shift.";
-    roleIntent.SUBJECT.expressive = "Strong arrangement freedom. Keep the same object while allowing a clear orientation/placement change.";
-    roleIntent.SUBJECT.maxExpressive = "Maximum arrangement freedom. Keep the same object while allowing a dramatic orientation/placement change.";
+    roleIntent.SUBJECT.maxImprovise = "Locked object reference. Match the object shape, orientation, placement, materials, and visible details as closely as possible.";
+    roleIntent.SUBJECT.improvise = "Close object reference. Preserve the object very closely unless the user asks for a change.";
+    roleIntent.SUBJECT.faithful = "Balanced object reference. Preserve the object closely while allowing a modest orientation or placement adjustment.";
+    roleIntent.SUBJECT.expressive = "Light object reference. Preserve object type and distinctive details with minor placement freedom.";
+    roleIntent.SUBJECT.maxExpressive = "Loose object reference. Preserve object type and distinctive details while allowing new placement.";
   }
 
   const priority: Record<StrengthBand, string> = {
-    maxImprovise: "locked",
-    improvise: "slight",
+    maxImprovise: "maximum",
+    improvise: "high",
     faithful: "medium",
-    expressive: "high",
-    maxExpressive: "maximum"
+    expressive: "slight",
+    maxExpressive: "free"
   };
 
   const controlAxis: Record<ReferenceRole, string> = {
@@ -148,34 +161,34 @@ export function describeReferenceStrength(value: unknown, role: ReferenceRole, l
     : "object type, shape, structure, proportions, materials, textures, and distinctive details";
 
   const subjectVariation: Record<StrengthBand, string> = {
-    maxImprovise: "Do not meaningfully change pose/action; preserve the source posture and silhouette.",
-    improvise: "Allow only small pose/expression/orientation adjustments.",
-    faithful: "Allow a natural pose/expression/orientation change, but keep the same subject.",
-    expressive: "Allow a clear pose/action/orientation change, but keep the same subject.",
-    maxExpressive: "Allow a dramatic pose/action/orientation change, but keep the same subject."
+    maxImprovise: "Match posture, expression, silhouette, orientation, placement, wardrobe, materials, and visible details as closely as possible.",
+    improvise: "Preserve posture, expression, silhouette, orientation, and placement closely unless the user asks to change one of them.",
+    faithful: "Allow only a modest pose, expression, orientation, or placement adjustment.",
+    expressive: "Allow natural pose, expression, action, orientation, or placement changes while keeping the subject recognizable.",
+    maxExpressive: "Pose, expression, action, orientation, and placement may change to fit the requested task."
   };
 
   const sceneVariation: Record<StrengthBand, string> = {
-    maxImprovise: "Keep the same camera view and composition.",
-    improvise: "Allow a slight reframe, crop, lens, or camera-height change.",
-    faithful: "Allow a modest new camera position while keeping the same visible anchors.",
-    expressive: "Allow a new shot angle while keeping the same event, location, and key anchors recognizable.",
-    maxExpressive: "Allow a strong new shot angle, but do not invent unseen geometry beyond what the reference supports."
+    maxImprovise: "Match the camera view, composition, background, lighting direction, scale, and visible anchors as closely as possible.",
+    improvise: "Preserve the camera view, framing, composition, and key anchors closely unless the user asks to change them.",
+    faithful: "Allow only a natural camera adjustment while keeping the same visible anchors.",
+    expressive: "Allow a modest reframe, crop, lens, or camera-height change while keeping the location recognizable.",
+    maxExpressive: "Camera view, crop, framing, and layout may change to fit the requested task."
   };
 
   const styleVariation: Record<StrengthBand, string> = {
-    maxImprovise: "Apply only a subtle touch of palette or finish.",
-    improvise: "Apply light palette, lighting mood, texture, or medium cues.",
+    maxImprovise: "Apply the strongest rendering treatment, palette, texture, and finish.",
+    improvise: "Apply a strong rendering treatment, palette, texture, and finish.",
     faithful: "Apply a balanced amount of rendering medium, palette, texture, and finish.",
-    expressive: "Apply a strong rendering treatment, palette, texture, and finish.",
-    maxExpressive: "Apply the strongest rendering treatment, palette, texture, and finish."
+    expressive: "Apply light palette, lighting mood, texture, or medium cues.",
+    maxExpressive: "Apply only a subtle touch of palette or finish."
   };
 
   const contract: Record<ReferenceRole, string> = {
-    SUBJECT: `Lock ${subjectLockedTarget}. Strength controls only ${controlAxis.SUBJECT}. ${subjectVariation[band]} Do not redesign what the subject is, and do not use the subject image background as a scene unless no Scene image exists and the task asks to keep it.`,
+    SUBJECT: `Preserve ${subjectLockedTarget}. ${subjectVariation[band]} Do not redesign what the subject is, and do not use the subject image background as a scene unless no Scene image exists and the task asks to keep it.`,
     SCENE: `Use this only as the stage/environment source. ${sceneVariation[band]} Preserve the same environment, background, event, scale, lighting direction, and key visible anchors. Do not redesign the location or invent a different event.`,
-    STYLE: `Use this only for visual treatment. Strength controls only ${controlAxis.STYLE}. ${styleVariation[band]} Ignore depicted objects, people, background, layout, and scene content; those belong to Subject and Scene modules.`,
-    UNASSIGNED: `Use this only as supporting reference context. Strength controls ${controlAxis.UNASSIGNED}. Do not let it override active Subject, Scene, or Style modules.`
+    STYLE: `Use this only for visual treatment. ${styleVariation[band]} Ignore depicted objects, people, background, layout, and scene content; those belong to Subject and Scene modules.`,
+    UNASSIGNED: `Use this only as supporting reference context. Do not let it override active Subject, Scene, or Style modules.`
   };
 
   return {

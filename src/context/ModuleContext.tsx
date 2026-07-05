@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useMemo, useState, ReactNode, useEffect } from "react";
+import React, { createContext, useContext, useMemo, useState, ReactNode, useEffect, useRef } from "react";
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 import { moduleFileForStorage } from "@/lib/moduleFiles";
@@ -19,6 +19,8 @@ export type ModuleFile = {
   strength: number;
   mode: string;
   url: string;
+  visualRead?: string;
+  visualReadSource?: "local" | "vision";
 };
 
 export type ModuleFolder = {
@@ -116,8 +118,33 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
   const [renamingFileId, setRenamingFileId] = useState<number | null>(null);
   const [labelEditOpen, setLabelEditOpen] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const responsiveCollapseInitialized = useRef(false);
+  const responsiveAutoCollapsed = useRef(false);
 
   const { activeProjectId } = useApp();
+
+  useEffect(() => {
+    if (responsiveCollapseInitialized.current) return;
+    responsiveCollapseInitialized.current = true;
+    const query = window.matchMedia("(max-width: 900px)");
+    if (query.matches) {
+      responsiveAutoCollapsed.current = true;
+      setCollapsed(true);
+    }
+
+    const handleBreakpointChange = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        responsiveAutoCollapsed.current = true;
+        setCollapsed(true);
+      } else if (responsiveAutoCollapsed.current) {
+        responsiveAutoCollapsed.current = false;
+        setCollapsed(false);
+      }
+    };
+
+    query.addEventListener("change", handleBreakpointChange);
+    return () => query.removeEventListener("change", handleBreakpointChange);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
