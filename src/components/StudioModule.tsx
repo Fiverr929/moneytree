@@ -5,12 +5,33 @@ import { useStudio, StudioGroup } from "@/context/StudioContext";
 import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 
-const ACTIONS = ['INSERT', 'SWAP', 'TRANSFER', 'REMOVE', 'PRESERVE'];
+const ACTIONS = ['INSERT', 'REPLACE', 'REMOVE', 'KEEP'];
 const MAX_IMAGES = 3;
 type PendingUpload =
   | { type: 'create'; action: string }
   | { type: 'insert'; index: number }
   | { type: 'replace'; index: number; imageIndex: number };
+
+const normalizeAction = (action: string) => {
+  const upper = action.toUpperCase();
+  if (upper === 'SWAP' || upper === 'TRANSFER') return 'REPLACE';
+  if (upper === 'PRESERVE') return 'KEEP';
+  return ACTIONS.includes(upper) ? upper : 'INSERT';
+};
+
+const defaultNameForAction = (action: string) => {
+  switch (normalizeAction(action)) {
+    case 'INSERT':
+      return 'OBJECT';
+    case 'REPLACE':
+    case 'REMOVE':
+      return 'TARGET';
+    case 'KEEP':
+      return 'PROTECT';
+    default:
+      return 'TARGET';
+  }
+};
 
 export default function StudioModule() {
   const { groups, setGroups, isOpen } = useStudio();
@@ -57,8 +78,8 @@ export default function StudioModule() {
           await DB.images.put(uuid, url, activeProjectId);
         }
         const newGroup: StudioGroup = {
-          action: pendingUpload.action,
-          name: 'REFERENCE',
+          action: normalizeAction(pendingUpload.action),
+          name: defaultNameForAction(pendingUpload.action),
           images: [{ uuid, url, visible: true }]
         };
         setGroups([newGroup, ...groups]);
@@ -152,6 +173,7 @@ export default function StudioModule() {
           {groups.map((g, gIdx) => {
             const isEditingName = editingGroupId === gIdx;
             const isActionOpen = actionDrawerId === gIdx;
+            const action = normalizeAction(g.action);
 
             return (
               <div key={gIdx} className={`layer-group ${isEditingName ? 'drawer-open' : ''} ${isActionOpen ? 'action-drawer-open' : ''}`}>
@@ -166,7 +188,7 @@ export default function StudioModule() {
                     className="sm-action-btn"
                     onClick={(e) => { e.stopPropagation(); setActionDrawerId(isActionOpen ? null : gIdx); setEditingGroupId(null); setHeaderMenuOpen(false); }}
                   >
-                    {g.action}
+                    {action}
                   </button>
                   <div 
                     className="plr-name blue" 
@@ -182,11 +204,14 @@ export default function StudioModule() {
                       <button 
                         key={a} 
                         type="button" 
-                        className={`sm-action-option ${a === g.action ? 'active' : ''}`}
+                        className={`sm-action-option ${a === action ? 'active' : ''}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           const next = [...groups];
                           next[gIdx].action = a;
+                          if (!next[gIdx].name || next[gIdx].name === defaultNameForAction(g.action)) {
+                            next[gIdx].name = defaultNameForAction(a);
+                          }
                           setGroups(next);
                           setActionDrawerId(null);
                         }}
@@ -206,7 +231,7 @@ export default function StudioModule() {
                       onChange={(e) => setEditingGroupName(e.target.value)}
                       onBlur={() => {
                         const next = [...groups];
-                        next[gIdx].name = editingGroupName.trim().toUpperCase() || 'REFERENCE';
+                        next[gIdx].name = editingGroupName.trim().toUpperCase() || defaultNameForAction(next[gIdx].action);
                         setGroups(next);
                         setEditingGroupId(null);
                       }}

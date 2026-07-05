@@ -12,11 +12,12 @@ import { join } from "node:path";
 import type { VeoGenerationRequest } from "@/lib/video/api";
 
 export const runtime = "nodejs";
-export const maxDuration = 1200;
+export const maxDuration = 300;
 
 const POLL_INTERVAL_MS = 10_000;
-const MAX_POLL_TIME_MS = 20 * 60 * 1000;
+const MAX_POLL_TIME_MS = 4.5 * 60 * 1000;
 const MAX_REQUEST_BYTES = 40 * 1024 * 1024;
+const MAX_VERCEL_REQUEST_BYTES = 4 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_PROMPT_LENGTH = 4_000;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -25,6 +26,14 @@ const VIDEO_MODELS = {
   "veo-3.1-fast-generate-001": { supportsReferences: true },
   "veo-3.1-lite-generate-001": { supportsReferences: false },
 } as const;
+
+function isVercelDownloadProxyDisabled() {
+  return process.env.VERCEL === "1" && process.env.ENABLE_VERCEL_VIDEO_DOWNLOAD !== "true";
+}
+
+function getMaxRequestBytes() {
+  return process.env.VERCEL === "1" ? MAX_VERCEL_REQUEST_BYTES : MAX_REQUEST_BYTES;
+}
 
 function toVeoImage(dataUrl: string): Image {
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
@@ -55,7 +64,7 @@ function validateRequest(request: Request, value: unknown): VeoGenerationRequest
   }
 
   const contentLength = Number(request.headers.get("content-length") || 0);
-  if (contentLength > MAX_REQUEST_BYTES) {
+  if (contentLength > getMaxRequestBytes()) {
     throw new Error("Video generation request is too large.");
   }
   if (typeof input.prompt !== "string" || !input.prompt.trim()) {
@@ -154,6 +163,15 @@ async function downloadGeneratedVideo(ai: GoogleGenAI, video: Video) {
 
 export async function POST(request: Request) {
   try {
+    if (isVercelDownloadProxyDisabled()) {
+      return NextResponse.json(
+        {
+          error: "Video generation is disabled on Vercel until direct cloud storage downloads are configured. This avoids sending large video files through Vercel's free-tier functions.",
+        },
+        { status: 503 },
+      );
+    }
+
     const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
     const location = process.env.GOOGLE_CLOUD_LOCATION?.trim();
     if (!project || !location) {
@@ -166,7 +184,7 @@ export async function POST(request: Request) {
     }
 
     const contentLength = Number(request.headers.get("content-length") || 0);
-    if (contentLength > MAX_REQUEST_BYTES) {
+    if (contentLength > getMaxRequestBytes()) {
       return NextResponse.json({ error: "Video generation request is too large." }, { status: 413 });
     }
     const input = validateRequest(request, await request.json());
@@ -204,7 +222,7 @@ export async function POST(request: Request) {
     const startedAt = Date.now();
     while (!operation.done) {
       if (Date.now() - startedAt > MAX_POLL_TIME_MS) {
-        throw new Error("Video generation timed out after 20 minutes.");
+        throw new Error("Video generation timed out before the serverless function limit. Use direct cloud storage downloads for production video generation.");
       }
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
       operation = await ai.operations.getVideosOperation({ operation });

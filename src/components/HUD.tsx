@@ -483,6 +483,7 @@ export default function HUD() {
             </button>
           </div>
           <div className="prompt-text" id="info-prompt">{promptTextForCell(activeCell) || '-'}</div>
+
         </div>
       </div>
 

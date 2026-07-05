@@ -9,30 +9,118 @@ import StudioModule from "./StudioModule";
 
 type Point = { x: number, y: number };
 type Stroke = { color: string, size: number, points: Point[] };
+type CropBox = { l: number, t: number, w: number, h: number };
+type CropHandlePos = "tl" | "t" | "tr" | "r" | "br" | "b" | "bl" | "l";
+type StudioFlavor = "normal" | "creative";
 type StudioPromptCommand =
-  | { kind: "refine"; prompt: string }
+  | { kind: "refine"; prompt: string; flavor: StudioFlavor }
   | { kind: "upscale"; prompt: string; imageSize: "2K" | "4K" }
-  | { kind: "invalid-upscale"; message: string };
+  | { kind: "invalid-command"; message: string };
 
 const MAX_STUDIO_HISTORY = 20;
 const limitStudioHistory = (items: string[]) => items.slice(0, MAX_STUDIO_HISTORY);
+const MIN_CROP_SIZE = 40;
+
+const STUDIO_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4"] as const;
+
+const aspectRatioFromImage = (img: HTMLImageElement | null | undefined) => {
+  const width = Math.round(img?.naturalWidth || 0);
+  const height = Math.round(img?.naturalHeight || 0);
+  if (width <= 0 || height <= 0) return undefined;
+  const imageRatio = width / height;
+
+  return STUDIO_ASPECT_RATIOS.reduce((best, ratio) => {
+    const [ratioWidth, ratioHeight] = ratio.split(":").map(Number);
+    const [bestWidth, bestHeight] = best.split(":").map(Number);
+    const distance = Math.abs(imageRatio - ratioWidth / ratioHeight);
+    const bestDistance = Math.abs(imageRatio - bestWidth / bestHeight);
+    return distance < bestDistance ? ratio : best;
+  }, STUDIO_ASPECT_RATIOS[0]);
+};
+
+const createInitialCropBox = (cw: number, ch: number, cropRatio: number | "free"): CropBox => {
+  let w: number;
+  let h: number;
+  if (cropRatio === "free") {
+    w = cw * 0.72;
+    h = ch * 0.72;
+  } else {
+    w = Math.min(cw * 0.82, ch * 0.82 * cropRatio);
+    h = w / cropRatio;
+    if (h > ch * 0.82) {
+      h = ch * 0.82;
+      w = h * cropRatio;
+    }
+  }
+  return { l: (cw - w) / 2, t: (ch - h) / 2, w, h };
+};
+
+const clampCropBox = (box: CropBox, cw: number, ch: number, cropRatio: number | "free"): CropBox => {
+  const minSize = Math.min(MIN_CROP_SIZE, cw, ch);
+  let { l, t, w, h } = box;
+
+  if (cropRatio === "free") {
+    w = Math.min(Math.max(w, minSize), cw);
+    h = Math.min(Math.max(h, minSize), ch);
+  } else {
+    const maxW = Math.min(cw, ch * cropRatio);
+    w = Math.min(Math.max(w, minSize), maxW);
+    h = w / cropRatio;
+    if (h > ch) {
+      h = ch;
+      w = h * cropRatio;
+    }
+  }
+
+  l = Math.min(Math.max(l, 0), Math.max(0, cw - w));
+  t = Math.min(Math.max(t, 0), Math.max(0, ch - h));
+  return { l, t, w, h };
+};
+
+const FREE_CROP_HANDLES: Array<{ pos: CropHandlePos; cursor: string; className: string }> = [
+  { pos: "tl", cursor: "nw-resize", className: "corner tl" },
+  { pos: "t", cursor: "n-resize", className: "edge t" },
+  { pos: "tr", cursor: "ne-resize", className: "corner tr" },
+  { pos: "r", cursor: "e-resize", className: "edge r" },
+  { pos: "br", cursor: "se-resize", className: "corner br" },
+  { pos: "b", cursor: "s-resize", className: "edge b" },
+  { pos: "bl", cursor: "sw-resize", className: "corner bl" },
+  { pos: "l", cursor: "w-resize", className: "edge l" },
+];
+
+const LOCKED_CROP_HANDLES = FREE_CROP_HANDLES.filter(({ pos }) => ["tl", "tr", "br", "bl"].includes(pos));
+
+const STUDIO_COMMANDS = [
+  { value: "/creative", label: "/creative", description: "Creative reinterpretation" },
+  { value: "/upscale 2k", label: "/upscale 2k", description: "Upscale to 2K" },
+  { value: "/upscale 4k", label: "/upscale 4k", description: "Upscale to 4K" },
+];
 
 const parseStudioPromptCommand = (rawPrompt: string): StudioPromptCommand => {
   const trimmed = rawPrompt.trim();
-  if (!trimmed.toLowerCase().startsWith("/upscale")) {
-    return { kind: "refine", prompt: rawPrompt };
+  if (!trimmed.startsWith("/")) {
+    return { kind: "refine", prompt: rawPrompt, flavor: "normal" };
+  }
+
+  const creativeMatch = trimmed.match(/^\/creative(?:\s+([\s\S]*))?$/i);
+  if (creativeMatch) {
+    return { kind: "refine", prompt: creativeMatch[1]?.trim() || "", flavor: "creative" };
   }
 
   const match = trimmed.match(/^\/upscale(?:\s+(2k|4k))?(?:\s+([\s\S]*))?$/i);
-  if (!match || !match[1]) {
-    return { kind: "invalid-upscale", message: "Use /upscale 2k or /upscale 4k, optionally followed by a prompt." };
+  if (trimmed.toLowerCase().startsWith("/upscale")) {
+    if (!match || !match[1]) {
+      return { kind: "invalid-command", message: "Use /upscale 2k or /upscale 4k, optionally followed by a prompt." };
+    }
+
+    return {
+      kind: "upscale",
+      imageSize: match[1].toUpperCase() as "2K" | "4K",
+      prompt: match[2]?.trim() || ""
+    };
   }
 
-  return {
-    kind: "upscale",
-    imageSize: match[1].toUpperCase() as "2K" | "4K",
-    prompt: match[2]?.trim() || ""
-  };
+  return { kind: "invalid-command", message: "Unknown Studio command. Use /creative, /upscale 2k, or /upscale 4k." };
 };
 
 export default function Studio() {
@@ -51,12 +139,20 @@ export default function Studio() {
   const { activeModel } = useSettings();
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const drawLayerRef = useRef<HTMLCanvasElement>(null);
   const cropOverlayRef = useRef<HTMLDivElement>(null);
 
   const [prompt, setPrompt] = useState("");
   const [loadingCount, setLoadingCount] = useState(0);
+  const [imageAspect, setImageAspect] = useState<number | null>(null);
+  const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null);
+  const [referenceDrawerOpen, setReferenceDrawerOpen] = useState(false);
+  const [desktopReferenceVisible, setDesktopReferenceVisible] = useState(true);
+  const [compactStudio, setCompactStudio] = useState(false);
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false);
+  const [commandIndex, setCommandIndex] = useState(0);
   const inputRef = useRef<HTMLDivElement>(null);
 
   // Drawing state
@@ -68,8 +164,9 @@ export default function Studio() {
 
   // Crop state
   const cropDrag = useRef<{startX: number, startY: number, origLeft: number, origTop: number} | null>(null);
-  const cropResize = useRef<{pos: string, startX: number, startY: number, origLeft: number, origTop: number, origW: number, origH: number} | null>(null);
-  const [cropBox, setCropBox] = useState<{l: number, t: number, w: number, h: number} | null>(null);
+  const cropResize = useRef<{pos: CropHandlePos, startX: number, startY: number, origLeft: number, origTop: number, origW: number, origH: number} | null>(null);
+  const previousCanvasSize = useRef<{ width: number; height: number } | null>(null);
+  const [cropBox, setCropBox] = useState<CropBox | null>(null);
 
   useEffect(() => {
     if (isOpen && history.length > 0 && !activeUrl) {
@@ -81,6 +178,34 @@ export default function Studio() {
       setCropBox(null);
     }
   }, [isOpen, history, activeUrl, setActiveUrl]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setReferenceDrawerOpen(false);
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setReferenceDrawerOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen]);
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 900px)");
+    const syncCompactStudio = () => {
+      setCompactStudio(query.matches);
+      if (!query.matches) setReferenceDrawerOpen(false);
+    };
+
+    syncCompactStudio();
+    query.addEventListener("change", syncCompactStudio);
+    return () => query.removeEventListener("change", syncCompactStudio);
+  }, []);
 
   useEffect(() => {
     undoStackRef.current = undoStack;
@@ -122,25 +247,58 @@ export default function Studio() {
     redrawStrokes();
   }, [redrawStrokes]);
 
+  const fitStudioCanvas = useCallback(() => {
+    const wrap = canvasWrapRef.current;
+    if (!wrap || !imageAspect) return;
+
+    const refineToolbar = wrap.querySelector<HTMLElement>(".refine-toolbar");
+    const openSubmenu = wrap.querySelector<HTMLElement>(".tool-submenu.open");
+    const toolWidth = (refineToolbar?.offsetWidth || 0) + (openSubmenu?.offsetWidth || 0);
+    const availableWidth = Math.max(0, wrap.clientWidth - toolWidth);
+    const availableHeight = wrap.clientHeight;
+    if (availableWidth <= 0 || availableHeight <= 0) return;
+
+    let width = Math.min(availableWidth, availableHeight * imageAspect);
+    let height = width / imageAspect;
+    if (height > availableHeight) {
+      height = availableHeight;
+      width = height * imageAspect;
+    }
+
+    setCanvasSize({
+      width: Math.max(1, Math.floor(width)),
+      height: Math.max(1, Math.floor(height)),
+    });
+  }, [imageAspect]);
+
   useEffect(() => {
     if (isOpen && activeUrl) {
       const img = new Image();
       img.onload = () => {
         if (canvasRef.current) {
+          canvasRef.current.style.setProperty(
+            "--studio-image-aspect",
+            `${img.naturalWidth} / ${img.naturalHeight}`,
+          );
           canvasRef.current.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
         }
-        syncDrawLayer();
+        setImageAspect(img.naturalWidth / img.naturalHeight);
       };
       img.src = activeUrl;
     }
-  }, [activeUrl, isOpen, syncDrawLayer]);
+  }, [activeUrl, isOpen]);
 
   useEffect(() => {
-    if (!isOpen || !canvasRef.current) return;
-    const resizeObserver = new ResizeObserver(syncDrawLayer);
-    resizeObserver.observe(canvasRef.current);
+    if (!isOpen || !canvasWrapRef.current) return;
+    fitStudioCanvas();
+    const resizeObserver = new ResizeObserver(fitStudioCanvas);
+    resizeObserver.observe(canvasWrapRef.current);
     return () => resizeObserver.disconnect();
-  }, [isOpen, syncDrawLayer]);
+  }, [activeTool, fitStudioCanvas, isOpen]);
+
+  useEffect(() => {
+    syncDrawLayer();
+  }, [canvasSize, syncDrawLayer]);
 
   useEffect(() => { redrawStrokes(); }, [redrawStrokes]);
 
@@ -212,24 +370,32 @@ export default function Studio() {
     if (activeTool === 'crop' && canvasRef.current) {
       const cw = canvasRef.current.offsetWidth;
       const ch = canvasRef.current.offsetHeight;
-      let bw, bh;
-      if (cropRatio === 'free') {
-        bw = cw * 0.7; bh = ch * 0.7;
-      } else {
-        const cr = cropRatio as number;
-        bw = Math.min(cw * 0.8, ch * 0.8 * cr);
-        bh = bw / cr;
-        if (bh > ch * 0.8) { bh = ch * 0.8; bw = bh * cr; }
-      }
-      setCropBox({ l: (cw - bw)/2, t: (ch - bh)/2, w: bw, h: bh });
+      previousCanvasSize.current = { width: cw, height: ch };
+      setCropBox(createInitialCropBox(cw, ch, cropRatio));
     } else {
       setCropBox(null);
     }
   }, [activeTool, cropRatio, activeUrl]);
 
+  useEffect(() => {
+    if (activeTool !== "crop" || !canvasSize) return;
+    const previous = previousCanvasSize.current;
+    previousCanvasSize.current = canvasSize;
+    setCropBox((prev) => {
+      if (!prev) return createInitialCropBox(canvasSize.width, canvasSize.height, cropRatio);
+      if (!previous) return clampCropBox(prev, canvasSize.width, canvasSize.height, cropRatio);
+      return clampCropBox({
+        l: prev.l * (canvasSize.width / previous.width),
+        t: prev.t * (canvasSize.height / previous.height),
+        w: prev.w * (canvasSize.width / previous.width),
+        h: prev.h * (canvasSize.height / previous.height),
+      }, canvasSize.width, canvasSize.height, cropRatio);
+    });
+  }, [activeTool, canvasSize, cropRatio]);
+
   // Crop Drag/Resize handlers
   useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent) => {
       if (!canvasRef.current || !cropBox) return;
       const cw = canvasRef.current.offsetWidth;
       const ch = canvasRef.current.offsetHeight;
@@ -238,36 +404,61 @@ export default function Studio() {
         const d = cropDrag.current;
         const dx = e.clientX - d.startX;
         const dy = e.clientY - d.startY;
-        setCropBox(prev => ({
-          ...prev!,
-          l: Math.max(0, Math.min(d.origLeft + dx, cw - prev!.w)),
-          t: Math.max(0, Math.min(d.origTop + dy, ch - prev!.h))
-        }));
+        setCropBox(prev => prev ? clampCropBox({
+          ...prev,
+          l: d.origLeft + dx,
+          t: d.origTop + dy,
+        }, cw, ch, "free") : prev);
       }
       
       if (cropResize.current) {
         const r = cropResize.current;
         const dx = e.clientX - r.startX;
         const dy = e.clientY - r.startY;
-        let nl = r.origLeft, nt = r.origTop, nw = r.origW, nh = r.origH;
-        
-        if (r.pos === 'br') { nw = Math.max(40, r.origW + dx); nh = cropRatio === 'free' ? Math.max(40, r.origH + dy) : nw / (cropRatio as number); }
-        if (r.pos === 'bl') { nw = Math.max(40, r.origW - dx); nl = r.origLeft + r.origW - nw; nh = cropRatio === 'free' ? Math.max(40, r.origH + dy) : nw / (cropRatio as number); }
-        if (r.pos === 'tr') { nw = Math.max(40, r.origW + dx); nh = cropRatio === 'free' ? Math.max(40, r.origH - dy) : nw / (cropRatio as number); nt = cropRatio === 'free' ? r.origTop + r.origH - nh : r.origTop + r.origH - nw / (cropRatio as number); }
-        if (r.pos === 'tl') { nw = Math.max(40, r.origW - dx); nl = r.origLeft + r.origW - nw; nh = cropRatio === 'free' ? Math.max(40, r.origH - dy) : nw / (cropRatio as number); nt = r.origTop + r.origH - nh; }
-        
-        nl = Math.max(0, nl); nt = Math.max(0, nt);
-        nw = Math.min(nw, cw - nl); nh = Math.min(nh, ch - nt);
-        setCropBox({ l: nl, t: nt, w: nw, h: nh });
+        let left = r.origLeft;
+        let top = r.origTop;
+        let right = r.origLeft + r.origW;
+        let bottom = r.origTop + r.origH;
+
+        if (r.pos.includes("l")) left += dx;
+        if (r.pos.includes("r")) right += dx;
+        if (r.pos.includes("t")) top += dy;
+        if (r.pos.includes("b")) bottom += dy;
+
+        if (cropRatio !== "free") {
+          const cr = cropRatio as number;
+          let nextW = Math.abs(right - left);
+          let nextH = nextW / cr;
+          if (r.pos.includes("t")) top = bottom - nextH;
+          else bottom = top + nextH;
+          if (nextH > ch) {
+            nextH = ch;
+            nextW = nextH * cr;
+            if (r.pos.includes("l")) left = right - nextW;
+            else right = left + nextW;
+            if (r.pos.includes("t")) top = bottom - nextH;
+            else bottom = top + nextH;
+          }
+        }
+
+        const nextBox = {
+          l: Math.min(left, right),
+          t: Math.min(top, bottom),
+          w: Math.abs(right - left),
+          h: Math.abs(bottom - top),
+        };
+        setCropBox(clampCropBox(nextBox, cw, ch, cropRatio));
       }
     };
-    const onMouseUp = () => { cropDrag.current = null; cropResize.current = null; };
+    const onPointerUp = () => { cropDrag.current = null; cropResize.current = null; };
     
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', onPointerUp);
     return () => {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointercancel', onPointerUp);
     };
   }, [cropBox, cropRatio]);
 
@@ -306,7 +497,61 @@ export default function Studio() {
     }
   }, [prompt]);
 
+  const commandQuery = prompt.startsWith("/") ? prompt.split(/\s/, 1)[0].toLowerCase() : "";
+  const filteredCommands = commandQuery
+    ? STUDIO_COMMANDS.filter((command) => command.value.startsWith(commandQuery))
+    : STUDIO_COMMANDS;
+
+  useEffect(() => {
+    const isLeadingCommand = prompt.startsWith("/") && !prompt.includes(" ");
+    setCommandMenuOpen(isLeadingCommand && filteredCommands.length > 0);
+    setCommandIndex((index) => Math.min(index, Math.max(0, filteredCommands.length - 1)));
+  }, [filteredCommands.length, prompt]);
+
+  const setPromptText = (nextPrompt: string) => {
+    setPrompt(nextPrompt);
+    window.requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.textContent = nextPrompt;
+      const range = document.createRange();
+      range.selectNodeContents(input);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      input.focus();
+    });
+  };
+
+  const insertStudioCommand = (command: string) => {
+    setPromptText(`${command} `);
+    setCommandMenuOpen(false);
+  };
+
   const handlePromptKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (commandMenuOpen && filteredCommands.length > 0) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setCommandIndex((index) => (
+          e.key === "ArrowDown"
+            ? (index + 1) % filteredCommands.length
+            : (index - 1 + filteredCommands.length) % filteredCommands.length
+        ));
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        insertStudioCommand(filteredCommands[commandIndex]?.value || filteredCommands[0].value);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setCommandMenuOpen(false);
+        return;
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleRefine();
@@ -320,7 +565,7 @@ export default function Studio() {
     if (!activeUrl || !activeModel) return;
     
     const parsedCommand = parseStudioPromptCommand(prompt);
-    if (parsedCommand.kind === "invalid-upscale") {
+    if (parsedCommand.kind === "invalid-command") {
       alert(parsedCommand.message);
       return;
     }
@@ -335,7 +580,9 @@ export default function Studio() {
     // Capture state
     const currentPrompt = parsedCommand.prompt;
     const isUpscale = parsedCommand.kind === "upscale";
+    const studioFlavor = parsedCommand.kind === "refine" ? parsedCommand.flavor : "normal";
     const currentActiveUrl = activeUrl;
+    const currentAspectRatio = aspectRatioFromImage(canvasRef.current?.querySelector('img'));
     const currentGroups = groups.map(g => ({
        action: g.action,
        name: g.name,
@@ -370,6 +617,8 @@ export default function Studio() {
           annotationImageUrl: isUpscale ? undefined : annotationImageUrl,
           references: isUpscale ? [] : references,
           imageSize: isUpscale ? parsedCommand.imageSize : undefined,
+          flavor: studioFlavor,
+          aspectRatio: currentAspectRatio,
         });
 
         setHistory(prev => limitStudioHistory([generatedUrl, ...prev]));
@@ -384,7 +633,7 @@ export default function Studio() {
         addCell({
           id: Date.now(),
           uuid: newUuid,
-          ratio: "1:1",
+          ratio: currentAspectRatio || "1:1",
           mode: isUpscale ? "STUDIO UPSCALE" : "STUDIO REFINE",
           type: isUpscale ? "Studio Upscale" : "Studio Edit",
           kind: "image",
@@ -395,8 +644,13 @@ export default function Studio() {
           generated: true,
           imgUrl: generatedUrl,
           prompt: currentPrompt,
+          effectivePrompt: currentPrompt,
           date: createdAt,
-          usedImages
+          usedImages,
+          generationSettings: {
+            aspectRatio: currentAspectRatio || "1:1",
+            studioFlavor
+          }
         });
 
         // Switch to the generated image only if the user hasn't started new work
@@ -415,6 +669,23 @@ export default function Studio() {
 
   if (!isOpen) return null;
 
+  const renderHistoryFrames = () => (
+    <div className="studio-history-frames" id="studioHistoryFrames">
+      {Array.from({ length: loadingCount }).map((_, i) => (
+        <div key={`loading-${i}`} className="history-thumb loading" />
+      ))}
+      {history.map((url, i) => (
+        <div
+          key={i}
+          className={`history-thumb ${activeUrl === url ? 'active' : ''}`}
+          onClick={() => setActiveUrl(url)}
+        >
+          <img src={url} alt={`History ${i}`} />
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div id="studio-overlay" className="open" ref={containerRef}>
       <div className="studio-header">
@@ -422,30 +693,35 @@ export default function Studio() {
       </div>
 
       <div className="studio-body">
-        
-        {/* History column */}
-        <div className="studio-history">
-          <div className="studio-history-frames" id="studioHistoryFrames">
-            {Array.from({ length: loadingCount }).map((_, i) => (
-              <div key={`loading-${i}`} className="history-thumb loading" />
-            ))}
-            {history.map((url, i) => (
-              <div 
-                key={i} 
-                className={`history-thumb ${activeUrl === url ? 'active' : ''}`}
-                onClick={() => setActiveUrl(url)}
-              >
-                <img src={url} alt={`History ${i}`} />
-              </div>
-            ))}
+        {!compactStudio && (
+          <div className="studio-history studio-history-desktop">
+            {renderHistoryFrames()}
           </div>
-        </div>
+        )}
 
         {/* Center: canvas + tools + prompt */}
         <div className="studio-center">
-          <div className="studio-canvas-wrap">
-            <div className="canvas-group">
-              <div className="studio-canvas" id="studioCanvas" ref={canvasRef}>
+          {compactStudio && (
+            <div className="studio-history studio-history-top">
+              {renderHistoryFrames()}
+            </div>
+          )}
+
+          <div className="studio-canvas-wrap" ref={canvasWrapRef}>
+            <div
+              className="canvas-group"
+              style={canvasSize ? { height: `${canvasSize.height}px` } : undefined}
+            >
+              <div
+                className="studio-canvas"
+                id="studioCanvas"
+                ref={canvasRef}
+                style={canvasSize ? {
+                  width: `${canvasSize.width}px`,
+                  height: `${canvasSize.height}px`,
+                  aspectRatio: imageAspect ? `${imageAspect}` : undefined,
+                } : undefined}
+              >
                 {activeUrl && <img src={activeUrl} alt="Active" />}
                 <canvas 
                   id="studioDrawLayer" 
@@ -463,27 +739,25 @@ export default function Studio() {
                 <div id="studioCropOverlay" className={activeTool === 'crop' ? 'active' : ''} ref={cropOverlayRef}>
                   {cropBox && activeTool === 'crop' && (
                     <div 
-                      className="crop-box" 
+                      className={`crop-box ${cropRatio === "free" ? "free" : "locked"}`}
                       style={{ left: cropBox.l, top: cropBox.t, width: cropBox.w, height: cropBox.h }}
-                      onMouseDown={(e) => {
+                      onPointerDown={(e) => {
                         if (e.target === e.currentTarget) {
                           e.preventDefault();
+                          e.currentTarget.setPointerCapture(e.pointerId);
                           cropDrag.current = { startX: e.clientX, startY: e.clientY, origLeft: cropBox.l, origTop: cropBox.t };
                         }
                       }}
                     >
-                      {[
-                        { pos: 'tl', cursor: 'nw-resize', t: '-5px', l: '-5px' },
-                        { pos: 'tr', cursor: 'ne-resize', t: '-5px', r: '-5px' },
-                        { pos: 'bl', cursor: 'sw-resize', b: '-5px', l: '-5px' },
-                        { pos: 'br', cursor: 'se-resize', b: '-5px', r: '-5px' }
-                      ].map(h => (
+                      {(cropRatio === "free" ? FREE_CROP_HANDLES : LOCKED_CROP_HANDLES).map(h => (
                         <div 
-                          key={h.pos} className="crop-handle" 
-                          style={{ cursor: h.cursor, top: h.t, bottom: h.b, left: h.l, right: h.r }}
-                          onMouseDown={(e) => {
+                          key={h.pos}
+                          className={`crop-handle ${h.className}`}
+                          style={{ cursor: h.cursor }}
+                          onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
+                            e.currentTarget.setPointerCapture(e.pointerId);
                             cropResize.current = { pos: h.pos, startX: e.clientX, startY: e.clientY, origLeft: cropBox.l, origTop: cropBox.t, origW: cropBox.w, origH: cropBox.h };
                           }}
                         />
@@ -552,8 +826,41 @@ export default function Studio() {
           </div>
 
           <div className="prompt-wrap">
+            {commandMenuOpen && filteredCommands.length > 0 && (
+              <div className="studio-command-menu" role="listbox" aria-label="Studio commands">
+                {filteredCommands.map((command, index) => (
+                  <button
+                    key={command.value}
+                    type="button"
+                    className={`studio-command-option ${index === commandIndex ? "active" : ""}`}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      insertStudioCommand(command.value);
+                    }}
+                  >
+                    <span className="studio-command-label">{command.label}</span>
+                    <span className="studio-command-description">{command.description}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="studio-prompt-bar" id="studioPromptBar" data-state="FRAME">
               <div className="prompt-input-area">
+                <button
+                  type="button"
+                  className={`studio-reference-toggle ${(compactStudio ? referenceDrawerOpen : desktopReferenceVisible) ? "active" : ""}`}
+                  onClick={() => {
+                    if (compactStudio) {
+                      setReferenceDrawerOpen((open) => !open);
+                    } else {
+                      setDesktopReferenceVisible((visible) => !visible);
+                    }
+                  }}
+                  aria-label={(compactStudio ? referenceDrawerOpen : desktopReferenceVisible) ? "Close reference" : "Open reference"}
+                  title={(compactStudio ? referenceDrawerOpen : desktopReferenceVisible) ? "Close reference" : "Open reference"}
+                >
+                  <span></span>
+                </button>
                 <div
                   className={`prompt-text-field ${prompt === "" ? "has-placeholder" : ""}`}
                   id="studioPromptInput"
@@ -572,9 +879,26 @@ export default function Studio() {
           </div>
         </div>
 
-        {/* Right: reference module panel */}
-        <StudioModule />
+        {!compactStudio && desktopReferenceVisible && (
+          <div className="studio-reference-desktop">
+            <StudioModule />
+          </div>
+        )}
       </div>
+
+      {compactStudio && (
+        <div className={`studio-reference-drawer-shell ${referenceDrawerOpen ? "open" : ""}`}>
+          <button
+            type="button"
+            className="studio-reference-scrim"
+            onClick={() => setReferenceDrawerOpen(false)}
+            aria-label="Close reference drawer"
+          ></button>
+          <div className="studio-reference-drawer">
+            {referenceDrawerOpen && <StudioModule />}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -49,7 +49,6 @@ type GenerateOptions = {
 
 type ImageReferenceInput = {
   url: string;
-  instruction?: string;
 };
 
 const BLOCKED_FINISH_REASONS = new Set([
@@ -82,12 +81,7 @@ export async function googleGenerate(opts: GenerateOptions) {
 
   const parts: Part[] = [{ text: prompt }];
   if (imageRefs && imageRefs.length) {
-    imageRefs.forEach((ref, index) => {
-      if (ref.instruction) {
-        parts.push({ text: ref.instruction });
-      } else {
-        parts.push({ text: `Reference Image ${index + 1}: use according to the prompt instructions.` });
-      }
+    imageRefs.forEach((ref) => {
       const parsed = parseDataUrl(ref.url);
       parts.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.base64 } });
     });
@@ -129,8 +123,6 @@ export async function googleGenerate(opts: GenerateOptions) {
       serializedBodyCharacters: serializedBody.length
     }
   }, debugRunId);
-
-  console.log('[CafeAPI] → POST', modelId, '| ar:', ar, '| size:', imageSize, '| thinking:', thinkingLevel || 'none', '| image refs:', imageRefs?.length || 0);
 
   const results: PromiseSettledResult<Awaited<ReturnType<typeof sendGenerationRequest>>>[] = [];
 
@@ -268,7 +260,7 @@ export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, 
       const perf = describeReferenceStrength(file.strength, role, label);
 
       lines.push(
-        `- Image ${index + 1} (${role}, "${label}", ${perf.strengthLabel}): ${perf.contract}`
+        `- Image ${index + 1}, ${label}: ${perf.contract}`
       );
     });
 
@@ -279,7 +271,7 @@ export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, 
       const semantic = classifyLabel(single.label || single.name || 'UNASSIGNED');
       const role = normalizeRole(single);
       if (role === 'SUBJECT') {
-        lines.push(`- Preserve the same ${semantic}; strength changes only pose/action/orientation.`);
+        lines.push(`- Preserve the same ${semantic}. Only change pose, action, or orientation when the task asks for it.`);
         lines.push(`- Keep a plain source background plain unless the Task asks for a scene.`);
       } else if (role === 'SCENE') {
         lines.push(`- Use Image 1 only as the stage/background. Do not add a main subject unless the Task asks.`);
@@ -331,30 +323,7 @@ function defaultTaskForReferences(imageFiles: Record<string, any>[]) {
 }
 
 function buildImageReferenceInputs(imageFiles: Record<string, any>[]): ImageReferenceInput[] {
-  return imageFiles.map((file, index) => {
-    const label = file.label || file.name || 'UNASSIGNED';
-    const role = normalizeRole(file);
-    const strength = describeReferenceStrength(file.strength, role, label);
-    return {
-      url: file.url as string,
-      instruction: [
-        `Reference Image ${index + 1}`,
-        `Role: ${role}`,
-        `Label: ${label}`,
-        `Control: ${strength.strengthLabel} (${strength.controlAxis})`,
-        `Rule: ${strength.contract}`
-      ].join('\n')
-    };
-  });
-}
-
-function buildCleanReferenceInputs(imageFiles: Record<string, any>[]): ImageReferenceInput[] {
-  return imageFiles.map((file, index) => {
-    return {
-      url: file.url as string,
-      instruction: `Reference Image ${index + 1}`
-    };
-  });
+  return imageFiles.map((file) => ({ url: file.url as string }));
 }
 
 export async function generate(payload: GenerationPayload, settings: GenerationSettings, callbacks: GenerationCallbacks, files?: Record<string, any>[]) {
@@ -381,9 +350,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
     const effectivePrompt = cleanPromptManaged
       ? payload.effectivePrompt!.trim()
       : buildSimplePrompt(userPrompt, imageFiles);
-    const imageRefs = cleanPromptManaged
-      ? buildCleanReferenceInputs(imageFiles)
-      : buildImageReferenceInputs(imageFiles);
+    const imageRefs = buildImageReferenceInputs(imageFiles);
     const manifest = imageFiles.map((file, index) => ({
       kind: 'image',
       position: index + 1,
@@ -588,14 +555,99 @@ export type StudioGenerateOptions = {
   references?: Array<{ action: string, name: string, url: string }>;
   imageSize?: string;
   aspectRatio?: string;
+  flavor?: 'normal' | 'creative';
 };
 
-export async function studioGenerate(opts: StudioGenerateOptions): Promise<string> {
-  const { modelId, prompt, baseImageUrl, annotationImageUrl, references, imageSize, aspectRatio } = opts;
+type StudioReferenceAction = 'INSERT' | 'REPLACE' | 'REMOVE' | 'KEEP';
 
-  const fullPrompt = (prompt + (annotationImageUrl ? ' Focus on the annotated area.' : '')).trim();
+function normalizeStudioAction(action?: string): StudioReferenceAction {
+  const upper = String(action || '').toUpperCase();
+  if (upper === 'SWAP' || upper === 'TRANSFER') return 'REPLACE';
+  if (upper === 'PRESERVE') return 'KEEP';
+  if (upper === 'REMOVE') return 'REMOVE';
+  if (upper === 'KEEP') return 'KEEP';
+  if (upper === 'REPLACE') return 'REPLACE';
+  return 'INSERT';
+}
+
+function studioReferenceRole(action: StudioReferenceAction, creative: boolean) {
+  if (creative) {
+    const creativeRoles: Record<StudioReferenceAction, string> = {
+      INSERT: 'creative addition source',
+      REPLACE: 'creative transformation language',
+      REMOVE: 'removal target identifier',
+      KEEP: 'protected visual anchor',
+    };
+    return creativeRoles[action];
+  }
+
+  const roles: Record<StudioReferenceAction, string> = {
+    INSERT: 'controlled addition source',
+    REPLACE: 'direct replacement source',
+    REMOVE: 'removal target identifier',
+    KEEP: 'protected visual anchor',
+  };
+  return roles[action];
+}
+
+function studioReferenceInstruction(action: StudioReferenceAction, target: string, creative: boolean) {
+  if (creative) {
+    const creativeInstructions: Record<StudioReferenceAction, string> = {
+      INSERT: `Introduce the reference as a creative addition related to ${target}. Integrate it into the existing image rather than reimagining the whole frame. Adapt placement, scale, lighting, shadows, and perspective to the base image.`,
+      REPLACE: `Use the reference as design language for creatively reinterpreting ${target}. Borrow relevant form, material, texture, color, structure, mood, or styling while preserving the target's role, placement, scale, and surrounding relationships in the base image.`,
+      REMOVE: `Use the reference only to identify matching visual details of ${target} that should be removed. Do not add or copy content from the reference. Reconstruct the affected area naturally within the base image.`,
+      KEEP: `Use the reference to protect ${target}. Preserve its identity and defining details while allowing the user's creative edit to affect other parts of the image.`,
+    };
+    return creativeInstructions[action];
+  }
+
+  const instructions: Record<StudioReferenceAction, string> = {
+    INSERT: `Add the referenced subject/object as ${target} in the base image. Preserve the rest of the image unless the user asks otherwise. Match lighting, perspective, scale, contact shadows, and material response.`,
+    REPLACE: `Replace ${target} in the base image with the referenced subject/object. Preserve the scene function, position, scale, camera angle, lighting, and surrounding relationships unless the user asks otherwise.`,
+    REMOVE: `Use the reference only to identify ${target} for removal. Remove matching details from the base image, fill the area naturally, and do not import visual content from the reference.`,
+    KEEP: `Keep ${target} protected. Preserve matching identity, shape, color, texture, and defining details while applying the user's edit around it.`,
+  };
+  return instructions[action];
+}
+
+function buildStudioPrompt(prompt: string, hasReferences: boolean, hasAnnotation: boolean, flavor: 'normal' | 'creative') {
+  const userRequest = prompt.trim() || (flavor === 'creative'
+    ? 'Creatively reinterpret the image while preserving its core composition.'
+    : 'Refine the image while preserving unrelated parts.');
+  const lines = [
+    'Studio edit request:',
+    userRequest,
+    '',
+    `Studio mode: ${flavor === 'creative' ? 'creative reinterpretation' : 'direct controlled edit'}`,
+    '',
+    'Global rules:',
+    '- Edit the base image. Do not create a new unrelated scene.',
+    '- Preserve unrelated parts of the base image unless the user request or reference actions say to change them.',
+    '- Match camera, perspective, lighting, shadows, scale, and material response so edits feel native to the image.',
+  ];
+
+  if (flavor === 'creative') {
+    if (hasReferences) {
+      lines.push('- Use references as controlled creative direction for their named targets, not as generic style blending for the whole frame.');
+    } else {
+      lines.push('- With no references, use the prompt to creatively reinterpret the current image while keeping its composition and visual identity more stable than a fresh generation.');
+    }
+  } else if (hasReferences) {
+    lines.push('- Treat each reference as a precise tool for its action and target.');
+  }
+
+  if (hasAnnotation) {
+    lines.push('- Prioritize the annotated area when deciding where the edit should happen.');
+  }
+
+  return lines.join('\n');
+}
+
+export async function studioGenerate(opts: StudioGenerateOptions): Promise<string> {
+  const { modelId, prompt, baseImageUrl, annotationImageUrl, references, imageSize, aspectRatio, flavor = 'normal' } = opts;
+
   const parts: Part[] = [];
-  if (fullPrompt) parts.push({ text: fullPrompt });
+  parts.push({ text: buildStudioPrompt(prompt, !!references?.length, !!annotationImageUrl, flavor) });
 
   const baseParsed = parseDataUrl(baseImageUrl);
   parts.push({ inlineData: { mimeType: baseParsed.mimeType, data: baseParsed.base64 } });
@@ -606,8 +658,18 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
   }
 
   if (references) {
-    references.forEach(ref => {
-      parts.push({ text: `Reference action: ${ref.action || 'TRANSFER'}\nIntent: ${ref.name}\nUse this reference only for the stated action and intent:` });
+    references.forEach((ref, index) => {
+      const action = normalizeStudioAction(ref.action);
+      const target = (ref.name || 'TARGET').trim().toUpperCase();
+      parts.push({
+        text: [
+          `Studio reference ${index + 1}`,
+          `Action: ${action}`,
+          `Target: ${target}`,
+          `Reference role: ${studioReferenceRole(action, flavor === 'creative')}`,
+          `Instruction: ${studioReferenceInstruction(action, target, flavor === 'creative')}`,
+        ].join('\n')
+      });
       const refParsed = parseDataUrl(ref.url);
       parts.push({ inlineData: { mimeType: refParsed.mimeType, data: refParsed.base64 } });
     });
@@ -631,8 +693,6 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
     config: generationConfig
   };
 
-  console.log('[CafeAPI] → POST (Studio)', modelId, '| refs:', references?.length || 0);
-
   const result = await sendGenerationRequest(request);
   const prediction = findImagePrediction(result);
 
@@ -644,8 +704,3 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
 
   return `data:${prediction.mimeType};base64,${prediction.bytesBase64Encoded}`;
 }
-
-
-
-
-
