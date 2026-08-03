@@ -1,10 +1,19 @@
+import type { AgentRun } from "./runState";
+
 export type BriefReferenceRole = "SUBJECT" | "SCENE" | "STYLE" | "UNASSIGNED";
+export type BriefAgentAction = "talk" | "inspect" | "plan" | "ask" | "draft";
 
 export type AgentMessage = {
   id: string;
   role: "user" | "agent" | "system";
   text: string;
   createdAt: string;
+  action?: BriefAgentAction;
+  options?: Array<{
+    id: string;
+    label: string;
+    submitText: string;
+  }>;
   promptArtifact?: {
     id: string;
     title: string;
@@ -12,6 +21,7 @@ export type AgentMessage = {
     sourceDraftId?: string;
     sourceFingerprint?: string;
     refCount?: number;
+    previousPrompt?: string;
   };
   context?: {
     refCount: number;
@@ -78,9 +88,19 @@ export type BriefSkillCheck = {
   message: string;
 };
 
+export type BriefSessionState = {
+  projectIntent: string;
+  selectedDirection: string;
+  directions: string[];
+  lastDraftPrompt: string;
+  unresolvedQuestions: string[];
+  notes: string[];
+};
+
 export type BriefDraft = {
   id: string;
   status: "empty" | "needs_clarification" | "draft";
+  action: BriefAgentAction;
   reply: string;
   messages: AgentMessage[];
   referenceSnapshot: BriefReferenceSnapshot;
@@ -88,6 +108,7 @@ export type BriefDraft = {
   visualUnderstanding: VisualUnderstanding;
   clarification: BriefClarification;
   plan: BriefPlan;
+  session: BriefSessionState;
   finalPrompt: string;
   warnings: string[];
   skillChecks: BriefSkillCheck[];
@@ -97,11 +118,63 @@ export type BriefDraft = {
 export type BriefAgentRequest = {
   referenceSnapshot: BriefReferenceSnapshot;
   messages: AgentMessage[];
+  session?: BriefSessionState | null;
+  run?: AgentRun | null;
+  generations?: BriefGenerationEvidence[];
+};
+
+export type BriefGenerationEvidence = {
+  generationId: string;
+  recency: number;
+  createdAt: string | null;
+  prompt: string;
+  model: string | null;
+  visualReview: {
+    summary: string;
+    issues: string[];
+    suggestions: string[];
+    scores: {
+      prompt: number;
+      subject: number;
+      scene: number;
+      style: number;
+      quality: number;
+    };
+  } | null;
+  userFeedback: {
+    reaction: "like" | "mixed" | "dislike";
+    keep: string[];
+    change: string[];
+    note: string;
+  } | null;
+  visionObservation?: {
+    visualRead: string;
+    comparison: string | null;
+    inspectedAt: string;
+  } | null;
+};
+
+export type GenerationInspectionRequest = {
+  images: Array<{
+    generationId: string;
+    dataUrl: string;
+    prompt: string;
+  }>;
+};
+
+export type GenerationInspectionResponse = {
+  model: string;
+  observations: Array<{
+    generationId: string;
+    visualRead: string;
+  }>;
+  comparison: string | null;
 };
 
 export type BriefAgentResponse = {
   draft: BriefDraft;
   message: AgentMessage;
+  run: AgentRun;
   brain: "model";
   model: string | null;
 };

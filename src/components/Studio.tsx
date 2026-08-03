@@ -828,6 +828,10 @@ export default function Studio() {
           <div className="prompt-wrap">
             {commandMenuOpen && filteredCommands.length > 0 && (
               <div className="studio-command-menu" role="listbox" aria-label="Studio commands">
+                <div className="studio-command-head">
+                  <span>COMMAND</span>
+                  <span>{filteredCommands.length}</span>
+                </div>
                 {filteredCommands.map((command, index) => (
                   <button
                     key={command.value}

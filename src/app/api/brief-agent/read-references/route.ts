@@ -136,6 +136,25 @@ function buildInstruction(images: BriefReferenceImageInput[]) {
   ].join("\n");
 }
 
+function describeReaderError(error: unknown) {
+  const raw = error instanceof Error ? error.message : "Reference reader failed.";
+  const normalized = raw.toLowerCase();
+  if (
+    normalized.includes("resource_exhausted")
+    || normalized.includes("resource exhausted")
+    || normalized.includes("429")
+    || normalized.includes("rate limit")
+    || normalized.includes("quota")
+  ) {
+    return {
+      message: "Reference reader is temporarily busy. Existing reference notes will remain active while it retries.",
+      status: 429,
+      retryAfterSeconds: 8,
+    };
+  }
+  return { message: raw, status: 400, retryAfterSeconds: null };
+}
+
 async function readReferences(input: BriefReferenceReadRequest) {
   const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
   const location = process.env.GOOGLE_CLOUD_LOCATION?.trim();
@@ -196,7 +215,18 @@ export async function POST(request: Request) {
     };
     return NextResponse.json(response);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Reference reader failed.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    const described = describeReaderError(error);
+    return NextResponse.json(
+      {
+        error: described.message,
+        ...(described.retryAfterSeconds ? { retryAfterSeconds: described.retryAfterSeconds } : {}),
+      },
+      {
+        status: described.status,
+        headers: described.retryAfterSeconds
+          ? { "Retry-After": String(described.retryAfterSeconds) }
+          : undefined,
+      },
+    );
   }
 }

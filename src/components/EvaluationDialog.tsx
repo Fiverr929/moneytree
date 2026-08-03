@@ -1,18 +1,33 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { useGallery, type EvaluationScore } from "@/context/GalleryContext";
+import {
+  useGallery,
+  type FeedbackAspect,
+  type GenerationReaction,
+  type GenerationUserFeedback,
+} from "@/context/GalleryContext";
 
-type ScoreKey = "promptMatch" | "subjectMatch" | "sceneMatch" | "styleMatch" | "qualityMatch";
-type DraftScores = Record<ScoreKey, EvaluationScore | null>;
+type AspectState = "keep" | "change" | null;
 
-const SCORE_LABELS: Array<{ key: ScoreKey; label: string }> = [
-  { key: "promptMatch", label: "Prompt match" },
-  { key: "subjectMatch", label: "Subject match" },
-  { key: "sceneMatch", label: "Scene match" },
-  { key: "styleMatch", label: "Style match" },
-  { key: "qualityMatch", label: "Visual quality" },
+const REACTIONS: Array<{ value: GenerationReaction; label: string }> = [
+  { value: "like", label: "Like" },
+  { value: "mixed", label: "Mixed" },
+  { value: "dislike", label: "Dislike" },
 ];
+
+const ASPECTS: Array<{ value: FeedbackAspect; label: string }> = [
+  { value: "subject", label: "Subject" },
+  { value: "composition", label: "Composition" },
+  { value: "lighting", label: "Lighting" },
+  { value: "color", label: "Color" },
+  { value: "style", label: "Style" },
+  { value: "details", label: "Details" },
+  { value: "text", label: "Text" },
+  { value: "quality", label: "Quality" },
+];
+
+const REACTION_SCORE = { like: 5, mixed: 3, dislike: 1 } as const;
 
 export default function EvaluationDialog() {
   const {
@@ -29,25 +44,19 @@ export default function EvaluationDialog() {
     [cells, evaluationTargetId],
   );
 
-  const [scores, setScores] = useState<DraftScores>({
-    promptMatch: null,
-    subjectMatch: null,
-    sceneMatch: null,
-    styleMatch: null,
-    qualityMatch: null,
-  });
+  const [reaction, setReaction] = useState<GenerationReaction | null>(null);
+  const [aspects, setAspects] = useState<Partial<Record<FeedbackAspect, AspectState>>>({});
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setScores({
-      promptMatch: target?.evaluation?.promptMatch ?? null,
-      subjectMatch: target?.evaluation?.subjectMatch ?? null,
-      sceneMatch: target?.evaluation?.sceneMatch ?? null,
-      styleMatch: target?.evaluation?.styleMatch ?? null,
-      qualityMatch: target?.evaluation?.qualityMatch ?? null,
-    });
-    setComment(target?.evaluation?.comment || "");
+    const feedback = target?.evaluation?.userFeedback;
+    setReaction(feedback?.reaction || null);
+    setAspects(Object.fromEntries([
+      ...(feedback?.keep || []).map((aspect) => [aspect, "keep"] as const),
+      ...(feedback?.change || []).map((aspect) => [aspect, "change"] as const),
+    ]));
+    setComment(feedback?.note || target?.evaluation?.comment || "");
   }, [target?.id, target?.evaluation]);
 
   useEffect(() => {
@@ -61,27 +70,33 @@ export default function EvaluationDialog() {
 
   if (!target || evaluationTargetId === null) return null;
 
-  const canSave = Boolean(
-    scores.promptMatch &&
-    scores.subjectMatch &&
-    scores.sceneMatch &&
-    scores.styleMatch &&
-    scores.qualityMatch
-  );
+  const canSave = Boolean(reaction);
 
   const handleSave = async () => {
     if (!canSave || saving) return;
     setSaving(true);
     try {
+      const score = REACTION_SCORE[reaction!];
+      const userFeedback: GenerationUserFeedback = {
+        reaction: reaction!,
+        keep: ASPECTS.filter(({ value }) => aspects[value] === "keep").map(({ value }) => value),
+        change: ASPECTS.filter(({ value }) => aspects[value] === "change").map(({ value }) => value),
+        note: comment.trim(),
+      };
       await saveEvaluation(target.id, {
-        promptMatch: scores.promptMatch!,
-        subjectMatch: scores.subjectMatch!,
-        sceneMatch: scores.sceneMatch!,
-        styleMatch: scores.styleMatch!,
-        qualityMatch: scores.qualityMatch!,
-        comment: comment.trim(),
+        promptMatch: target.evaluation?.promptMatch || score,
+        subjectMatch: target.evaluation?.subjectMatch || score,
+        sceneMatch: target.evaluation?.sceneMatch || score,
+        styleMatch: target.evaluation?.styleMatch || score,
+        qualityMatch: target.evaluation?.qualityMatch || score,
+        comment: userFeedback.note,
+        summary: target.evaluation?.summary,
+        issues: target.evaluation?.issues,
+        suggestions: target.evaluation?.suggestions,
         evaluatedAt: new Date().toISOString(),
-        reviewSource: "manual",
+        reviewSource: target.evaluation?.reviewSource || "manual",
+        reviewModel: target.evaluation?.reviewModel,
+        userFeedback,
       });
     } finally {
       setSaving(false);
@@ -94,7 +109,7 @@ export default function EvaluationDialog() {
     }}>
       <div className="evaluation-panel" role="dialog" aria-modal="true" aria-labelledby="evaluation-title">
         <div className="evaluation-header">
-          <span id="evaluation-title">Evaluate generation</span>
+          <span id="evaluation-title">Generation feedback</span>
           <button type="button" title="Rate later" aria-label="Rate later" onClick={closeEvaluationQueue}>&times;</button>
         </div>
         <div className="evaluation-body">
@@ -102,34 +117,51 @@ export default function EvaluationDialog() {
           <div className="evaluation-content">
             <div className="evaluation-meta">
               <span>{target.pipelineVersion || "legacy-unversioned"}</span>
-              {target.evaluation?.reviewSource === "ai" && <span>AI prefilled</span>}
+              {target.evaluation?.reviewSource === "ai" && <span>AI review available</span>}
               <span>{evaluationQueueLength} pending</span>
             </div>
-            {SCORE_LABELS.map(({ key, label }) => (
-              <div className="evaluation-row" key={key}>
-                <span>{label}</span>
-                <div className="evaluation-score-options">
-                  {([1, 2, 3, 4, 5] as EvaluationScore[]).map((score) => (
-                    <button
-                      type="button"
-                      className={scores[key] === score ? "active" : ""}
-                      key={score}
-                      onClick={() => {
-                        setScores((current) => ({ ...current, [key]: score }));
-                      }}
-                    >
-                      {score}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
+            <div className="evaluation-question">What is your overall reaction?</div>
+            <div className="evaluation-reactions">
+              {REACTIONS.map((option) => (
+                <button
+                  type="button"
+                  className={reaction === option.value ? `active ${option.value}` : ""}
+                  key={option.value}
+                  onClick={() => setReaction(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <div className="evaluation-question">
+              What stood out?
+              <small>Click once to keep, twice to change.</small>
+            </div>
+            <div className="evaluation-aspects">
+              {ASPECTS.map((aspect) => {
+                const state = aspects[aspect.value] || null;
+                return (
+                  <button
+                    type="button"
+                    className={state || ""}
+                    key={aspect.value}
+                    onClick={() => setAspects((current) => ({
+                      ...current,
+                      [aspect.value]: state === null ? "keep" : state === "keep" ? "change" : null,
+                    }))}
+                  >
+                    <span>{state === "keep" ? "+" : state === "change" ? "−" : ""}</span>
+                    {aspect.label}
+                  </button>
+                );
+              })}
+            </div>
             <label className="evaluation-comment">
-              <span>Comment</span>
+              <span>Optional note</span>
               <textarea
                 value={comment}
                 onChange={(event) => setComment(event.target.value)}
-                placeholder="What translated well or failed?"
+                placeholder="What should the agent preserve or change?"
               />
             </label>
           </div>

@@ -14,7 +14,8 @@ const S = {
   VIDEOS: 'videos',
   DESCRIPTIONS: 'descriptions',
   STUDIO_STATE: 'studio-state',
-  GENERATION_JOBS: 'generation-jobs'
+  GENERATION_JOBS: 'generation-jobs',
+  AGENT_RUNS: 'agent-runs'
 };
 
 const ready = new Promise<IDBDatabase>((resolve, reject) => {
@@ -35,14 +36,17 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
                          !db.objectStoreNames.contains(S.GALLERY) ||
                          !db.objectStoreNames.contains(S.IMAGES) ||
                          !db.objectStoreNames.contains(S.VIDEOS) ||
-                         !db.objectStoreNames.contains(S.DESCRIPTIONS) ||
-                         !db.objectStoreNames.contains(S.GENERATION_JOBS) ||
+                           !db.objectStoreNames.contains(S.DESCRIPTIONS) ||
+                           !db.objectStoreNames.contains(S.GENERATION_JOBS) ||
+                          !db.objectStoreNames.contains(S.AGENT_RUNS) ||
                          !hasIndex(S.PROJECTS, 'by_modified') ||
                          !hasIndex(S.REFERENCES, 'by_project') ||
                          !hasIndex(S.GALLERY, 'by_project') ||
                          !hasIndex(S.IMAGES, 'by_project') ||
                          !hasIndex(S.VIDEOS, 'by_project') ||
-                         !hasIndex(S.GENERATION_JOBS, 'by_project');
+                          !hasIndex(S.GENERATION_JOBS, 'by_project') ||
+                          !hasIndex(S.AGENT_RUNS, 'by_project') ||
+                          !hasIndex(S.AGENT_RUNS, 'by_project_active');
     db.close();
 
     const targetVersion = needsUpgrade ? currentVersion + 1 : currentVersion;
@@ -97,6 +101,15 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
       } else {
         const js = e2.target.transaction.objectStore(S.GENERATION_JOBS);
         if (!js.indexNames.contains('by_project')) js.createIndex('by_project', 'project_id');
+      }
+      if (!db2.objectStoreNames.contains(S.AGENT_RUNS)) {
+        const ars = db2.createObjectStore(S.AGENT_RUNS, { keyPath: 'id' });
+        ars.createIndex('by_project', 'project_id');
+        ars.createIndex('by_project_active', ['project_id', 'active']);
+      } else {
+        const ars = e2.target.transaction.objectStore(S.AGENT_RUNS);
+        if (!ars.indexNames.contains('by_project')) ars.createIndex('by_project', 'project_id');
+        if (!ars.indexNames.contains('by_project_active')) ars.createIndex('by_project_active', ['project_id', 'active']);
       }
     };
 
@@ -158,6 +171,7 @@ async function deleteProjectCascade(id: number) {
       S.DESCRIPTIONS,
       S.STUDIO_STATE,
       S.GENERATION_JOBS,
+      S.AGENT_RUNS,
     ],
     "readwrite",
   );
@@ -182,6 +196,7 @@ async function deleteProjectCascade(id: number) {
   transaction.objectStore(S.MODULE_STATE).delete(id);
   transaction.objectStore(S.STUDIO_STATE).delete(id);
   deleteProjectRecordsByIndex(transaction.objectStore(S.GENERATION_JOBS), id);
+  deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_RUNS), id);
   transaction.objectStore(S.PROJECTS).delete(id);
 
   await transactionDone(transaction);
@@ -287,7 +302,50 @@ const generationJobs = {
   ),
 };
 
-const DB = { ready, projects, images, videos, studioState, gallery, references, descriptions, generationJobs };
+const agentRuns = {
+  getActive: (projectId: number) => ready.then(() => {
+    const idx = tx(S.AGENT_RUNS).objectStore(S.AGENT_RUNS).index('by_project_active');
+    return wrap(idx.get([projectId, 1]));
+  }),
+  getByProject: (projectId: number) => ready.then(() => {
+    const idx = tx(S.AGENT_RUNS).objectStore(S.AGENT_RUNS).index('by_project');
+    return wrap(idx.getAll(projectId));
+  }),
+  saveActive: (projectId: number, data: any) => ready.then(async () => {
+    const transaction = tx(S.AGENT_RUNS, 'readwrite');
+    const store = transaction.objectStore(S.AGENT_RUNS);
+    const cursorRequest = store.index('by_project').openCursor(IDBKeyRange.only(projectId));
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) return;
+      const record = cursor.value;
+      if (record.active === 1 && record.id !== data.id) cursor.update({ ...record, active: 0 });
+      cursor.continue();
+    };
+    store.put({
+      ...data,
+      project_id: projectId,
+      active: 1,
+      schemaVersion: 1,
+      updatedAt: new Date().toISOString(),
+    });
+    await transactionDone(transaction);
+  }),
+  clearActive: (projectId: number) => ready.then(async () => {
+    const transaction = tx(S.AGENT_RUNS, 'readwrite');
+    const store = transaction.objectStore(S.AGENT_RUNS);
+    const cursorRequest = store.index('by_project_active').openCursor(IDBKeyRange.only([projectId, 1]));
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) return;
+      cursor.update({ ...cursor.value, active: 0, updatedAt: new Date().toISOString() });
+      cursor.continue();
+    };
+    await transactionDone(transaction);
+  }),
+};
+
+const DB = { ready, projects, images, videos, studioState, gallery, references, descriptions, generationJobs, agentRuns };
 export default DB;
 
 

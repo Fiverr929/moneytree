@@ -9,6 +9,14 @@ import type { ModuleFile } from "@/context/ModuleContext";
 import type { StrengthBand } from "@/lib/pipeline/strength";
 export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string; strength?: number; strengthBand?: StrengthBand };
 export type EvaluationScore = 1 | 2 | 3 | 4 | 5;
+export type GenerationReaction = "like" | "mixed" | "dislike";
+export type FeedbackAspect = "subject" | "composition" | "lighting" | "color" | "style" | "details" | "text" | "quality";
+export type GenerationUserFeedback = {
+  reaction: GenerationReaction;
+  keep: FeedbackAspect[];
+  change: FeedbackAspect[];
+  note: string;
+};
 export type GenerationEvaluation = {
   promptMatch: EvaluationScore;
   subjectMatch: EvaluationScore;
@@ -16,9 +24,13 @@ export type GenerationEvaluation = {
   styleMatch: EvaluationScore;
   qualityMatch: EvaluationScore;
   comment: string;
+  summary?: string;
+  issues?: string[];
+  suggestions?: string[];
   evaluatedAt: string;
   reviewSource?: "manual" | "ai";
   reviewModel?: string | null;
+  userFeedback?: GenerationUserFeedback;
 };
 export type GalleryCell = {
   id: number;
@@ -344,7 +356,7 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
     ));
     void persistCell(normalized).catch((error) => console.error("Failed to persist generated image", error));
     scheduleEvaluation(normalized.id);
-    if (normalized.imgUrl && normalized.origin === "generation") {
+    if (normalized.imgUrl && normalized.origin === "generation" && !normalized.agentDraft) {
       void requestGenerationEvaluation({
         imageDataUrl: normalized.imgUrl,
         effectivePrompt: normalized.effectivePrompt || normalized.prompt || "",

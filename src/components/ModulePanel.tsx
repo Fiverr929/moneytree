@@ -232,14 +232,11 @@ export default function ModulePanel() {
     setFiles((prev) => {
       const current = prev.find((f) => f.id === id);
       const nextMode = moduleRole(current?.mode || "") === mode ? "REFERENCE" : mode;
-      const next = prev.map((f) => {
-        if (f.id === id) return { ...f, mode: nextMode };
-        if (nextMode === mode && moduleRole(f.mode) === mode) return { ...f, mode: "REFERENCE" };
-        return f;
-      });
-      next
-        .filter((f) => f.id === id || prev.some((old) => old.id === f.id && old.mode !== f.mode))
-        .forEach(persistReference);
+      const next = prev.map((f) =>
+        f.id === id ? { ...f, mode: nextMode } : f,
+      );
+      const updated = next.find((f) => f.id === id);
+      if (updated) persistReference(updated);
       return next;
     });
   };
@@ -1367,7 +1364,7 @@ export default function ModulePanel() {
 
         <div className="cmp-status cmp-root-status">
           <span>
-            {roleFiles.length}/3 MODULE &middot; {assigned.length} MOOD FILES
+            {roleFiles.length} MODULE IMAGES &middot; {assigned.length} MOOD FILES
           </span>
           <span>{rootFiles.length} UNASSIGNED</span>
         </div>

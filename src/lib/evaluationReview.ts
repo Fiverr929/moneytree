@@ -7,6 +7,9 @@ export type AiGenerationEvaluation = {
   styleMatch: EvaluationScoreValue;
   qualityMatch: EvaluationScoreValue;
   comment: string;
+  summary: string;
+  issues: string[];
+  suggestions: string[];
   evaluatedAt: string;
   reviewSource: "ai";
   reviewModel: string | null;

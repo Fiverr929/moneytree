@@ -23,6 +23,7 @@ export function fingerprintModuleFiles(files: ModuleFile[]) {
       file.url,
       file.mode,
       file.label || file.name,
+      normalizeStrength(file.strength),
       file.eye === false ? "hidden" : "visible",
     ].join(":"))
     .join("|");
@@ -38,8 +39,8 @@ function observationForFile(file: ModuleFile): ReferenceObservation {
     role,
     label,
     strength,
-    visualRead: "",
-    readSource: "local",
+    visualRead: file.visualRead || "",
+    readSource: file.visualReadSource || "local",
   };
 }
 

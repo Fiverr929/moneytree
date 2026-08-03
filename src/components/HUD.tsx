@@ -370,10 +370,10 @@ export default function HUD() {
           </svg>
         </button>
         <button
-          className={`hud-icon-btn hud-evaluate ${activeCell.evaluation ? "rated" : ""}`}
+          className={`hud-icon-btn hud-evaluate ${activeCell.evaluation?.userFeedback ? "rated" : ""}`}
           id="hud-evaluate"
-          title="Evaluate generation"
-          aria-label="Evaluate generation"
+          title="Give generation feedback"
+          aria-label="Give generation feedback"
           onClick={() => openEvaluation(activeCell.id)}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
