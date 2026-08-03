@@ -24,6 +24,7 @@ export type LyriaCallbacks = {
   onAudioLevel: (level: number) => void;
   onError: (message: string) => void;
   onFilteredPrompt: (text: string, reason?: string) => void;
+  onWarning?: (message: string) => void;
 };
 
 export const LYRIA_SCALE_BY_LABEL: Record<string, Scale> = {
@@ -87,12 +88,16 @@ export class LyriaRealtimeEngine {
   private session: LiveMusicSession | null = null;
   private sessionPromise: Promise<LiveMusicSession> | null = null;
   private output: GainNode;
+  private readonly recordingOutput: MediaStreamAudioDestinationNode;
+  private recorder: MediaRecorder | null = null;
+  private recordedChunks: Blob[] = [];
   private nextStartTime = 0;
   private readonly bufferSeconds = 1.25;
   private prompts: LyriaPrompt[] = [];
   private config: LiveMusicGenerationConfig = {};
   private stopped = true;
   private analyserTimer: number | null = null;
+  private firstAudioTimer: number | null = null;
 
   constructor(apiKey: string, callbacks: LyriaCallbacks) {
     this.client = new GoogleGenAI({ apiKey, apiVersion: "v1alpha" });
@@ -101,16 +106,25 @@ export class LyriaRealtimeEngine {
     this.analyser = this.context.createAnalyser();
     this.analyser.fftSize = 64;
     this.output = this.context.createGain();
+    this.recordingOutput = this.context.createMediaStreamDestination();
     this.analyser.connect(this.output);
     this.output.connect(this.context.destination);
+    this.output.connect(this.recordingOutput);
   }
 
   private async connect() {
     this.callbacks.onStatus("connecting");
+    let resolveSetup: () => void = () => {};
+    const setupReady = new Promise<void>((resolve) => {
+      resolveSetup = resolve;
+    });
     const connection = this.client.live.music.connect({
       model: "models/lyria-realtime-exp",
       callbacks: {
         onmessage: (message: LiveMusicServerMessage) => {
+          if (message.setupComplete) resolveSetup();
+          const warning = (message as LiveMusicServerMessage & { warning?: string }).warning;
+          if (warning) this.callbacks.onWarning?.(warning);
           if (message.filteredPrompt?.text) {
             this.callbacks.onFilteredPrompt(message.filteredPrompt.text, message.filteredPrompt.filteredReason);
           }
@@ -118,9 +132,10 @@ export class LyriaRealtimeEngine {
             void this.processAudioChunks(message.serverContent.audioChunks);
           }
         },
-        onerror: () => this.fail("Lyria connection error."),
-        onclose: () => {
-          if (!this.stopped) this.fail("Lyria connection closed.");
+        onerror: (event) => this.fail(event.message || "Lyria connection error."),
+        onclose: (event) => {
+          const detail = event.reason || (event.code ? `code ${event.code}` : "no reason provided");
+          if (!this.stopped) this.fail(`Lyria connection closed (${detail}).`);
         },
       },
     });
@@ -134,6 +149,21 @@ export class LyriaRealtimeEngine {
       }),
     ]);
     this.session = session;
+    try {
+      await Promise.race([
+        setupReady,
+        new Promise<never>((_, reject) => {
+          window.setTimeout(
+            () => reject(new Error("Lyria opened a connection but did not finish setup.")),
+            10000,
+          );
+        }),
+      ]);
+    } catch (error) {
+      session.close();
+      this.session = null;
+      throw error;
+    }
     return session;
   }
 
@@ -153,11 +183,13 @@ export class LyriaRealtimeEngine {
     this.callbacks.onError(message);
     this.stopped = true;
     this.nextStartTime = 0;
+    this.clearFirstAudioTimeout();
     this.stopAnalyserLoop();
   }
 
   private async processAudioChunks(chunks: AudioChunk[]) {
     if (this.stopped) return;
+    this.clearFirstAudioTimeout();
     for (const chunk of chunks) {
       if (!chunk.data) continue;
       const { audioBuffer } = decodePcm16(decodeBase64(chunk.data), this.context);
@@ -204,6 +236,37 @@ export class LyriaRealtimeEngine {
     this.output.gain.setTargetAtTime(volume, this.context.currentTime, 0.06);
   }
 
+  startRecording() {
+    if (this.recorder?.state === "recording") return true;
+    if (typeof MediaRecorder === "undefined") return false;
+    this.recordedChunks = [];
+    this.recorder = new MediaRecorder(this.recordingOutput.stream);
+    this.recorder.ondataavailable = (event) => {
+      if (event.data.size) this.recordedChunks.push(event.data);
+    };
+    this.recorder.start(500);
+    return true;
+  }
+
+  stopRecording() {
+    return new Promise<Blob | null>((resolve) => {
+      const recorder = this.recorder;
+      if (!recorder || recorder.state === "inactive") {
+        resolve(null);
+        return;
+      }
+      recorder.onstop = () => {
+        const blob = this.recordedChunks.length
+          ? new Blob(this.recordedChunks, { type: recorder.mimeType || "audio/webm" })
+          : null;
+        this.recorder = null;
+        this.recordedChunks = [];
+        resolve(blob);
+      };
+      recorder.stop();
+    });
+  }
+
   private startAnalyserLoop() {
     if (this.analyserTimer) return;
     const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
@@ -233,6 +296,13 @@ export class LyriaRealtimeEngine {
     }
   }
 
+  private clearFirstAudioTimeout() {
+    if (this.firstAudioTimer) {
+      window.clearTimeout(this.firstAudioTimer);
+      this.firstAudioTimer = null;
+    }
+  }
+
   async play() {
     const weightedPrompts = this.activePrompts();
     if (!weightedPrompts.length) throw new Error("At least one prompt must be active.");
@@ -244,12 +314,17 @@ export class LyriaRealtimeEngine {
     await session.setWeightedPrompts({ weightedPrompts });
     await session.setMusicGenerationConfig({ musicGenerationConfig: this.config });
     session.play();
+    this.clearFirstAudioTimeout();
+    this.firstAudioTimer = window.setTimeout(() => {
+      this.fail("Lyria connected, but no audio arrived. Check model access, billing, and regional availability.");
+    }, 15000);
   }
 
   pause() {
     this.session?.pause();
     this.callbacks.onStatus("paused");
     this.nextStartTime = 0;
+    this.clearFirstAudioTimeout();
     this.stopAnalyserLoop();
   }
 
@@ -258,6 +333,7 @@ export class LyriaRealtimeEngine {
     this.session?.stop();
     this.callbacks.onStatus("stopped");
     this.nextStartTime = 0;
+    this.clearFirstAudioTimeout();
     this.stopAnalyserLoop();
   }
 
@@ -268,10 +344,12 @@ export class LyriaRealtimeEngine {
   close() {
     this.stopped = true;
     this.stopAnalyserLoop();
+    this.clearFirstAudioTimeout();
     this.session?.close();
     this.session = null;
     this.sessionPromise = null;
     this.nextStartTime = 0;
+    if (this.recorder?.state === "recording") this.recorder.stop();
     void this.context.close();
   }
 }
