@@ -5,8 +5,8 @@ import styles from "./music-test.module.css";
 import { useSettings } from "@/context/SettingsContext";
 import { useApp } from "@/context/AppContext";
 import {
-  generationModeForDiversity,
-  LYRIA_SCALE_BY_LABEL,
+  interpolateLiveMusicConfig,
+  liveMusicConfig,
   LyriaRealtimeEngine,
   type LyriaStatus,
 } from "@/lib/music/lyriaRealtime";
@@ -173,6 +173,7 @@ export default function MusicTestPage() {
   const [bpm, setBpm] = useState<number | "Auto">("Auto");
   const [bpmDraft, setBpmDraft] = useState(120);
   const [musicKey, setMusicKey] = useState("Auto");
+  const [musicKeyDraft, setMusicKeyDraft] = useState("Auto");
   const [toast, setToast] = useState("");
   const [lyriaError, setLyriaError] = useState("");
   const [lyriaStatus, setLyriaStatus] = useState<LyriaStatus>("stopped");
@@ -211,15 +212,13 @@ export default function MusicTestPage() {
     return result;
   }, [suggestionPage]);
 
-  const lyriaConfig = useMemo(() => ({
-    bpm: bpm === "Auto" ? undefined : bpm,
-    scale: LYRIA_SCALE_BY_LABEL[musicKey],
-    density: density === 0 ? 0.2 : density === 2 ? 0.85 : undefined,
-    brightness: brightness === 0 ? 0.2 : brightness === 2 ? 0.85 : undefined,
-    musicGenerationMode: generationModeForDiversity(diversity),
-    muteBass: !stems.bass,
-    muteDrums: !stems.drums,
-    onlyBassAndDrums: !stems.other,
+  const lyriaConfig = useMemo(() => liveMusicConfig({
+    bpm,
+    musicKey,
+    density,
+    brightness,
+    diversity,
+    roles: stems,
   }), [bpm, brightness, density, diversity, musicKey, stems]);
 
   useEffect(() => {
@@ -242,6 +241,10 @@ export default function MusicTestPage() {
           height: Math.max(18, Math.min(96, 18 + level * 78)),
           tone,
         }].slice(-120));
+      },
+      onPlaybackStart: (delayMs) => {
+        transportStartRef.current = performance.now() + delayMs;
+        setTransportPosition({ bar: 1, beat: 1 });
       },
       onError: (message) => {
         setLyriaError(message);
@@ -279,8 +282,8 @@ export default function MusicTestPage() {
 
   useEffect(() => {
     if (!playing) return;
-    if (!transportStartRef.current) transportStartRef.current = performance.now();
     const updatePosition = () => {
+      if (!transportStartRef.current) return;
       const beatMs = barDurationMs(bpm) / 4;
       const elapsed = Math.max(0, performance.now() - transportStartRef.current);
       const absoluteBeat = Math.floor(elapsed / beatMs);
@@ -341,32 +344,47 @@ export default function MusicTestPage() {
     setBpm(scene.bpm);
     if (scene.bpm !== "Auto") setBpmDraft(scene.bpm);
     setMusicKey(scene.musicKey);
+    setMusicKeyDraft(scene.musicKey);
     setActiveSceneId(scene.id);
     setQueuedSceneId(null);
     recordEvent("scene", `${scene.name} entered`);
 
-    void engineRef.current?.setConfig({
-      bpm: scene.bpm === "Auto" ? undefined : scene.bpm,
-      scale: LYRIA_SCALE_BY_LABEL[scene.musicKey],
-      density: scene.density === 0 ? 0.2 : scene.density === 2 ? 0.85 : undefined,
-      brightness: scene.brightness === 0 ? 0.2 : scene.brightness === 2 ? 0.85 : undefined,
-      musicGenerationMode: generationModeForDiversity(scene.diversity),
-      muteBass: !scene.roles.bass,
-      muteDrums: !scene.roles.drums,
-      onlyBassAndDrums: !scene.roles.other,
-    }, hardChange).catch(() => setToast("The scene changed, but Lyria could not apply every control."));
+    void engineRef.current?.setConfig(liveMusicConfig({
+      bpm: scene.bpm,
+      musicKey: scene.musicKey,
+      density: scene.density,
+      brightness: scene.brightness,
+      diversity: scene.diversity,
+      roles: scene.roles,
+    }), hardChange).catch(() => setToast("The scene changed, but Lyria could not apply every control."));
     setToast(`${scene.name} is live.`);
   }, [bpm, musicKey, promptTracksForScene, recordEvent]);
 
   const beginSceneTransition = useCallback((scene: MusicScene) => {
     const target = promptTracksForScene(scene);
-    const duration = playing ? barDurationMs(bpm) * transitionBars : 0;
+    const duration = playing && bpm !== "Auto" ? barDurationMs(bpm) * transitionBars : 0;
     if (!duration) {
       finishSceneTransition(scene);
       return;
     }
 
     const source = clonePrompts(prompts);
+    const sourceControls = {
+      bpm,
+      musicKey,
+      density,
+      brightness,
+      diversity,
+      roles: stems,
+    };
+    const targetControls = {
+      bpm: scene.bpm,
+      musicKey: scene.musicKey,
+      density: scene.density,
+      brightness: scene.brightness,
+      diversity: scene.diversity,
+      roles: scene.roles,
+    };
     const startedAt = performance.now();
     if (morphTimerRef.current) window.clearInterval(morphTimerRef.current);
     setToast(`Morphing to ${scene.name} over ${transitionBars} bar${transitionBars === 1 ? "" : "s"}.`);
@@ -379,19 +397,34 @@ export default function MusicTestPage() {
           ?? (["orange", "blue", "light"] as const)[index % 3],
       }));
       setPrompts(morphed);
+      void engineRef.current?.setConfig(
+        interpolateLiveMusicConfig(sourceControls, targetControls, progress),
+      ).catch(() => setToast("The scene morph was interrupted by Lyria."));
       if (progress >= 1) {
         if (morphTimerRef.current) window.clearInterval(morphTimerRef.current);
         morphTimerRef.current = null;
         finishSceneTransition(scene);
       }
     }, 180);
-  }, [bpm, finishSceneTransition, playing, promptTracksForScene, prompts, transitionBars]);
+  }, [
+    bpm,
+    brightness,
+    density,
+    diversity,
+    finishSceneTransition,
+    musicKey,
+    playing,
+    promptTracksForScene,
+    prompts,
+    stems,
+    transitionBars,
+  ]);
 
   const launchScene = (scene: MusicScene) => {
     if (sceneTimerRef.current) window.clearTimeout(sceneTimerRef.current);
     if (morphTimerRef.current) window.clearInterval(morphTimerRef.current);
     setQueuedSceneId(scene.id);
-    const delay = playing
+    const delay = playing && bpm !== "Auto" && transportStartRef.current
       ? millisecondsUntilNextBar(transportStartRef.current, bpm)
       : 0;
     recordEvent("scene-queued", `${scene.name}; ${transitionBars} bar transition`);
@@ -475,6 +508,8 @@ export default function MusicTestPage() {
     if (playing) {
       engineRef.current?.pause();
       setPlaying(false);
+      transportStartRef.current = 0;
+      setTransportPosition({ bar: 1, beat: 1 });
       recordEvent("transport", "Paused");
       return;
     }
@@ -484,7 +519,7 @@ export default function MusicTestPage() {
     }
     setToast("Connecting to Lyria ...");
     setLyriaError("");
-    transportStartRef.current = performance.now();
+    transportStartRef.current = 0;
     recordEvent("transport", "Play");
     void engineRef.current.play()
       .catch((error: unknown) => {
@@ -504,8 +539,17 @@ export default function MusicTestPage() {
     setToast("Mix reset. Press play for a new variation.");
   };
 
-  const applyRestartingChange = () => {
-    void engineRef.current?.setConfig(lyriaConfig, true);
+  const applyRestartingChange = (nextBpm: number | "Auto", nextMusicKey: string) => {
+    setBpm(nextBpm);
+    setMusicKey(nextMusicKey);
+    void engineRef.current?.setConfig(liveMusicConfig({
+      bpm: nextBpm,
+      musicKey: nextMusicKey,
+      density,
+      brightness,
+      diversity,
+      roles: stems,
+    }), true).catch(() => setToast("Lyria could not apply the tempo or key change."));
     setOpenPanel(null);
   };
 
@@ -675,14 +719,19 @@ export default function MusicTestPage() {
                     type="button"
                     className={stems[stem] ? styles.stemOn : ""}
                     onClick={() => {
-                      setStems((current) => ({ ...current, [stem]: !current[stem] }));
-                      recordEvent("role", `${stem}: ${stems[stem] ? "off" : "on"}`);
+                      const next = { ...stems, [stem]: !stems[stem] };
+                      if (!next.drums && !next.bass && !next.other) {
+                        setToast("Keep at least one generation role active.");
+                        return;
+                      }
+                      setStems(next);
+                      recordEvent("role", `${stem}: ${next[stem] ? "on" : "off"}`);
                     }}
-                    aria-label={`${stems[stem] ? "Mute" : "Unmute"} ${stem}`}
+                    aria-label={`${stems[stem] ? "Mute" : "Unmute"} ${stem === "other" ? "music" : stem}`}
                   >
                     <Icon name={stems[stem] ? "volume" : "mute"} />
                   </button>
-                  <span>{stem === "other" ? "Texture" : stem[0].toUpperCase() + stem.slice(1)}</span>
+                  <span>{stem === "other" ? "Music" : stem[0].toUpperCase() + stem.slice(1)}</span>
                 </label>
               ))}
             </div>
@@ -727,36 +776,48 @@ export default function MusicTestPage() {
 
             <div className={styles.transportMenus}>
               <div className={styles.popoverAnchor}>
-                <button type="button" className={styles.valueButton} onClick={() => setOpenPanel(openPanel === "bpm" ? null : "bpm")}>
+                <button type="button" className={styles.valueButton} onClick={() => {
+                  if (openPanel === "bpm") setOpenPanel(null);
+                  else {
+                    setBpmDraft(bpm === "Auto" ? 120 : bpm);
+                    setOpenPanel("bpm");
+                  }
+                }}>
                   <span>BPM</span>{bpm !== "Auto" && <b>{bpm}</b>}
                 </button>
                 {openPanel === "bpm" && (
                   <div className={styles.popover}>
-                    <label>BPM <strong>{bpm === "Auto" ? "Auto" : bpmDraft}</strong></label>
-                    <input type="range" min="60" max="200" value={bpmDraft} onChange={(event) => { setBpmDraft(Number(event.target.value)); setBpm(Number(event.target.value)); }} />
+                    <label>BPM <strong>{bpmDraft}</strong></label>
+                    <input type="range" min="60" max="200" value={bpmDraft} onChange={(event) => setBpmDraft(Number(event.target.value))} />
                     <p>Adjusting BPM during playback resets the current mix.</p>
                     <footer>
-                      <button type="button" onClick={() => { setBpm("Auto"); setOpenPanel(null); }}>Reset</button>
-                      <button type="button" onClick={applyRestartingChange}>Apply</button>
+                      <button type="button" onClick={() => applyRestartingChange("Auto", musicKey)}>Reset</button>
+                      <button type="button" onClick={() => applyRestartingChange(bpmDraft, musicKey)}>Apply</button>
                     </footer>
                   </div>
                 )}
               </div>
 
               <div className={styles.popoverAnchor}>
-                <button type="button" className={styles.valueButton} onClick={() => setOpenPanel(openPanel === "key" ? null : "key")}>
+                <button type="button" className={styles.valueButton} onClick={() => {
+                  if (openPanel === "key") setOpenPanel(null);
+                  else {
+                    setMusicKeyDraft(musicKey);
+                    setOpenPanel("key");
+                  }
+                }}>
                   <span>KEY</span>{musicKey !== "Auto" && <b>{musicKey.split(" ")[0]}</b>}
                 </button>
                 {openPanel === "key" && (
                   <div className={`${styles.popover} ${styles.keyPopover}`}>
                     <label>Key</label>
-                    <select value={musicKey} onChange={(event) => setMusicKey(event.target.value)}>
+                    <select value={musicKeyDraft} onChange={(event) => setMusicKeyDraft(event.target.value)}>
                       {KEYS.map((key) => <option key={key}>{key}</option>)}
                     </select>
                     <p>Adjusting the key during playback resets the current mix.</p>
                     <footer>
-                      <button type="button" onClick={() => { setMusicKey("Auto"); setOpenPanel(null); }}>Reset</button>
-                      <button type="button" onClick={applyRestartingChange}>Apply</button>
+                      <button type="button" onClick={() => applyRestartingChange(bpm, "Auto")}>Reset</button>
+                      <button type="button" onClick={() => applyRestartingChange(bpm, musicKeyDraft)}>Apply</button>
                     </footer>
                   </div>
                 )}

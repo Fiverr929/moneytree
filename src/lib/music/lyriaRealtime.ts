@@ -22,6 +22,7 @@ export type LyriaStatus = "connecting" | "loading" | "playing" | "paused" | "sto
 export type LyriaCallbacks = {
   onStatus: (status: LyriaStatus) => void;
   onAudioLevel: (level: number) => void;
+  onPlaybackStart?: (delayMs: number) => void;
   onError: (message: string) => void;
   onFilteredPrompt: (text: string, reason?: string) => void;
   onWarning?: (message: string) => void;
@@ -43,8 +44,93 @@ export const LYRIA_SCALE_BY_LABEL: Record<string, Scale> = {
   "B maj / G# min": Scale.B_MAJOR_A_FLAT_MINOR,
 };
 
-export function generationModeForDiversity(value: 0 | 1 | 2) {
-  return value === 2 ? MusicGenerationMode.DIVERSITY : MusicGenerationMode.QUALITY;
+export function diversityConfig(value: 0 | 1 | 2) {
+  if (value === 0) {
+    return {
+      musicGenerationMode: MusicGenerationMode.QUALITY,
+      temperature: 0.7,
+      topK: 24,
+      guidance: 4.8,
+    };
+  }
+  if (value === 2) {
+    return {
+      musicGenerationMode: MusicGenerationMode.DIVERSITY,
+      temperature: 1.6,
+      topK: 80,
+      guidance: 3.2,
+    };
+  }
+  return {
+    musicGenerationMode: MusicGenerationMode.QUALITY,
+    temperature: 1.1,
+    topK: 40,
+    guidance: 4,
+  };
+}
+
+export type LiveMusicControlState = {
+  bpm: number | "Auto";
+  musicKey: string;
+  density: 0 | 1 | 2;
+  brightness: 0 | 1 | 2;
+  diversity: 0 | 1 | 2;
+  roles: { drums: boolean; bass: boolean; other: boolean };
+};
+
+export function liveMusicConfig({
+  bpm,
+  musicKey,
+  density,
+  brightness,
+  diversity,
+  roles,
+}: LiveMusicControlState): LiveMusicGenerationConfig {
+  return {
+    ...diversityConfig(diversity),
+    bpm: bpm === "Auto" ? undefined : bpm,
+    scale: LYRIA_SCALE_BY_LABEL[musicKey],
+    density: density === 0 ? 0.2 : density === 2 ? 0.85 : undefined,
+    brightness: brightness === 0 ? 0.2 : brightness === 2 ? 0.85 : undefined,
+    muteBass: !roles.bass,
+    muteDrums: !roles.drums,
+    onlyBassAndDrums: !roles.other && (roles.bass || roles.drums),
+  };
+}
+
+function characterValue(value: 0 | 1 | 2) {
+  return value === 0 ? 0.2 : value === 2 ? 0.85 : 0.5;
+}
+
+function lerp(from: number, to: number, progress: number) {
+  return from + (to - from) * progress;
+}
+
+export function interpolateLiveMusicConfig(
+  from: LiveMusicControlState,
+  to: LiveMusicControlState,
+  progress: number,
+): LiveMusicGenerationConfig {
+  const amount = Math.max(0, Math.min(1, progress));
+  const fromDiversity = diversityConfig(from.diversity);
+  const toDiversity = diversityConfig(to.diversity);
+  const roles = amount < 0.65 ? from.roles : to.roles;
+
+  return {
+    bpm: from.bpm === "Auto" ? undefined : from.bpm,
+    scale: LYRIA_SCALE_BY_LABEL[from.musicKey],
+    density: lerp(characterValue(from.density), characterValue(to.density), amount),
+    brightness: lerp(characterValue(from.brightness), characterValue(to.brightness), amount),
+    temperature: lerp(fromDiversity.temperature, toDiversity.temperature, amount),
+    topK: Math.round(lerp(fromDiversity.topK, toDiversity.topK, amount)),
+    guidance: lerp(fromDiversity.guidance, toDiversity.guidance, amount),
+    musicGenerationMode: amount < 0.5
+      ? fromDiversity.musicGenerationMode
+      : toDiversity.musicGenerationMode,
+    muteBass: !roles.bass,
+    muteDrums: !roles.drums,
+    onlyBassAndDrums: !roles.other && (roles.bass || roles.drums),
+  };
 }
 
 function decodeBase64(base64: string) {
@@ -98,6 +184,8 @@ export class LyriaRealtimeEngine {
   private stopped = true;
   private analyserTimer: number | null = null;
   private firstAudioTimer: number | null = null;
+  private playbackAnchored = false;
+  private readonly scheduledSources = new Set<AudioBufferSourceNode>();
 
   constructor(apiKey: string, callbacks: LyriaCallbacks) {
     this.client = new GoogleGenAI({ apiKey, apiVersion: "v1alpha" });
@@ -179,29 +267,44 @@ export class LyriaRealtimeEngine {
   }
 
   private fail(message: string) {
+    const session = this.session;
+    this.session = null;
+    this.sessionPromise = null;
     this.callbacks.onStatus("error");
     this.callbacks.onError(message);
     this.stopped = true;
-    this.nextStartTime = 0;
+    this.clearScheduledAudio();
     this.clearFirstAudioTimeout();
     this.stopAnalyserLoop();
+    session?.close();
   }
 
   private async processAudioChunks(chunks: AudioChunk[]) {
     if (this.stopped) return;
-    this.clearFirstAudioTimeout();
     for (const chunk of chunks) {
       if (!chunk.data) continue;
+      this.clearFirstAudioTimeout();
       const { audioBuffer } = decodePcm16(decodeBase64(chunk.data), this.context);
       const source = this.context.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(this.analyser);
+      this.scheduledSources.add(source);
+      source.onended = () => {
+        this.scheduledSources.delete(source);
+        source.disconnect();
+      };
 
       if (this.nextStartTime === 0 || this.nextStartTime < this.context.currentTime) {
         this.nextStartTime = this.context.currentTime + this.bufferSeconds;
         this.callbacks.onStatus("loading");
       }
 
+      if (!this.playbackAnchored) {
+        this.playbackAnchored = true;
+        this.callbacks.onPlaybackStart?.(
+          Math.max(0, (this.nextStartTime - this.context.currentTime) * 1000),
+        );
+      }
       source.start(this.nextStartTime);
       this.nextStartTime += audioBuffer.duration;
 
@@ -229,7 +332,15 @@ export class LyriaRealtimeEngine {
     this.config = config;
     if (!this.session) return;
     await this.session.setMusicGenerationConfig({ musicGenerationConfig: this.config });
-    if (resetContext) this.session.resetContext();
+    if (resetContext) {
+      this.clearScheduledAudio();
+      this.playbackAnchored = false;
+      this.session.resetContext();
+      if (!this.stopped) {
+        this.callbacks.onStatus("loading");
+        this.startFirstAudioTimeout();
+      }
+    }
   }
 
   setVolume(volume: number) {
@@ -303,6 +414,27 @@ export class LyriaRealtimeEngine {
     }
   }
 
+  private startFirstAudioTimeout() {
+    this.clearFirstAudioTimeout();
+    this.firstAudioTimer = window.setTimeout(() => {
+      this.fail("Lyria connected, but no audio arrived. Check model access, billing, and regional availability.");
+    }, 15000);
+  }
+
+  private clearScheduledAudio() {
+    for (const source of this.scheduledSources) {
+      source.onended = null;
+      try {
+        source.stop();
+      } catch {
+        // A source that already ended needs no further cleanup.
+      }
+      source.disconnect();
+    }
+    this.scheduledSources.clear();
+    this.nextStartTime = 0;
+  }
+
   async play() {
     const weightedPrompts = this.activePrompts();
     if (!weightedPrompts.length) throw new Error("At least one prompt must be active.");
@@ -314,16 +446,16 @@ export class LyriaRealtimeEngine {
     await session.setWeightedPrompts({ weightedPrompts });
     await session.setMusicGenerationConfig({ musicGenerationConfig: this.config });
     session.play();
-    this.clearFirstAudioTimeout();
-    this.firstAudioTimer = window.setTimeout(() => {
-      this.fail("Lyria connected, but no audio arrived. Check model access, billing, and regional availability.");
-    }, 15000);
+    this.playbackAnchored = false;
+    this.startFirstAudioTimeout();
   }
 
   pause() {
+    this.stopped = true;
     this.session?.pause();
     this.callbacks.onStatus("paused");
-    this.nextStartTime = 0;
+    this.clearScheduledAudio();
+    this.playbackAnchored = false;
     this.clearFirstAudioTimeout();
     this.stopAnalyserLoop();
   }
@@ -332,7 +464,8 @@ export class LyriaRealtimeEngine {
     this.stopped = true;
     this.session?.stop();
     this.callbacks.onStatus("stopped");
-    this.nextStartTime = 0;
+    this.clearScheduledAudio();
+    this.playbackAnchored = false;
     this.clearFirstAudioTimeout();
     this.stopAnalyserLoop();
   }
@@ -348,7 +481,8 @@ export class LyriaRealtimeEngine {
     this.session?.close();
     this.session = null;
     this.sessionPromise = null;
-    this.nextStartTime = 0;
+    this.clearScheduledAudio();
+    this.playbackAnchored = false;
     if (this.recorder?.state === "recording") this.recorder.stop();
     void this.context.close();
   }
