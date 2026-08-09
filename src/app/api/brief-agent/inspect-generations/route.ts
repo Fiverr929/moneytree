@@ -64,8 +64,17 @@ function cleanText(value: unknown, limit = 1600) {
 function describeError(error: unknown) {
   const raw = error instanceof Error ? error.message : "Generation inspection failed.";
   const lower = raw.toLowerCase();
+  if (lower.includes("billing_disabled") || lower.includes("billing to be enabled") || lower.includes("billing is disabled")) {
+    return { message: "Google Cloud billing is disabled for the configured Vertex AI project.", status: 403 };
+  }
   if (lower.includes("429") || lower.includes("resource_exhausted") || lower.includes("resource exhausted") || lower.includes("quota")) {
     return { message: "Generation vision is temporarily busy. Try inspection again shortly.", status: 429 };
+  }
+  if (lower.includes("permission_denied") || lower.includes("permission denied") || lower.includes("403")) {
+    return { message: "Vertex AI denied generation inspection. Check project permissions and API enablement.", status: 403 };
+  }
+  if (lower.includes("unauthenticated") || lower.includes("credential") || lower.includes("401")) {
+    return { message: "Generation vision authentication is not configured for the server.", status: 401 };
   }
   return { message: raw, status: 400 };
 }

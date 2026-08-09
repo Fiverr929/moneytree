@@ -582,16 +582,22 @@ async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft) 
 function describeBriefAgentError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
+  if (lower.includes("billing_disabled") || lower.includes("billing to be enabled") || lower.includes("billing is disabled")) {
+    return { message: "Google Cloud billing is disabled for the configured Vertex AI project. Enable billing, wait for it to propagate, then try again.", status: 403 };
+  }
   if (lower.includes("token") || lower.includes("context") || lower.includes("too long") || lower.includes("request too large")) {
-    return "Brief agent context is still too large. Clear the agent console or reduce active references, then try again.";
+    return { message: "Brief agent context is still too large. Clear the agent console or reduce active references, then try again.", status: 413 };
   }
-  if (lower.includes("quota") || lower.includes("rate") || lower.includes("429")) {
-    return "Brief agent model quota or rate limit was hit. Wait a moment and try again.";
+  if (lower.includes("resource_exhausted") || lower.includes("quota") || lower.includes("rate") || lower.includes("429")) {
+    return { message: "Brief agent model quota or rate limit was hit. Wait a moment and try again.", status: 429 };
   }
-  if (lower.includes("auth") || lower.includes("credential") || lower.includes("permission") || lower.includes("unauthenticated")) {
-    return "Brief agent authentication is not configured for the server.";
+  if (lower.includes("permission_denied") || lower.includes("permission denied") || lower.includes("403")) {
+    return { message: "Vertex AI access was denied. Check the project, API enablement, and the account's Vertex AI permissions.", status: 403 };
   }
-  return message || "Brief agent failed.";
+  if (lower.includes("auth") || lower.includes("credential") || lower.includes("unauthenticated") || lower.includes("401")) {
+    return { message: "Brief agent authentication is not configured for the server.", status: 401 };
+  }
+  return { message: message || "Brief agent failed.", status: 400 };
 }
 
 export async function POST(request: Request) {
@@ -631,6 +637,7 @@ export async function POST(request: Request) {
     const response: BriefAgentResponse = { draft, message, run, brain: "model", model: modelResult.model };
     return NextResponse.json(response);
   } catch (error) {
-    return NextResponse.json({ error: describeBriefAgentError(error) }, { status: 400 });
+    const described = describeBriefAgentError(error);
+    return NextResponse.json({ error: described.message }, { status: described.status });
   }
 }

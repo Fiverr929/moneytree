@@ -139,6 +139,13 @@ function buildInstruction(images: BriefReferenceImageInput[]) {
 function describeReaderError(error: unknown) {
   const raw = error instanceof Error ? error.message : "Reference reader failed.";
   const normalized = raw.toLowerCase();
+  if (normalized.includes("billing_disabled") || normalized.includes("billing to be enabled") || normalized.includes("billing is disabled")) {
+    return {
+      message: "Google Cloud billing is disabled for the configured Vertex AI project.",
+      status: 403,
+      retryAfterSeconds: null,
+    };
+  }
   if (
     normalized.includes("resource_exhausted")
     || normalized.includes("resource exhausted")
@@ -151,6 +158,12 @@ function describeReaderError(error: unknown) {
       status: 429,
       retryAfterSeconds: 8,
     };
+  }
+  if (normalized.includes("permission_denied") || normalized.includes("permission denied") || normalized.includes("403")) {
+    return { message: "Vertex AI denied access to the reference reader. Check project permissions and API enablement.", status: 403, retryAfterSeconds: null };
+  }
+  if (normalized.includes("unauthenticated") || normalized.includes("credential") || normalized.includes("401")) {
+    return { message: "Reference reader authentication is not configured for the server.", status: 401, retryAfterSeconds: null };
   }
   return { message: raw, status: 400, retryAfterSeconds: null };
 }

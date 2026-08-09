@@ -19,6 +19,7 @@
 
 # production
 /build
+/dist
 
 # misc
 .DS_Store
@@ -62,3 +63,5 @@ mingit.zip
 
 # local Codex scratch research
 /.codex-study/
+/.npm-cache/
+/.wrangler/
