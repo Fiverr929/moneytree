@@ -1,9 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
-import { readFileSync } from "fs";
-import path from "path";
 import { NextResponse } from "next/server";
 import { applySkillContract, BRIEF_AGENT_SKILL_CONTRACT } from "@/lib/brief-agent/skillContract";
 import { advanceAgentRun, type AgentRun } from "@/lib/brief-agent/runState";
+import { REFERENCE_INFLUENCE_SKILL } from "@/lib/brief-agent/skills/referenceInfluence";
 import { createVisualUnderstanding } from "@/lib/brief-agent/visualUnderstanding";
 import { getReferenceInfluence } from "@/lib/pipeline/strength";
 import type {
@@ -33,11 +32,6 @@ const MAX_REFERENCE_READ_CHARS = 650;
 const MAX_SESSION_TEXT_CHARS = 900;
 const MAX_VISUAL_FACTS = 5;
 const MAX_GENERATION_EVIDENCE = 6;
-const REFERENCE_INFLUENCE_SKILL = readFileSync(
-  path.join(process.cwd(), "src/lib/brief-agent/skills/referenceInfluence.md"),
-  "utf8",
-);
-
 function validateMessage(value: unknown): AgentMessage {
   if (!value || typeof value !== "object") {
     throw new Error("Invalid brief agent message.");
