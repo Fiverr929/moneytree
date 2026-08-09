@@ -1,10 +1,10 @@
-import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { applySkillContract, BRIEF_AGENT_SKILL_CONTRACT } from "@/lib/brief-agent/skillContract";
 import { advanceAgentRun, type AgentRun } from "@/lib/brief-agent/runState";
 import { REFERENCE_INFLUENCE_SKILL } from "@/lib/brief-agent/skills/referenceInfluence";
 import { createVisualUnderstanding } from "@/lib/brief-agent/visualUnderstanding";
 import { getReferenceInfluence } from "@/lib/pipeline/strength";
+import { createGoogleGenAI } from "@/lib/server/googleGenAI";
 import type {
   AgentMessage,
   BriefAgentAction,
@@ -541,19 +541,8 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
 }
 
 async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft) {
-  const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
-  const location = process.env.GOOGLE_CLOUD_LOCATION?.trim();
   const model = process.env.BRIEF_AGENT_MODEL?.trim() || DEFAULT_BRIEF_AGENT_MODEL;
-  if (!project || !location) {
-    throw new Error("Brief agent planner is not configured.");
-  }
-
-  const ai = new GoogleGenAI({
-    vertexai: true,
-    project,
-    location,
-    apiVersion: "v1",
-  });
+  const ai = createGoogleGenAI();
   const result = await ai.models.generateContent({
     model,
     contents: [{
@@ -589,7 +578,7 @@ function describeBriefAgentError(error: unknown) {
     return { message: "Vertex AI access was denied. Check the project, API enablement, and the account's Vertex AI permissions.", status: 403 };
   }
   if (lower.includes("auth") || lower.includes("credential") || lower.includes("unauthenticated") || lower.includes("401")) {
-    return { message: "Brief agent authentication is not configured for the server.", status: 401 };
+    return { message: "Brief agent authentication is not configured. Add GEMINI_API_KEY as a server secret.", status: 401 };
   }
   return { message: message || "Brief agent failed.", status: 400 };
 }

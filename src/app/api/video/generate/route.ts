@@ -1,5 +1,4 @@
 import {
-  GoogleGenAI,
   VideoGenerationReferenceType,
   type GenerateVideosConfig,
   type Image,
@@ -10,6 +9,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { VeoGenerationRequest } from "@/lib/video/api";
+import { createGoogleGenAI } from "@/lib/server/googleGenAI";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -113,7 +113,7 @@ function describeError(error: unknown) {
       || error.message.includes("Could not load the default credentials")
       || error.message.includes("UNAUTHENTICATED")
     ) {
-      return "Vertex authentication is not configured. Set up Application Default Credentials or GOOGLE_APPLICATION_CREDENTIALS for the Next.js server.";
+      return "Google AI authentication is not configured. Set GEMINI_API_KEY as a server secret, or configure Vertex AI server credentials.";
     }
     return error.message;
   }
@@ -141,7 +141,7 @@ function summarizeVideoOperation(operation: unknown) {
   };
 }
 
-async function downloadGeneratedVideo(ai: GoogleGenAI, video: Video) {
+async function downloadGeneratedVideo(ai: ReturnType<typeof createGoogleGenAI>, video: Video) {
   if (!video.uri) return null;
 
   const dir = await mkdtemp(join(tmpdir(), "cafehtml-veo-"));
@@ -172,29 +172,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
-    const location = process.env.GOOGLE_CLOUD_LOCATION?.trim();
-    if (!project || !location) {
-      return NextResponse.json(
-        {
-          error: "Vertex video generation is not configured. Set GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION on the server.",
-        },
-        { status: 503 },
-      );
-    }
-
     const contentLength = Number(request.headers.get("content-length") || 0);
     if (contentLength > getMaxRequestBytes()) {
       return NextResponse.json({ error: "Video generation request is too large." }, { status: 413 });
     }
     const input = validateRequest(request, await request.json());
 
-    const ai = new GoogleGenAI({
-      enterprise: true,
-      project,
-      location,
-      apiVersion: "v1",
-    });
+    const ai = createGoogleGenAI({ enterprise: true });
     const config: GenerateVideosConfig = {
       numberOfVideos: 1,
       aspectRatio: input.aspectRatio,

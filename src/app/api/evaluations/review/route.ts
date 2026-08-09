@@ -1,7 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { GENERATION_SAFETY_SETTINGS, type Part } from "@/lib/pipeline/genai-client";
 import type { AiGenerationEvaluation, EvaluationScoreValue } from "@/lib/evaluationReview";
+import { createGoogleGenAI } from "@/lib/server/googleGenAI";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -174,12 +174,9 @@ function buildInstruction(input: ReviewRequest) {
 }
 
 async function reviewGeneration(input: ReviewRequest) {
-  const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
-  const location = process.env.GOOGLE_CLOUD_LOCATION?.trim();
   const model = process.env.EVALUATION_REVIEW_MODEL?.trim()
     || process.env.BRIEF_AGENT_MODEL?.trim()
     || DEFAULT_REVIEW_MODEL;
-  if (!project || !location) throw new Error("Generation reviewer is not configured.");
 
   const parts: Part[] = [{ text: buildInstruction(input) }];
   input.references.forEach((reference, index) => {
@@ -191,12 +188,7 @@ async function reviewGeneration(input: ReviewRequest) {
   parts.push({ text: "Generated image to evaluate:" });
   parts.push({ inlineData: { mimeType: generated.mimeType, data: generated.data } });
 
-  const ai = new GoogleGenAI({
-    vertexai: true,
-    project,
-    location,
-    apiVersion: "v1",
-  });
+  const ai = createGoogleGenAI();
   const result = await ai.models.generateContent({
     model,
     contents: [{ role: "user", parts }],

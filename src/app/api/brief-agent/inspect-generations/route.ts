@@ -1,6 +1,6 @@
-import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import type { GenerationInspectionRequest, GenerationInspectionResponse } from "@/lib/brief-agent/types";
+import { createGoogleGenAI } from "@/lib/server/googleGenAI";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -74,7 +74,7 @@ function describeError(error: unknown) {
     return { message: "Vertex AI denied generation inspection. Check project permissions and API enablement.", status: 403 };
   }
   if (lower.includes("unauthenticated") || lower.includes("credential") || lower.includes("401")) {
-    return { message: "Generation vision authentication is not configured for the server.", status: 401 };
+    return { message: "Generation vision authentication is not configured. Add GEMINI_API_KEY as a server secret.", status: 401 };
   }
   return { message: raw, status: 400 };
 }
@@ -82,12 +82,9 @@ function describeError(error: unknown) {
 export async function POST(request: Request) {
   try {
     const input = validateRequest(request, await request.json());
-    const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
-    const location = process.env.GOOGLE_CLOUD_LOCATION?.trim();
     const model = process.env.BRIEF_GENERATION_INSPECTION_MODEL?.trim()
       || process.env.BRIEF_REFERENCE_MODEL?.trim()
       || DEFAULT_MODEL;
-    if (!project || !location) throw new Error("Generation vision is not configured.");
 
     const parts = [
       { text: [
@@ -106,7 +103,7 @@ export async function POST(request: Request) {
         ];
       }),
     ];
-    const ai = new GoogleGenAI({ vertexai: true, project, location, apiVersion: "v1" });
+    const ai = createGoogleGenAI();
     const result = await ai.models.generateContent({
       model,
       contents: [{ role: "user", parts }],

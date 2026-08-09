@@ -1,6 +1,6 @@
-import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { BRIEF_AGENT_SKILL_CONTRACT } from "@/lib/brief-agent/skillContract";
+import { createGoogleGenAI } from "@/lib/server/googleGenAI";
 import type {
   BriefReferenceImageInput,
   BriefReferenceReadRequest,
@@ -163,25 +163,16 @@ function describeReaderError(error: unknown) {
     return { message: "Vertex AI denied access to the reference reader. Check project permissions and API enablement.", status: 403, retryAfterSeconds: null };
   }
   if (normalized.includes("unauthenticated") || normalized.includes("credential") || normalized.includes("401")) {
-    return { message: "Reference reader authentication is not configured for the server.", status: 401, retryAfterSeconds: null };
+    return { message: "Reference reader authentication is not configured. Add GEMINI_API_KEY as a server secret.", status: 401, retryAfterSeconds: null };
   }
   return { message: raw, status: 400, retryAfterSeconds: null };
 }
 
 async function readReferences(input: BriefReferenceReadRequest) {
-  const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
-  const location = process.env.GOOGLE_CLOUD_LOCATION?.trim();
   const model = process.env.BRIEF_REFERENCE_MODEL?.trim()
     || process.env.BRIEF_AGENT_MODEL?.trim()
     || DEFAULT_REFERENCE_READER_MODEL;
-  if (!project || !location) throw new Error("Vertex reference reader is not configured.");
-
-  const ai = new GoogleGenAI({
-    vertexai: true,
-    project,
-    location,
-    apiVersion: "v1",
-  });
+  const ai = createGoogleGenAI();
   const parts = [
     { text: buildInstruction(input.images) },
     ...input.images.flatMap((image, index) => {
