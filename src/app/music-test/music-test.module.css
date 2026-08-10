@@ -681,8 +681,15 @@
 @keyframes recordPulse { 50% { box-shadow: inset 0 0 0 2px rgba(232,230,230,.45); } }
 
 @media (max-width: 760px) {
-  .page { padding: 10px; }
-  .workspace { min-height: calc(100vh - 20px); justify-content: flex-start; }
+  .page {
+    padding:
+      max(10px, env(safe-area-inset-top))
+      max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
+    overscroll-behavior: contain;
+  }
+  .workspace { min-height: calc(100dvh - 20px); justify-content: flex-start; }
   .header { min-height: 44px; }
   .header > div:first-child { display: block; }
   .header h1 { font-size: 15px; }
@@ -696,17 +703,39 @@
   .sceneTools label { flex: 1; }
   .sceneTools select { flex: 1; }
   .sceneTools > button { flex: 1; justify-content: center; }
-  .sceneGrid { grid-auto-columns: minmax(175px, 72vw); }
-  .promptRow { grid-template-columns: 54px minmax(100px, 1fr) minmax(125px, 1.25fr); min-height: 51px; }
-  .promptActions button { width: 24px; }
+  .sceneGrid {
+    grid-auto-columns: minmax(168px, 78vw);
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+  }
+  .sceneCard { scroll-snap-align: start; }
+  .sceneLaunch { min-height: 88px; }
+  .sceneDelete {
+    display: grid;
+    width: 36px;
+    height: 36px;
+  }
+  .promptRow { grid-template-columns: 76px minmax(90px, 1fr) minmax(108px, 1fr); min-height: 56px; }
+  .promptActions button { width: 36px; min-height: 44px; opacity: .72; }
   .promptName { padding: 0 9px; font-size: 13px; }
   .weightControl { padding: 0 9px; }
+  .promptInput { min-height: 48px; }
+  .promptInput button { width: 48px; }
+  .suggestions button { min-height: 36px; }
   .characterRow { grid-template-columns: 1fr; }
   .stems { margin-top: 4px; }
-  .transport { flex-wrap: wrap; }
+  .transport { flex-wrap: wrap; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
   .waveform { order: 5; flex-basis: 100%; }
   .volumeControl { flex: 1; }
   .transportMenus { margin-left: auto; }
-  .popover { position: fixed; left: 10px; right: 10px; bottom: 10px; width: auto; }
+  .popover {
+    position: fixed;
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: calc(100dvh - 20px);
+    overflow-y: auto;
+  }
   .popover::after { display: none; }
 }

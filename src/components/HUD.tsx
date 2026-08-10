@@ -23,6 +23,24 @@ export default function HUD() {
   const { setFiles } = useModule();
   const { activeProjectId } = useApp();
 
+  useEffect(() => {
+    const visualViewport = window.visualViewport;
+    const updateVisibleViewportHeight = () => {
+      const height = visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty("--visible-viewport-height", `${height}px`);
+    };
+
+    updateVisibleViewportHeight();
+    window.addEventListener("resize", updateVisibleViewportHeight);
+    visualViewport?.addEventListener("resize", updateVisibleViewportHeight);
+
+    return () => {
+      window.removeEventListener("resize", updateVisibleViewportHeight);
+      visualViewport?.removeEventListener("resize", updateVisibleViewportHeight);
+      document.documentElement.style.removeProperty("--visible-viewport-height");
+    };
+  }, []);
+
   const [threeDotOpen, setThreeDotOpen] = useState(false);
   const [setupPopupOpen, setSetupPopupOpen] = useState(false);
   const [copyPromptTitle, setCopyPromptTitle] = useState("Copy prompt");
@@ -347,7 +365,19 @@ export default function HUD() {
           CLOSE
         </button>
         <div className="hud-divider"></div>
-        <span id="hud-counter">{hudIndex + 1} OF {visibleCells.length}</span>
+        <span
+          id="hud-counter"
+          aria-label={`${hudIndex + 1} of ${visibleCells.length}`}
+          style={{
+            display: "inline-block",
+            flex: "0 0 auto",
+            minWidth: "max-content",
+            whiteSpace: "nowrap",
+            wordBreak: "keep-all",
+          }}
+        >
+          {`${hudIndex + 1}/${visibleCells.length}`}
+        </span>
 
         <div className="hud-spacer"></div>
 
