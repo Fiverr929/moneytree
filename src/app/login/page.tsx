@@ -55,13 +55,7 @@ export default function LoginPage() {
     <main className={styles.page}>
       <section className={styles.card} aria-labelledby="auth-title">
         <div className={styles.brand}><span>©</span> CAFEHTML</div>
-        <p className={styles.eyebrow}>PRIVATE STUDIO</p>
-        <h1 id="auth-title">{isLoading ? "Checking account" : mode === "signup" ? "Create your account" : "Welcome back"}</h1>
-        <p className={styles.copy}>
-          {isLoading ? "Preparing your private workspace…" : mode === "signup"
-            ? "This is the only account that can be created for this site."
-            : "Sign in to open your image generation workspace."}
-        </p>
+        <h1 id="auth-title">{isLoading ? "Loading" : mode === "signup" ? "Create account" : "Sign in"}</h1>
 
         {!isLoading && (
           <form className={styles.form} onSubmit={submit}>
@@ -97,7 +91,6 @@ export default function LoginPage() {
         )}
 
         {error && <p className={styles.error} role="alert">{error}</p>}
-        {mode === "signup" && <p className={styles.note}>Use at least 10 characters. Your password is stored as a secure one-way hash.</p>}
       </section>
     </main>
   );
