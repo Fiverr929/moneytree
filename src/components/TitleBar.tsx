@@ -25,6 +25,11 @@ export default function TitleBar() {
     setMenuOpen(false);
   };
 
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.replace("/login");
+  };
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -60,6 +65,7 @@ export default function TitleBar() {
             <div className="cafe-menu-divider"></div>
             <button className="menu-item" type="button" onClick={handleNewProject}><span>NEW PROJECT</span></button>
             <button className="menu-item" type="button" onClick={handleExport}><span>EXPORT</span></button>
+            <button className="menu-item" type="button" onClick={handleLogout}><span>SIGN OUT</span></button>
           </div>
         </div>
         <div
