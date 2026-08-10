@@ -99,7 +99,7 @@ async function hashPassword(password: string, salt: Uint8Array<ArrayBuffer>) {
     ["deriveBits"],
   );
   return new Uint8Array(await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: 210_000 },
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations: 100_000 },
     key,
     256,
   ));
