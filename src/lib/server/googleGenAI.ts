@@ -7,7 +7,7 @@ type GoogleGenAIOptions = {
 export function createGoogleGenAI(options: GoogleGenAIOptions = {}) {
   const apiKey = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim();
   if (apiKey) {
-    return new GoogleGenAI({ apiKey, apiVersion: "v1" });
+    return new GoogleGenAI({ apiKey });
   }
 
   const project = process.env.GOOGLE_CLOUD_PROJECT?.trim();
