@@ -44,8 +44,11 @@ export default function HUD() {
   const [threeDotOpen, setThreeDotOpen] = useState(false);
   const [setupPopupOpen, setSetupPopupOpen] = useState(false);
   const [copyPromptTitle, setCopyPromptTitle] = useState("Copy prompt");
+  const [dragOffset, setDragOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   
   const threeDotRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef({ pointerId: -1, startX: 0, lastX: 0, startedAt: 0 });
   type ActiveHudCell = GalleryCell | undefined;
 
   // Derive visible cells before callbacks so selected cell state is initialized
@@ -184,6 +187,51 @@ export default function HUD() {
     if (!visibleCells.length) return;
     setHudIndex((hudIndex - 1 + visibleCells.length) % visibleCells.length);
   }, [hudIndex, setHudIndex, visibleCells.length]);
+
+  const slidePosition = useCallback((index: number) => {
+    if (visibleCells.length < 2) return 0;
+    let position = index - hudIndex;
+    const midpoint = visibleCells.length / 2;
+    if (position > midpoint) position -= visibleCells.length;
+    if (position < -midpoint) position += visibleCells.length;
+    return position;
+  }, [hudIndex, visibleCells.length]);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if ((event.target as HTMLElement).closest("button")) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      lastX: event.clientX,
+      startedAt: performance.now(),
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsDragging(true);
+    setDragOffset(0);
+  }, []);
+
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging || dragRef.current.pointerId !== event.pointerId) return;
+    dragRef.current.lastX = event.clientX;
+    setDragOffset(event.clientX - dragRef.current.startX);
+  }, [isDragging]);
+
+  const finishDrag = useCallback((event: React.PointerEvent<HTMLDivElement>, cancelled = false) => {
+    if (dragRef.current.pointerId !== event.pointerId) return;
+    const distance = dragRef.current.lastX - dragRef.current.startX;
+    const elapsed = Math.max(performance.now() - dragRef.current.startedAt, 1);
+    const velocity = distance / elapsed;
+    const threshold = Math.min(64, event.currentTarget.clientWidth * 0.16);
+
+    setIsDragging(false);
+    setDragOffset(0);
+    dragRef.current.pointerId = -1;
+
+    if (cancelled || visibleCells.length < 2) return;
+    if (distance <= -threshold || velocity < -0.45) handleNext();
+    else if (distance >= threshold || velocity > 0.45) handlePrev();
+  }, [handleNext, handlePrev, visibleCells.length]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -368,15 +416,8 @@ export default function HUD() {
         <span
           id="hud-counter"
           aria-label={`${hudIndex + 1} of ${visibleCells.length}`}
-          style={{
-            display: "inline-block",
-            flex: "0 0 auto",
-            minWidth: "max-content",
-            whiteSpace: "nowrap",
-            wordBreak: "keep-all",
-          }}
         >
-          {`${hudIndex + 1}/${visibleCells.length}`}
+          {`${hudIndex + 1} OF ${visibleCells.length}`}
         </span>
 
         <div className="hud-spacer"></div>
@@ -423,20 +464,28 @@ export default function HUD() {
       </div>
 
       {/* Image viewport */}
-      <div id="hud-image-area">
+      <div
+        id="hud-image-area"
+        className={isDragging ? "dragging" : ""}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={(event) => finishDrag(event)}
+        onPointerCancel={(event) => finishDrag(event, true)}
+      >
         <div id="hud-slide-track" style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
           {renderedSlides.map(({ cell, i }) => (
             <div 
               key={cell.id} 
               className="hud-slide" 
               data-slide-id={i}
-              style={{ transform: `translateX(${(i - hudIndex) * 100}%)` }}
+              style={{ transform: `translateX(calc(${slidePosition(i) * 100}% + ${dragOffset}px))` }}
             >
               {cell.imgUrl ? (
                 <img
                   className="hud-slide-img"
                   src={cell.imgUrl}
                   alt="Generated"
+                  draggable={false}
                   onLoad={(e) => syncGalleryImageMeta(cell, e.currentTarget)}
                 />
               ) : (
