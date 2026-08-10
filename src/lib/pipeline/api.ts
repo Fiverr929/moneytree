@@ -91,8 +91,7 @@ export async function googleGenerate(opts: GenerateOptions) {
     responseModalities: ['TEXT', 'IMAGE'],
     imageConfig: {
       aspectRatio: ar,
-      imageSize: imageSize || '1K',
-      outputMimeType: 'image/png'
+      imageSize: imageSize || '1K'
     },
     safetySettings: GENERATION_SAFETY_SETTINGS
   };
@@ -676,8 +675,7 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
   }
 
   const imageConfig: NonNullable<GenerateContentConfig['imageConfig']> = {
-    imageSize: imageSize || '1K',
-    outputMimeType: 'image/png'
+    imageSize: imageSize || '1K'
   };
   if (aspectRatio) imageConfig.aspectRatio = aspectRatio;
 
