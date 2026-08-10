@@ -9910,3 +9910,98 @@ body.module-collapsed .module-panel {
     height: 16px;
   }
 }
+
+/* Mobile workspace polish: keep navigation anchored and make the composer
+   read as two calm horizontal rows instead of one oversized action block. */
+@media (max-width: 680px) {
+  html,
+  body {
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    overscroll-behavior: none;
+  }
+
+  .title-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 500;
+    transform: translateZ(0);
+  }
+
+  #gallery-grid,
+  .cmp-scroll,
+  .cmp-detail-body,
+  .prompt-text-field,
+  .agent-console-scroll {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  button,
+  .tab,
+  .btn-menu,
+  .cmp-image-row,
+  .cmp-folder {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@media (max-width: 430px) {
+  .prompt-bar-row {
+    grid-template-columns: 36px 36px minmax(0, 1fr);
+    grid-template-rows: 36px 58px;
+    column-gap: 0;
+    row-gap: 5px;
+  }
+
+  .prompt-input-area {
+    display: contents;
+  }
+
+  .prompt-text-field {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    height: 58px;
+    min-height: 58px;
+    border: 1px solid var(--accent);
+    padding: 7px 9px;
+    line-height: 18px;
+  }
+
+  .prompt-text-field.has-placeholder::before {
+    top: 8px;
+    left: 9px;
+    right: 9px;
+    line-height: 18px;
+  }
+
+  .btn-frame {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+    width: 88px;
+    height: 36px;
+    border: 1px solid var(--accent);
+    color: #e8e6e6;
+    font-size: 15px;
+    letter-spacing: 0.06em;
+  }
+
+  #promptBar .btn-frame:active {
+    transform: scale(0.97);
+  }
+
+  .right-sidebar {
+    top: calc(max(8px, env(safe-area-inset-top)) + 109px + var(--agent-console-offset, 0px));
+  }
+
+  #gallery-panel {
+    top: calc(max(8px, env(safe-area-inset-top)) + 197px + var(--agent-console-offset, 0px));
+    bottom: calc(30px + env(safe-area-inset-bottom));
+  }
+}
