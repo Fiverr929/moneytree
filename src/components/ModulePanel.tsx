@@ -620,7 +620,10 @@ export default function ModulePanel() {
     fileId: number,
     rootFiles: ModuleFile[],
   ) => {
-    if (e.button !== 0) return;
+    // A few pixels of normal finger movement should scroll the panel, not
+    // unexpectedly reorder a reference. Reordering remains a precise mouse
+    // gesture; touch and pen input use stable taps and native scrolling.
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target.closest("button, input, textarea, .cmp-menu, .cmp-dot")) return;
 
@@ -1389,12 +1392,14 @@ export default function ModulePanel() {
     };
 
     const handleStrengthPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
       updateStrengthFromClientX(e.clientX, e.currentTarget);
     };
 
     const handleStrengthPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-      if (e.buttons !== 1) return;
+      if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+      e.preventDefault();
       updateStrengthFromClientX(e.clientX, e.currentTarget);
     };
 

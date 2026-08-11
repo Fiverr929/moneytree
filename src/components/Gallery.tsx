@@ -59,7 +59,16 @@ const GalleryTile = memo(function GalleryTile({
       data-id={cell.id}
       data-ratio={cell.ratio}
       data-loading-id={cell.loadingId}
+      role="button"
+      tabIndex={cell.loadingId ? -1 : 0}
+      onDragStart={(event) => event.preventDefault()}
       onClick={() => !cell.loadingId && onCellClick(cell.id)}
+      onKeyDown={(event) => {
+        if (!cell.loadingId && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onCellClick(cell.id);
+        }
+      }}
     >
       <div
         className={`cell-inner ${cell.phClass || ""} ${((cell.loadingId && !cell.blocked && !cell.error) || isPendingImage) ? "cafe-loading" : ""} ${cell.blocked ? "cell-blocked" : ""} ${cell.error ? "cell-error" : ""}`}
@@ -68,7 +77,7 @@ const GalleryTile = memo(function GalleryTile({
         }}
       >
         {shouldLoadImage && cell.imgUrl && (
-          <img className="cell-img" src={cell.imgUrl} alt="" loading="lazy" decoding="async" />
+          <img className="cell-img" src={cell.imgUrl} alt="" loading="lazy" decoding="async" draggable={false} />
         )}
         {cell.blocked && <span className="cell-blocked-label">{cell.statusLabel || "BLOCKED"}</span>}
         {cell.error && (

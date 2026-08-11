@@ -304,6 +304,8 @@ export default function Studio() {
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (activeTool !== 'pencil' || !drawLayerRef.current) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
     const r = drawLayerRef.current.getBoundingClientRect();
     const sx = drawLayerRef.current.width / drawLayerRef.current.offsetWidth;
     const sy = drawLayerRef.current.height / drawLayerRef.current.offsetHeight;
@@ -319,6 +321,7 @@ export default function Studio() {
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (!isDrawing.current || !currentStroke.current || !drawLayerRef.current) return;
+    e.preventDefault();
     const r = drawLayerRef.current.getBoundingClientRect();
     const sx = drawLayerRef.current.width / drawLayerRef.current.offsetWidth;
     const sy = drawLayerRef.current.height / drawLayerRef.current.offsetHeight;
@@ -340,9 +343,12 @@ export default function Studio() {
     }
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e?: React.PointerEvent) => {
     if (!isDrawing.current || !currentStroke.current) return;
     isDrawing.current = false;
+    if (e?.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
     setUndoStack(prev => [...prev, currentStroke.current!]);
     currentStroke.current = null;
   };
@@ -401,6 +407,7 @@ export default function Studio() {
       const ch = canvasRef.current.offsetHeight;
       
       if (cropDrag.current) {
+        e.preventDefault();
         const d = cropDrag.current;
         const dx = e.clientX - d.startX;
         const dy = e.clientY - d.startY;
@@ -412,6 +419,7 @@ export default function Studio() {
       }
       
       if (cropResize.current) {
+        e.preventDefault();
         const r = cropResize.current;
         const dx = e.clientX - r.startX;
         const dy = e.clientY - r.startY;
@@ -452,7 +460,7 @@ export default function Studio() {
     };
     const onPointerUp = () => { cropDrag.current = null; cropResize.current = null; };
     
-    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointermove', onPointerMove, { passive: false });
     document.addEventListener('pointerup', onPointerUp);
     document.addEventListener('pointercancel', onPointerUp);
     return () => {
@@ -733,7 +741,7 @@ export default function Studio() {
                   onPointerDown={handlePointerDown}
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
-                  onPointerLeave={handlePointerUp}
+                  onPointerCancel={handlePointerUp}
                 ></canvas>
                 
                 <div id="studioCropOverlay" className={activeTool === 'crop' ? 'active' : ''} ref={cropOverlayRef}>

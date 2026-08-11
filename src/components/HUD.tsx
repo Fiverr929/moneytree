@@ -48,7 +48,14 @@ export default function HUD() {
   const [isDragging, setIsDragging] = useState(false);
   
   const threeDotRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef({ pointerId: -1, startX: 0, lastX: 0, startedAt: 0 });
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    lastX: number;
+    startedAt: number;
+    axis: "horizontal" | "vertical" | null;
+  }>({ pointerId: -1, startX: 0, startY: 0, lastX: 0, startedAt: 0, axis: null });
   type ActiveHudCell = GalleryCell | undefined;
 
   // Derive visible cells before callbacks so selected cell state is initialized
@@ -203,24 +210,39 @@ export default function HUD() {
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
+      startY: event.clientY,
       lastX: event.clientX,
       startedAt: performance.now(),
+      axis: null,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
-    setIsDragging(true);
+    setIsDragging(false);
     setDragOffset(0);
   }, []);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging || dragRef.current.pointerId !== event.pointerId) return;
-    dragRef.current.lastX = event.clientX;
-    setDragOffset(event.clientX - dragRef.current.startX);
-  }, [isDragging]);
+    const drag = dragRef.current;
+    if (drag.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.axis) {
+      if (Math.hypot(deltaX, deltaY) < 7) return;
+      drag.axis = Math.abs(deltaX) > Math.abs(deltaY) ? "horizontal" : "vertical";
+      if (drag.axis === "horizontal") setIsDragging(true);
+    }
+
+    if (drag.axis !== "horizontal") return;
+    event.preventDefault();
+    drag.lastX = event.clientX;
+    setDragOffset(deltaX);
+  }, []);
 
   const finishDrag = useCallback((event: React.PointerEvent<HTMLDivElement>, cancelled = false) => {
     if (dragRef.current.pointerId !== event.pointerId) return;
-    const distance = dragRef.current.lastX - dragRef.current.startX;
-    const elapsed = Math.max(performance.now() - dragRef.current.startedAt, 1);
+    const drag = dragRef.current;
+    const distance = drag.lastX - drag.startX;
+    const elapsed = Math.max(performance.now() - drag.startedAt, 1);
     const velocity = distance / elapsed;
     const threshold = Math.min(64, event.currentTarget.clientWidth * 0.16);
 
@@ -228,7 +250,7 @@ export default function HUD() {
     setDragOffset(0);
     dragRef.current.pointerId = -1;
 
-    if (cancelled || visibleCells.length < 2) return;
+    if (cancelled || drag.axis !== "horizontal" || visibleCells.length < 2) return;
     if (distance <= -threshold || velocity < -0.45) handleNext();
     else if (distance >= threshold || velocity > 0.45) handlePrev();
   }, [handleNext, handlePrev, visibleCells.length]);
