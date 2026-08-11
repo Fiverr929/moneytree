@@ -10079,3 +10079,68 @@ body.module-collapsed .module-panel {
     bottom: calc(30px + env(safe-area-inset-bottom));
   }
 }
+
+/* iOS touch controls: prevent focus and double-tap zoom without disabling
+   deliberate two-finger pinch zoom for accessibility. */
+@media (max-width: 680px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  button,
+  a,
+  select,
+  label,
+  summary,
+  [role="button"],
+  [role="tab"],
+  .gallery-cell,
+  .cmp-image-row,
+  .cmp-folder,
+  .hud-action,
+  .hud-icon-btn {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button,
+  a,
+  label,
+  summary,
+  [role="button"],
+  [role="tab"] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px !important;
+    touch-action: manipulation;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  #gallery-scroll,
+  .cmp-scroll,
+  .cmp-detail-body,
+  .agent-console-scroll {
+    touch-action: pan-y;
+  }
+
+  .mod-panel-wrap.collapsed .cmp-scroll {
+    touch-action: pan-x;
+  }
+
+  #hud-image-area {
+    touch-action: pan-y;
+  }
+}
