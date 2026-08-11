@@ -46,6 +46,8 @@ interface ExecutionContext {
 }
 
 const SESSION_COOKIE = "cafehtml_session";
+const CANONICAL_HOSTNAME = "cafehtml.net";
+const SITES_HOSTNAME = "cafehtml-next.cafehtml.chatgpt.site";
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 7;
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOGIN_WINDOW_SECONDS = 15 * 60;
@@ -282,6 +284,13 @@ const worker = {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.hostname === SITES_HOSTNAME) {
+      url.protocol = "https:";
+      url.hostname = CANONICAL_HOSTNAME;
+      url.port = "";
+      return Response.redirect(url, 308);
+    }
 
     if (url.pathname.startsWith("/api/auth/")) {
       return handleAuth(request, env, url.pathname);
