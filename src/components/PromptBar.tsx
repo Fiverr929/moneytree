@@ -1361,6 +1361,7 @@ export default function PromptBar() {
             contentEditable="true"
             role="textbox"
             aria-label="Image prompt"
+            aria-controls="agentConsole"
             data-placeholder={placeholderText}
             ref={inputRef}
             onFocus={() => setAgentConsoleOpen(true)}
@@ -1402,7 +1403,20 @@ export default function PromptBar() {
           </div>
         )}
       </div>
-      <div className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
+      <div id="agentConsole" className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
+        <button
+          className="agent-console-close"
+          type="button"
+          aria-label="Close chat"
+          disabled={!agentConsoleOpen}
+          tabIndex={agentConsoleOpen ? 0 : -1}
+          onClick={() => {
+            inputRef.current?.blur();
+            setAgentConsoleOpen(false);
+          }}
+        >
+          Close
+        </button>
         <div className="agent-console-scroll" ref={agentConsoleScrollRef}>
           {agentIdle ? (
             <div className="agent-idle">

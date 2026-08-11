@@ -11,6 +11,8 @@ const SKELETON_RATIOS = ["1:1", "16:9", "1:1", "9:16", "4:3", "1:1", "3:4", "1:1
 type GalleryTileProps = {
   cell: GalleryCell;
   isSelected: boolean;
+  selectMode: boolean;
+  position: number;
   isGalleryLoading: boolean;
   onCellClick: (cellId: number) => void;
   onRetry: (cell: GalleryCell) => void;
@@ -19,6 +21,8 @@ type GalleryTileProps = {
 const GalleryTile = memo(function GalleryTile({
   cell,
   isSelected,
+  selectMode,
+  position,
   isGalleryLoading,
   onCellClick,
   onRetry,
@@ -61,6 +65,10 @@ const GalleryTile = memo(function GalleryTile({
       data-loading-id={cell.loadingId}
       role="button"
       tabIndex={cell.loadingId ? -1 : 0}
+      aria-label={selectMode
+        ? `${isSelected ? "Deselect" : "Select"} gallery image ${position}`
+        : `Open gallery image ${position}`}
+      aria-pressed={selectMode ? isSelected : undefined}
       onDragStart={(event) => event.preventDefault()}
       onClick={() => !cell.loadingId && onCellClick(cell.id)}
       onKeyDown={(event) => {
@@ -269,6 +277,10 @@ export default function Gallery() {
             className={`${!hasSelected ? "btn-disabled" : ""} ${threeDotDropdownOpen ? "active" : ""}`}
             onClick={() => { if (hasSelected) setThreeDotDropdownOpen(!threeDotDropdownOpen); }}
             title="More actions"
+            aria-label="Selected image actions"
+            aria-expanded={threeDotDropdownOpen}
+            aria-haspopup="menu"
+            disabled={!hasSelected}
           >
             <span></span><span></span><span></span>
           </button>
@@ -284,6 +296,7 @@ export default function Gallery() {
         <button 
           id="btn-select" 
           className={selectMode ? "active" : ""}
+          aria-pressed={selectMode}
           onClick={() => {
             if (selectMode) {
               setSelectedIds(new Set());
@@ -298,13 +311,13 @@ export default function Gallery() {
         <div className="ctrl-spacer"></div>
 
         <div className="view-toggles">
-          <button className={`btn-view ${currentView === "small" ? "active" : ""}`} data-view-target="small" onClick={() => setCurrentView("small")}>
+          <button className={`btn-view ${currentView === "small" ? "active" : ""}`} data-view-target="small" aria-label="Small gallery view" aria-pressed={currentView === "small"} title="Small gallery view" onClick={() => setCurrentView("small")}>
             <svg width="18" height="18" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="3" height="3" fill="currentColor"/><rect x="4" y="0" width="3" height="3" fill="currentColor"/><rect x="8" y="0" width="3" height="3" fill="currentColor"/><rect x="12" y="0" width="3" height="3" fill="currentColor"/><rect x="0" y="4" width="3" height="3" fill="currentColor"/><rect x="4" y="4" width="3" height="3" fill="currentColor"/><rect x="8" y="4" width="3" height="3" fill="currentColor"/><rect x="12" y="4" width="3" height="3" fill="currentColor"/><rect x="0" y="8" width="3" height="3" fill="currentColor"/><rect x="4" y="8" width="3" height="3" fill="currentColor"/><rect x="8" y="8" width="3" height="3" fill="currentColor"/><rect x="12" y="8" width="3" height="3" fill="currentColor"/><rect x="0" y="12" width="3" height="3" fill="currentColor"/><rect x="4" y="12" width="3" height="3" fill="currentColor"/><rect x="8" y="12" width="3" height="3" fill="currentColor"/><rect x="12" y="12" width="3" height="3" fill="currentColor"/></svg>
           </button>
-          <button className={`btn-view ${currentView === "medium" ? "active" : ""}`} data-view-target="medium" onClick={() => setCurrentView("medium")}>
+          <button className={`btn-view ${currentView === "medium" ? "active" : ""}`} data-view-target="medium" aria-label="Medium gallery view" aria-pressed={currentView === "medium"} title="Medium gallery view" onClick={() => setCurrentView("medium")}>
             <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="6" height="6" fill="currentColor"/><rect x="7" y="0" width="6" height="6" fill="currentColor"/><rect x="14" y="0" width="6" height="6" fill="currentColor"/><rect x="0" y="7" width="6" height="6" fill="currentColor"/><rect x="7" y="7" width="6" height="6" fill="currentColor"/><rect x="14" y="7" width="6" height="6" fill="currentColor"/><rect x="0" y="14" width="6" height="6" fill="currentColor"/><rect x="7" y="14" width="6" height="6" fill="currentColor"/><rect x="14" y="14" width="6" height="6" fill="currentColor"/></svg>
           </button>
-          <button className={`btn-view ${currentView === "large" ? "active" : ""}`} data-view-target="large" onClick={() => setCurrentView("large")}>
+          <button className={`btn-view ${currentView === "large" ? "active" : ""}`} data-view-target="large" aria-label="Large gallery view" aria-pressed={currentView === "large"} title="Large gallery view" onClick={() => setCurrentView("large")}>
             <svg width="18" height="18" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="7" height="7" fill="currentColor"/><rect x="8" y="0" width="7" height="7" fill="currentColor"/><rect x="0" y="8" width="7" height="7" fill="currentColor"/><rect x="8" y="8" width="7" height="7" fill="currentColor"/></svg>
           </button>
         </div>
@@ -316,6 +329,10 @@ export default function Gallery() {
             id="btn-filter"
             className={`${isFilterActive ? "has-filter" : ""} ${filterDropdownOpen ? "active" : ""}`} 
             onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
+            title="Filter and sort gallery"
+            aria-label="Filter and sort gallery"
+            aria-expanded={filterDropdownOpen}
+            aria-haspopup="menu"
           >
             <svg width="21" height="12" viewBox="0 0 21 12" fill="none">
               <rect x="0" y="0" width="21" height="2" fill="#c7c7c7" />
@@ -350,11 +367,13 @@ export default function Gallery() {
               <div className="cell-inner cafe-loading"></div>
             </div>
           ))}
-          {visibleCells.map(cell => (
+          {visibleCells.map((cell, index) => (
             <GalleryTile
               key={cell.loadingId || cell.id}
               cell={cell}
               isSelected={selectedIds.has(cell.id)}
+              selectMode={selectMode}
+              position={index + 1}
               isGalleryLoading={isGalleryLoading}
               onCellClick={handleCellClick}
               onRetry={handleRetryCell}
