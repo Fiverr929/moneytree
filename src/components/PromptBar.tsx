@@ -1792,19 +1792,28 @@ export default function PromptBar() {
       </div>
       <div id="agentConsole" className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
         <button
-          className="agent-console-close"
+          className="agent-console-clear"
           type="button"
-          aria-label="Close chat"
-          title="Close chat"
+          aria-label="Clear chat"
+          title="Clear chat"
+          disabled={!agentConsoleOpen}
+          tabIndex={agentConsoleOpen ? 0 : -1}
+          onClick={() => runCanvasLocalCommand("/clear")}
+        >
+          <span aria-hidden="true">&times;</span>
+        </button>
+        <button
+          className="agent-console-retract"
+          type="button"
+          aria-label="Retract chat"
+          title="Retract chat"
           disabled={!agentConsoleOpen}
           tabIndex={agentConsoleOpen ? 0 : -1}
           onClick={() => {
             inputRef.current?.blur();
             setAgentConsoleOpen(false);
           }}
-        >
-          <span aria-hidden="true">&times;</span>
-        </button>
+        ></button>
         <div className="agent-console-scroll" ref={agentConsoleScrollRef}>
           {agentIdle ? (
             <div className="agent-idle">
