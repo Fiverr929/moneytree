@@ -44,6 +44,9 @@ const CANVAS_COMMANDS = [
   { value: "/approve", label: "/approve", description: "Approve the latest proposed app actions" },
   { value: "/reject", label: "/reject", description: "Reject the latest proposed app actions" },
   { value: "/pending", label: "/pending", description: "Show actions waiting for approval" },
+  { value: "/status", label: "/status", description: "Show agent and generation state" },
+  { value: "/retry", label: "/retry", description: "Retry the last failed turn" },
+  { value: "/stop", label: "/stop", description: "Stop agent thinking and clear its queue" },
 ];
 const DEFAULT_FRAME_RATIO = "1:1";
 const DEFAULT_FRAME_VARIATIONS = 1;
@@ -73,7 +76,10 @@ type PersistedAgentWorkspace = {
   reviewEvaluation: AiGenerationEvaluation | null;
   revisionRequested: boolean;
   reviewTargetKeys: string[];
+  queuedInputs?: string[];
 };
+
+type CanvasLocalCommand = "/help" | "/clear" | "/undo" | "/actions" | "/approve" | "/reject" | "/pending" | "/status" | "/retry" | "/stop";
 
 type PersistedAgentRunRecord = {
   id: string;
@@ -193,7 +199,8 @@ function promptLexicalDiff(previousPrompt: string, nextPrompt: string) {
 function parseCanvasLocalCommand(text: string) {
   const command = text.trim().toLowerCase();
   return command === "/help" || command === "/clear" || command === "/undo" || command === "/actions"
-    || command === "/approve" || command === "/reject" || command === "/pending" ? command : null;
+    || command === "/approve" || command === "/reject" || command === "/pending" || command === "/status"
+    || command === "/retry" || command === "/stop" ? command as CanvasLocalCommand : null;
 }
 
 function normalizeFrameVariations(value: unknown) {
@@ -227,6 +234,7 @@ export default function PromptBar() {
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [agentPending, setAgentPending] = useState(false);
   const [queuedAgentInputs, setQueuedAgentInputs] = useState<string[]>([]);
+  const [lastFailedAgentInput, setLastFailedAgentInput] = useState("");
   const [agentToolPending, setAgentToolPending] = useState(false);
   const [agentError, setAgentError] = useState("");
   const [agentBrain, setAgentBrain] = useState<"model" | "local">("local");
@@ -254,6 +262,8 @@ export default function PromptBar() {
   const agentRunHydratedProjectRef = useRef<number | null>(null);
   const agentToolPendingRef = useRef(false);
   const agentMessagesRef = useRef<AgentMessage[]>([]);
+  const agentAbortRef = useRef<AbortController | null>(null);
+  const agentRequestIdRef = useRef(0);
   const activeProjectIdRef = useRef(activeProjectId);
   const moduleFilesRef = useRef(moduleContext.files);
   const moduleFoldersRef = useRef(moduleContext.folders);
@@ -314,6 +324,18 @@ export default function PromptBar() {
       // Ignore storage access issues in embedded browsers.
     }
     setImagePromptSettingsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    const focusAgentInput = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setAgentConsoleOpen(true);
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", focusAgentInput);
+    return () => window.removeEventListener("keydown", focusAgentInput);
   }, []);
 
   useEffect(() => {
@@ -383,7 +405,12 @@ export default function PromptBar() {
     setDraftProjectId(null);
     setGenerationError("");
     setAgentMessages([]);
+    setAgentPending(false);
     setQueuedAgentInputs([]);
+    setLastFailedAgentInput("");
+    agentAbortRef.current?.abort();
+    agentAbortRef.current = null;
+    agentRequestIdRef.current += 1;
     setAgentToolPending(false);
     agentToolPendingRef.current = false;
     setAgentError("");
@@ -436,6 +463,7 @@ export default function PromptBar() {
           setAgentReviewEvaluation(state.reviewEvaluation || null);
           setAgentRevisionRequested(Boolean(state.revisionRequested));
           setRestoredReviewTargetKeys(Array.isArray(state.reviewTargetKeys) ? state.reviewTargetKeys : []);
+          setQueuedAgentInputs(Array.isArray(state.queuedInputs) ? state.queuedInputs.filter((item) => typeof item === "string" && item.trim()).slice(0, 20) : []);
         }
         agentRunHydratedProjectRef.current = activeProjectId;
       }).catch((error) => {
@@ -462,6 +490,7 @@ export default function PromptBar() {
       reviewEvaluation: agentReviewEvaluation,
       revisionRequested: agentRevisionRequested,
       reviewTargetKeys: agentReviewTargets.map(galleryCellKey),
+      queuedInputs: queuedAgentInputs,
     };
     void DB.agentRuns.saveActive(activeProjectId, {
       id: agentRun.id,
@@ -480,6 +509,7 @@ export default function PromptBar() {
     agentReviewTargets,
     agentRevisionRequested,
     agentRun,
+    queuedAgentInputs,
   ]);
 
   useEffect(() => {
@@ -904,7 +934,7 @@ export default function PromptBar() {
     };
     });
 
-  const inspectGenerationsForMessage = async (text: string, evidence: BriefGenerationEvidence[]) => {
+  const inspectGenerationsForMessage = async (text: string, evidence: BriefGenerationEvidence[], signal?: AbortSignal) => {
     const requestedCount = generationInspectionCount(text);
     if (!requestedCount) return evidence;
     const recentCells = gallery.cells
@@ -928,7 +958,7 @@ export default function PromptBar() {
           dataUrl: cell.imgUrl!,
           prompt: cell.effectivePrompt || cell.prompt || "",
         })),
-      }, settings.geminiApiKey);
+      }, settings.geminiApiKey, signal);
       const inspectedAt = new Date().toISOString();
       inspectionEntries = response.observations.map((observation) => ({
         cacheKey,
@@ -1364,9 +1394,40 @@ export default function PromptBar() {
       : "No agent app actions recorded for this project.", "inspect");
   };
 
-  const runCanvasLocalCommand = (command: "/help" | "/clear" | "/undo" | "/actions" | "/approve" | "/reject" | "/pending") => {
+  const runCanvasLocalCommand = (command: CanvasLocalCommand) => {
     setCommandMenuOpen(false);
     setHistoryIndex(-1);
+    if (command === "/stop") {
+      setPromptText("");
+      setQueuedAgentInputs([]);
+      if (agentAbortRef.current) {
+        agentAbortRef.current.abort();
+      } else {
+        addLocalAgentMessage(activeGenerationCount > 0
+          ? `No agent request is running. ${activeGenerationCount} image generation${activeGenerationCount === 1 ? " is" : "s are"} still active.`
+          : "No agent request is running.", "inspect");
+      }
+      return;
+    }
+    if (command === "/status") {
+      setPromptText("");
+      const pendingActions = agentMessagesRef.current.filter((message) => message.toolProposal?.status === "pending").length;
+      addLocalAgentMessage([
+        `AGENT ${agentPending ? "THINKING" : "READY"} | MODEL ${agentModel || referenceReadModel || "UNAVAILABLE"}`,
+        `RUN ${agentRun?.status?.replaceAll("_", " ").toUpperCase() || "IDLE"} | GENERATIONS ${activeGenerationCount} ACTIVE`,
+        `REFERENCES ${activeModuleCount} | QUEUE ${queuedAgentInputs.length} | APPROVALS ${pendingActions}`,
+      ].join("\n"), "inspect");
+      return;
+    }
+    if (command === "/retry") {
+      setPromptText("");
+      if (!lastFailedAgentInput) {
+        addLocalAgentMessage("No failed agent turn is available to retry.", "inspect");
+        return;
+      }
+      void submitAgentMessage(lastFailedAgentInput);
+      return;
+    }
     if (command === "/undo") {
       setPromptText("");
       void undoLastAppAction().catch((error) => setAgentError(error instanceof Error ? error.message : "Undo failed."));
@@ -1398,7 +1459,12 @@ export default function PromptBar() {
         void DB.agentRuns.clearActive(activeProjectId).catch((error) => console.error("Failed to end agent run", error));
       }
       setAgentMessages([]);
+      setAgentPending(false);
       setQueuedAgentInputs([]);
+      setLastFailedAgentInput("");
+      agentAbortRef.current?.abort();
+      agentAbortRef.current = null;
+      agentRequestIdRef.current += 1;
       setAgentToolPending(false);
       agentToolPendingRef.current = false;
       setAgentDraft(null);
@@ -1424,6 +1490,9 @@ export default function PromptBar() {
       "/approve executes the latest proposed app actions.",
       "/reject rejects the latest proposed app actions.",
       "/pending shows actions waiting for approval.",
+      "/status shows the live agent, generation, queue, reference, and approval state.",
+      "/retry retries the latest failed agent turn.",
+      "/stop cancels agent thinking and clears queued turns; active image generation continues.",
       "/help shows commands.",
     ].join("\n"), "inspect");
     setPromptText("");
@@ -1458,8 +1527,13 @@ export default function PromptBar() {
     }
     setHistoryIndex(-1);
     setPromptText("");
+    const requestId = ++agentRequestIdRef.current;
+    const controller = new AbortController();
+    agentAbortRef.current?.abort();
+    agentAbortRef.current = controller;
     try {
-      const generations = await inspectGenerationsForMessage(trimmed, currentGenerationEvidence());
+      const generations = await inspectGenerationsForMessage(trimmed, currentGenerationEvidence(), controller.signal);
+      if (controller.signal.aborted || requestId !== agentRequestIdRef.current) return;
       const workspace = await currentWorkspace();
       const response = await requestBriefAgent({
         referenceSnapshot,
@@ -1468,7 +1542,8 @@ export default function PromptBar() {
         run: agentRun,
         generations,
         workspace,
-      }, settings.geminiApiKey);
+      }, settings.geminiApiKey, controller.signal);
+      if (controller.signal.aborted || requestId !== agentRequestIdRef.current) return;
       if (activeProjectIdRef.current !== requestProjectId) {
         throw new Error("Project changed while the agent was working. No app actions were applied.");
       }
@@ -1496,11 +1571,23 @@ export default function PromptBar() {
         },
         ...(proposalMessage ? [proposalMessage] : []),
       ]);
+      setLastFailedAgentInput("");
       if (response.message.promptArtifact) {
-        await handleGenerate(response.message.promptArtifact, response.run, true);
+        void handleGenerate(response.message.promptArtifact, response.run, true);
       }
     } catch (error) {
+      if (requestId !== agentRequestIdRef.current) return;
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+        setAgentMessages((messages) => [...messages, {
+          id: crypto.randomUUID(),
+          role: "system",
+          text: "AGENT STOPPED - The current request was cancelled. Active image generation was not interrupted.",
+          createdAt: new Date().toISOString(),
+        }]);
+        return;
+      }
       const message = error instanceof Error ? error.message : "Brief agent failed.";
+      setLastFailedAgentInput(trimmed);
       setAgentError(message);
       setAgentMessages([
         ...nextUserMessages,
@@ -1512,7 +1599,10 @@ export default function PromptBar() {
         },
       ]);
     } finally {
-      setAgentPending(false);
+      if (requestId === agentRequestIdRef.current) {
+        agentAbortRef.current = null;
+        setAgentPending(false);
+      }
     }
   };
 
@@ -1559,6 +1649,10 @@ export default function PromptBar() {
         void submitAgentMessage();
       }
     } else if (e.key === "Escape") {
+      if (agentPending && agentAbortRef.current) {
+        agentAbortRef.current.abort();
+        return;
+      }
       setPromptText("");
       setCommandMenuOpen(false);
       setHistoryIndex(-1);

@@ -49,6 +49,11 @@ The reference library accepts multi-image uploads directly into MOOD, LOOKBOOK, 
 - `/undo` — undo the latest eligible completed agent action.
 - `/clear` — end the current agent run and clear the console.
 - `/help` — list commands.
+- `/status` — show live model, run, generation, reference, queue, and approval state.
+- `/retry` — retry the latest failed agent turn.
+- `/stop` — cancel agent thinking and clear queued turns without interrupting active image generation.
+
+`Ctrl/Cmd+K` focuses the agent input. `Escape` stops an active agent request before reverting to its normal input-clear behavior. Image generation runs independently, so the user can continue talking to the agent while frames render.
 
 Approval commands apply only to app-changing proposals: `/pending` shows waiting proposals, `/approve` executes the latest proposal, and `/reject` declines it. Image generation does not wait for approval.
 

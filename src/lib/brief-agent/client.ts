@@ -29,11 +29,13 @@ function localGeminiHeaders(apiKey?: string | null): Record<string, string> {
 export async function requestGenerationInspection(
   input: GenerationInspectionRequest,
   apiKey?: string | null,
+  signal?: AbortSignal,
 ): Promise<GenerationInspectionResponse> {
   const response = await fetch("/api/brief-agent/inspect-generations", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...localGeminiHeaders(apiKey) },
     body: JSON.stringify(input),
+    signal,
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
@@ -56,7 +58,11 @@ function apiErrorMessage(data: unknown, fallback: string) {
   return fallback;
 }
 
-export async function requestBriefAgent(input: BriefAgentRequest, apiKey?: string | null): Promise<BriefAgentResponse> {
+export async function requestBriefAgent(
+  input: BriefAgentRequest,
+  apiKey?: string | null,
+  signal?: AbortSignal,
+): Promise<BriefAgentResponse> {
   const response = await fetch("/api/brief-agent", {
     method: "POST",
     headers: {
@@ -64,6 +70,7 @@ export async function requestBriefAgent(input: BriefAgentRequest, apiKey?: strin
       ...localGeminiHeaders(apiKey),
     },
     body: JSON.stringify(input),
+    signal,
   });
 
   const data = await response.json().catch(() => null);
