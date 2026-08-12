@@ -5,6 +5,7 @@ import type {
   BriefReferenceSnapshot,
   ReferenceObservation,
 } from "./types";
+import { getGenerationModuleImages } from "@/lib/pipeline/module-order";
 
 function roleOf(file: ModuleFile): BriefReferenceRole {
   const role = String(file.mode || "").toUpperCase();
@@ -13,7 +14,7 @@ function roleOf(file: ModuleFile): BriefReferenceRole {
 }
 
 function visibleModuleFiles(files: ModuleFile[]) {
-  return files.filter((file) => file.eye !== false && file.url && !file.folder);
+  return getGenerationModuleImages(files);
 }
 
 export function fingerprintModuleFiles(files: ModuleFile[]) {

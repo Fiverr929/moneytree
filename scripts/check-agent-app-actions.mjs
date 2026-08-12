@@ -10,6 +10,10 @@ import {
   recoverInterruptedActionProposal,
   resolveAgentActionProposal,
 } from "../src/lib/brief-agent/actionApproval.ts";
+import {
+  getGenerationModuleImages,
+  MAX_ACTIVE_GENERATION_REFERENCES,
+} from "../src/lib/pipeline/module-order.ts";
 
 const workspace = {
   project: { id: 1, name: "Original" },
@@ -106,6 +110,22 @@ const duplicateUndone = applyAgentAppAction({
   runId: "run-1",
 });
 assert.equal(duplicateUndone.files.length, 1, "undo must remove only the created duplicate");
+
+const activeCandidates = Array.from({ length: 8 }, (_, index) => ({
+  ...file,
+  id: index + 10,
+  uuid: `active-${index}`,
+  modified: String(100 - index),
+  mode: "SUBJECT",
+}));
+const activeReferences = getGenerationModuleImages([
+  ...activeCandidates,
+  { ...file, id: 99, uuid: "library", folder: "MOOD", mode: "STYLE" },
+  { ...file, id: 100, uuid: "hidden", eye: false, mode: "SCENE" },
+]);
+assert.equal(activeReferences.length, MAX_ACTIVE_GENERATION_REFERENCES);
+assert.equal(activeReferences.some((item) => item.uuid === "library"), false, "folder references stay in the library");
+assert.equal(activeReferences.some((item) => item.uuid === "hidden"), false, "hidden references are inactive");
 
 const proposal = createAgentActionProposal(parsed, "run-1", 1);
 assert.equal(proposal.status, "pending");

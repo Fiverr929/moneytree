@@ -7,7 +7,7 @@ import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
 import { deriveEditedName, loadImageMetadata } from "@/lib/imageMeta";
 import { moduleFileForStorage } from "@/lib/moduleFiles";
-import { sortModuleFilesByLayerOrder } from "@/lib/pipeline/module-order";
+import { getGenerationModuleImages, MAX_ACTIVE_GENERATION_REFERENCES, sortModuleFilesByLayerOrder } from "@/lib/pipeline/module-order";
 import { describeReferenceStrength, normalizeStrength, type ReferenceRole } from "@/lib/pipeline/strength";
 import ModuleReferenceCard from "./ModuleReferenceCard";
 import { MODULE_FOLDER_PRESETS } from "@/lib/moduleFolderPresets";
@@ -126,6 +126,7 @@ export default function ModulePanel() {
     () => ACCENTS[Math.floor(Math.random() * ACCENTS.length)],
   );
   const [folderPresetOpen, setFolderPresetOpen] = useState(false);
+  const [uploadTargetFolderId, setUploadTargetFolderId] = useState<string | null>(null);
 
   // Sync collapsed state to body for gallery expansion
   useEffect(() => {
@@ -337,6 +338,7 @@ export default function ModulePanel() {
     setPendingUploadQueue(nextQueue);
     setPendingUpload(next);
     setShowUpload(!!next);
+    if (!next) setUploadTargetFolderId(null);
     setUploadRole(MODES[0]);
     setUploadRoleOpen(false);
   };
@@ -348,7 +350,7 @@ export default function ModulePanel() {
     ) as HTMLInputElement;
     const label = (labelInput?.value || "UNLABELED").trim();
     const displayName = label.toUpperCase() || "UNLABELED";
-    const role = moduleRole(uploadRole || MODES[0]);
+    const role = uploadTargetFolderId ? "REFERENCE" : moduleRole(uploadRole || MODES[0]);
 
     const uuid = crypto.randomUUID();
     const id = parseInt(uuid.replace(/-/g, "").slice(0, 12), 16);
@@ -356,7 +358,7 @@ export default function ModulePanel() {
     const newFile: ModuleFile = {
       id,
       uuid,
-      folder: null,
+      folder: uploadTargetFolderId,
       kind: "IMG",
       label: displayName,
       name: displayName,
@@ -378,7 +380,9 @@ export default function ModulePanel() {
     setFiles((prev) => [newFile, ...prev]);
     if (collapseAfter) {
       setPendingUpload(null);
+      setPendingUploadQueue([]);
       setShowUpload(false);
+      setUploadTargetFolderId(null);
       setUploadRole(MODES[0]);
       setUploadRoleOpen(false);
       setCollapsed(true);
@@ -397,9 +401,9 @@ export default function ModulePanel() {
           <img src={pendingUpload.url} alt="" />
         </div>
         <label>
-          NAME THIS BRIEF IMAGE {remaining ? `(${remaining + 1} SELECTED)` : ""}
+          {uploadTargetFolderId ? `ADD TO ${uploadTargetFolderId}` : "NAME THIS BRIEF IMAGE"} {remaining ? `(${remaining + 1} SELECTED)` : ""}
         </label>
-        <div className="cmp-upload-meta">
+        <div className={`cmp-upload-meta ${uploadTargetFolderId ? "library-target" : ""}`}>
           <input
             id="cmp-upload-label"
             defaultValue={pendingUpload.file.name
@@ -413,7 +417,7 @@ export default function ModulePanel() {
             }}
             autoFocus
           />
-          <div className="cmp-upload-role-picker">
+          {!uploadTargetFolderId && <div className="cmp-upload-role-picker">
             <button
               type="button"
               className={`cmp-upload-role-trigger mode-${uploadRole} ${uploadRoleOpen ? "open" : ""}`}
@@ -421,9 +425,9 @@ export default function ModulePanel() {
             >
               {uploadRole}
             </button>
-          </div>
+          </div>}
         </div>
-        {uploadRoleOpen && (
+        {uploadRoleOpen && !uploadTargetFolderId && (
           <div className="cmp-upload-role-list">
             {MODES.map((mode) => (
               <button
@@ -719,6 +723,18 @@ export default function ModulePanel() {
               {f.folder === folder.id && <b>NOW</b>}
             </button>
           ))}
+          <button
+            className={f.folder === null ? "current" : ""}
+            onClick={(e) => {
+              e.stopPropagation();
+              updateFile(f.id, { folder: null });
+              setMoveFileId(null);
+            }}
+          >
+            <i style={{ background: "#c7c7c7" }}></i>
+            <span>ROOT</span>
+            {f.folder === null && <b>NOW</b>}
+          </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1168,6 +1184,20 @@ export default function ModulePanel() {
                 className="primary"
                 onClick={(e) => {
                   e.stopPropagation();
+                  setUploadTargetFolderId(folder.id);
+                  setPendingReplaceFileId(null);
+                  setView("root");
+                  setActiveFileId(null);
+                  setFolderMenuId(null);
+                  fileInputRef.current?.click();
+                }}
+              >
+                ADD IMAGES
+              </button>
+              <button
+                className="primary"
+                onClick={(e) => {
+                  e.stopPropagation();
                   setEditingFolder(folder.id);
                   setFolderMenuId(null);
                 }}
@@ -1207,7 +1237,11 @@ export default function ModulePanel() {
     const rootFiles = sortModuleFilesByLayerOrder(
       files.filter((f) => f.folder === null),
     );
-    const roleFiles = files.filter((f) => moduleRole(f.mode) !== "UNASSIGNED");
+    const activeGenerationFiles = getGenerationModuleImages(files);
+    const eligibleGenerationCount = rootFiles.filter((file) => (
+      file.url && file.eye !== false && ["SUBJECT", "SCENE", "STYLE"].includes(moduleRole(file.mode))
+    )).length;
+    const queuedGenerationCount = Math.max(0, eligibleGenerationCount - activeGenerationFiles.length);
     const assigned = files.filter((f) => f.folder !== null);
     const results = q
       ? assigned.filter((f) => {
@@ -1337,6 +1371,7 @@ export default function ModulePanel() {
             <button
               className="cmp-icon-btn"
               onClick={() => {
+                setUploadTargetFolderId(null);
                 setPendingReplaceFileId(null);
                 fileInputRef.current?.click();
               }}
@@ -1365,9 +1400,9 @@ export default function ModulePanel() {
 
         <div className="cmp-status cmp-root-status">
           <span>
-            {roleFiles.length} MODULE IMAGES &middot; {assigned.length} MOOD FILES
+            ACTIVE {activeGenerationFiles.length}/{MAX_ACTIVE_GENERATION_REFERENCES} &middot; LIBRARY {assigned.length}
           </span>
-          <span>{rootFiles.length} UNASSIGNED</span>
+          <span>{rootFiles.length} ROOT{queuedGenerationCount ? ` · ${queuedGenerationCount} QUEUED` : ""}</span>
         </div>
       </div>
     );

@@ -26,6 +26,8 @@ The default planner uses Gemini 3.6 Flash at medium thinking. Reference reading 
 
 Generation, editing, deletion of user-owned content, replacement, upload, and publishing are intentionally excluded. Paid generation continues through the existing prompt approval flow.
 
+The reference library accepts multi-image uploads directly into MOOD, LOOKBOOK, and WORLD. Folder images remain inactive until moved to root and assigned SUBJECT, SCENE, or STYLE. Generation and agent vision share the same ordered maximum of six active root references.
+
 ## Safety invariants
 
 - At most eight app actions are accepted from one model response.

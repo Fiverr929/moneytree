@@ -3861,6 +3861,9 @@
       letter-spacing: 0.08em;
       opacity: 0.8;
     }
+    .cmp-upload-meta.library-target {
+      grid-template-columns: minmax(0, 1fr);
+    }
 
 
     .hud-spacer {

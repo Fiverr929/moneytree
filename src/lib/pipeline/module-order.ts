@@ -7,6 +7,7 @@ type OrderedModuleFile = {
 };
 
 const GENERATION_ROLES = new Set(["SUBJECT", "SCENE", "STYLE"]);
+export const MAX_ACTIVE_GENERATION_REFERENCES = 6;
 
 function modifiedValue(file: OrderedModuleFile) {
   return String(file.modified || "");
@@ -26,5 +27,5 @@ export function getGenerationModuleImages<T extends OrderedModuleFile>(files?: T
   return sortModuleFilesByLayerOrder(files || []).filter((file) => {
     if (!file?.url || file.eye === false || file.folder) return false;
     return GENERATION_ROLES.has(String(file.mode || "").toUpperCase());
-  });
+  }).slice(0, MAX_ACTIVE_GENERATION_REFERENCES);
 }
