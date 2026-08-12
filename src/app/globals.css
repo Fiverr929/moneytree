@@ -7191,41 +7191,10 @@ body.module-collapsed .module-panel {
   color: var(--terminal-green);
 }
 
-#promptBar .agent-artifact-head button,
-#promptBar .agent-tool-controls button,
-#promptBar .agent-direction-options button,
-#promptBar .agent-turn.system > button {
-  min-height: 26px;
-  border: 1px solid var(--terminal-blue);
-  background: transparent;
-  color: var(--terminal-text);
-  font-family: "Courier New", monospace;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-#promptBar .agent-artifact-head button:hover,
-#promptBar .agent-tool-controls button:hover:not(:disabled),
-#promptBar .agent-direction-options button:hover:not(:disabled) {
-  background: var(--terminal-blue);
-  color: var(--terminal-text);
-}
-
 #promptBar .agent-tool-proposal {
   padding: 11px 12px;
   border-color: rgba(255, 99, 50, 0.58);
   background: rgba(255, 99, 50, 0.06);
-}
-
-#promptBar .agent-tool-controls button:first-child {
-  border-color: var(--terminal-green);
-  color: var(--terminal-green);
-}
-
-#promptBar .agent-tool-controls button:first-child:hover:not(:disabled) {
-  background: var(--terminal-green);
-  color: var(--terminal-text);
 }
 
 #promptBar .agent-auto-run-status {
@@ -7271,7 +7240,8 @@ body.agent-console-open {
 
 @media (max-width: 720px) {
   #promptBar .btn-frame {
-    width: 50px;
+    width: 44px;
+    height: 44px;
   }
 
   #promptBar .prompt-text-field {
@@ -9720,6 +9690,12 @@ body.agent-console-open {
     color: #c7c7c7;
     font-size: 15px;
     letter-spacing: 0.06em;
+  }
+
+  #promptBar .btn-frame {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
   }
 
   #promptBar .btn-frame:active {
