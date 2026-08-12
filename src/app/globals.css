@@ -6914,14 +6914,14 @@ body.module-collapsed .module-panel {
 
 /* Agent terminal: durable input, high-contrast transcript, and explicit run state. */
 #promptBar {
-  --terminal-bg: #121312;
-  --terminal-panel: #181a18;
-  --terminal-line: rgba(229, 232, 222, 0.16);
-  --terminal-text: #ebece5;
-  --terminal-muted: #9a9e94;
-  --terminal-green: #b6f36b;
-  --terminal-blue: #7187ff;
-  --terminal-orange: #ff6332;
+  --terminal-bg: #999997;
+  --terminal-panel: #999997;
+  --terminal-line: rgba(199, 199, 199, 0.42);
+  --terminal-text: #c7c7c7;
+  --terminal-muted: rgba(199, 199, 199, 0.72);
+  --terminal-green: #5271ff;
+  --terminal-blue: #5271ff;
+  --terminal-orange: #ea5823;
   filter: drop-shadow(0 10px 24px rgba(18, 19, 18, 0.18));
 }
 
@@ -6948,7 +6948,7 @@ body.module-collapsed .module-panel {
 
 #promptBar .btn-upload-ref::before,
 #promptBar .btn-upload-ref::after {
-  background: #101110;
+  background: #c7c7c7;
 }
 
 #promptBar .btn-settings {
@@ -6981,7 +6981,7 @@ body.module-collapsed .module-panel {
 }
 
 #promptBar .prompt-text-field::placeholder {
-  color: #6f746c;
+  color: #c7c7c7;
   opacity: 1;
 }
 
@@ -6994,7 +6994,7 @@ body.module-collapsed .module-panel {
   border: 0;
   border-left: 1px solid var(--terminal-line);
   background: var(--terminal-orange);
-  color: #131413;
+  color: #c7c7c7;
   font-family: "Courier New", monospace;
   font-size: 12px;
   font-weight: 700;
@@ -7002,7 +7002,7 @@ body.module-collapsed .module-panel {
 }
 
 #promptBar .btn-frame:hover:not(:disabled) {
-  background: #ff7b53;
+  filter: brightness(0.92);
 }
 
 #promptBar .agent-console {
@@ -7028,7 +7028,7 @@ body.module-collapsed .module-panel {
   height: 34px;
   padding: 0 42px 0 14px;
   border-bottom: 1px solid var(--terminal-line);
-  background: #0d0e0d;
+  background: #8f8f8b;
   color: var(--terminal-muted);
   font-family: "Courier New", monospace;
   font-size: 9px;
@@ -7052,7 +7052,7 @@ body.module-collapsed .module-panel {
   height: 7px;
   border-radius: 50%;
   background: var(--terminal-green);
-  box-shadow: 0 0 0 3px rgba(182, 243, 107, 0.1);
+  box-shadow: 0 0 0 3px rgba(82, 113, 255, 0.12);
 }
 
 #promptBar .agent-status-dot.busy {
@@ -7103,7 +7103,7 @@ body.module-collapsed .module-panel {
 
 #promptBar .agent-turn.user {
   border-left-color: var(--terminal-blue);
-  color: #cdd4ff;
+  color: var(--terminal-text);
 }
 
 #promptBar .agent-turn.agent {
@@ -7164,7 +7164,7 @@ body.module-collapsed .module-panel {
   min-height: 26px;
   border: 1px solid var(--terminal-blue);
   background: transparent;
-  color: #cdd4ff;
+  color: var(--terminal-text);
   font-family: "Courier New", monospace;
   font-size: 10px;
   font-weight: 700;
@@ -7175,7 +7175,7 @@ body.module-collapsed .module-panel {
 #promptBar .agent-tool-controls button:hover:not(:disabled),
 #promptBar .agent-direction-options button:hover:not(:disabled) {
   background: var(--terminal-blue);
-  color: #111211;
+  color: var(--terminal-text);
 }
 
 #promptBar .agent-tool-proposal {
@@ -7191,7 +7191,7 @@ body.module-collapsed .module-panel {
 
 #promptBar .agent-tool-controls button:first-child:hover:not(:disabled) {
   background: var(--terminal-green);
-  color: #111211;
+  color: var(--terminal-text);
 }
 
 #promptBar .agent-auto-run-status {
@@ -7216,7 +7216,7 @@ body.module-collapsed .module-panel {
 
 #promptBar .canvas-command-head {
   background: var(--terminal-orange);
-  color: #111211;
+  color: var(--terminal-text);
 }
 
 #promptBar .canvas-command-option {
@@ -7228,7 +7228,7 @@ body.module-collapsed .module-panel {
 #promptBar .canvas-command-option.active,
 #promptBar .canvas-command-option:hover {
   background: var(--terminal-blue);
-  color: #111211;
+  color: var(--terminal-text);
 }
 
 body.agent-console-open {
