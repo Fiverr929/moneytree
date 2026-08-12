@@ -44,13 +44,13 @@ The reference library accepts multi-image uploads directly into MOOD, LOOKBOOK, 
 
 ## CLI commands
 
-- `/generate <prompt>` — enter the existing paid generation approval flow.
+- `/generate <prompt>` — generate an image immediately. Natural-language image briefs in chat also auto-generate after the agent composes the final prompt.
 - `/actions` — show the latest app-runtime events for the active project.
 - `/undo` — undo the latest eligible completed agent action.
 - `/clear` — end the current agent run and clear the console.
 - `/help` — list commands.
 
-Approval commands: `/pending` shows waiting proposals, `/approve` executes the latest proposal, and `/reject` declines it.
+Approval commands apply only to app-changing proposals: `/pending` shows waiting proposals, `/approve` executes the latest proposal, and `/reject` declines it. Image generation does not wait for approval.
 
 ## Next runtime milestones
 
