@@ -10,6 +10,7 @@ import { moduleFileForStorage } from "@/lib/moduleFiles";
 import { sortModuleFilesByLayerOrder } from "@/lib/pipeline/module-order";
 import { describeReferenceStrength, normalizeStrength, type ReferenceRole } from "@/lib/pipeline/strength";
 import ModuleReferenceCard from "./ModuleReferenceCard";
+import { MODULE_FOLDER_PRESETS } from "@/lib/moduleFolderPresets";
 
 const ACCENTS = [
   "#ea3a8a",
@@ -20,11 +21,7 @@ const ACCENTS = [
   "#3a8a7a",
 ];
 const MODES = ["SUBJECT", "SCENE", "STYLE"];
-const MODULE_PRESETS = [
-  { id: "MOOD", name: "MOOD", accent: "#a352ff" },
-  { id: "LOOKBOOK", name: "LOOKBOOK", accent: "#ea3a8a" },
-  { id: "WORLD", name: "WORLD", accent: "#3a8a7a" },
-];
+const MODULE_PRESETS = MODULE_FOLDER_PRESETS;
 
 const moduleRole = (mode: string) => {
   const role = String(mode || "").trim().toUpperCase();
@@ -991,13 +988,13 @@ export default function ModulePanel() {
           ),
         );
         if (preset.id !== folder.id) {
-          setFiles(
-            files.map((f) =>
-              f.folder === folder.id
-                ? { ...f, folder: preset.id }
-                : f,
-            ),
+          const nextFiles = files.map((f) =>
+            f.folder === folder.id
+              ? { ...f, folder: preset.id }
+              : f,
           );
+          setFiles(nextFiles);
+          nextFiles.filter((f) => f.folder === preset.id).forEach(persistReference);
           setOpenFolders((prev) => {
             const next = new Set(prev);
             next.delete(folder.id);
@@ -1182,11 +1179,12 @@ export default function ModulePanel() {
                 onClick={(e) => {
                   e.stopPropagation();
                   setFolders(folders.filter((f) => f.id !== folder.id));
-                  setFiles(
-                    files.map((f) =>
-                      f.folder === folder.id ? { ...f, folder: null } : f,
-                    ),
+                  const nextFiles = files.map((f) =>
+                    f.folder === folder.id ? { ...f, folder: null } : f,
                   );
+                  setFiles(nextFiles);
+                  nextFiles.filter((f) => f.folder === null && files.some((current) => current.id === f.id && current.folder === folder.id))
+                    .forEach(persistReference);
                   setFolderMenuId(null);
                 }}
               >

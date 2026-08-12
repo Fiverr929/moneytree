@@ -1,10 +1,20 @@
-import type { ModuleFile } from "../../context/ModuleContext.tsx";
+import type { ModuleFile, ModuleFolder } from "../../context/ModuleContext.tsx";
 import type {
   AgentAppAction,
   AgentAppEvent,
   BriefReferenceRole,
   CafeWorkspaceSnapshot,
 } from "./types";
+
+const AGENT_FOLDER_PRESETS = [
+  { id: "MOOD", name: "MOOD", accent: "#a352ff" },
+  { id: "LOOKBOOK", name: "LOOKBOOK", accent: "#ea3a8a" },
+  { id: "WORLD", name: "WORLD", accent: "#3a8a7a" },
+] as const;
+
+function getAgentFolderPreset(id: string) {
+  return AGENT_FOLDER_PRESETS.find((preset) => preset.id === id);
+}
 
 const ROLE_VALUES = new Set<BriefReferenceRole>(["SUBJECT", "SCENE", "STYLE", "UNASSIGNED"]);
 const MAX_ACTIONS_PER_TURN = 8;
@@ -37,7 +47,16 @@ export function parseAgentAppActions(value: unknown, workspace?: CafeWorkspaceSn
       const name = cleanName(action.name);
       return name ? [{ id, type, name }] : [];
     }
+    if (type === "folder.create") {
+      const folder = cleanName(action.folder).toUpperCase();
+      const available = Boolean(getAgentFolderPreset(folder));
+      const exists = Boolean(workspace?.folders.some((item) => item.id === folder));
+      return available && !exists ? [{ id, type, folder }] : [];
+    }
     if (!imageId || !targetExists(workspace, imageId)) return [];
+    if (type === "reference.duplicate") {
+      return [{ id, type, imageId }];
+    }
     if (type === "reference.rename") {
       const name = cleanName(action.name);
       return name ? [{ id, type, imageId, name }] : [];
@@ -70,6 +89,10 @@ export function describeAgentAppAction(action: AgentAppAction) {
     case "reference.set_strength": return `set ${action.imageId} strength to ${action.strength}`;
     case "reference.set_visibility": return `${action.visible ? "showed" : "hid"} ${action.imageId}`;
     case "reference.move": return `moved ${action.imageId} ${action.folder ? `to ${action.folder}` : "to the root"}`;
+    case "reference.duplicate": return `duplicated ${action.imageId}`;
+    case "reference.remove_copy": return `removed duplicate ${action.imageId}`;
+    case "folder.create": return `created ${action.folder} folder`;
+    case "folder.remove": return `removed ${action.folder} folder`;
   }
 }
 
@@ -77,18 +100,55 @@ type ApplyActionInput = {
   action: AgentAppAction;
   projectName: string;
   files: ModuleFile[];
+  folders?: ModuleFolder[];
   runId: string;
 };
 
-export function applyAgentAppAction({ action, projectName, files, runId }: ApplyActionInput) {
+export function applyAgentAppAction({ action, projectName, files, folders = [], runId }: ApplyActionInput) {
   const createdAt = new Date().toISOString();
   let nextProjectName = projectName;
   let nextFiles = files;
+  let nextFolders = folders;
   let inverse: AgentAppAction | null = null;
 
   if (action.type === "project.rename") {
     inverse = { id: crypto.randomUUID(), type: "project.rename", name: projectName };
     nextProjectName = action.name;
+  } else if (action.type === "folder.create") {
+    const preset = getAgentFolderPreset(action.folder);
+    if (!preset) throw new Error(`Folder ${action.folder} is not available.`);
+    if (folders.some((folder) => folder.id === preset.id)) throw new Error(`Folder ${preset.id} already exists.`);
+    nextFolders = [...folders, { ...preset }];
+    inverse = { id: crypto.randomUUID(), type: "folder.remove", folder: preset.id };
+  } else if (action.type === "folder.remove") {
+    const folder = folders.find((candidate) => candidate.id === action.folder);
+    if (!folder) throw new Error(`Folder ${action.folder} is no longer available.`);
+    if (files.some((file) => file.folder === action.folder)) {
+      throw new Error(`Folder ${action.folder} is not empty and cannot be removed by undo.`);
+    }
+    nextFolders = folders.filter((candidate) => candidate.id !== action.folder);
+    inverse = { id: crypto.randomUUID(), type: "folder.create", folder: action.folder };
+  } else if (action.type === "reference.duplicate") {
+    const index = files.findIndex((file) => file.uuid === action.imageId);
+    if (index < 0) throw new Error(`Reference ${action.imageId} is no longer available.`);
+    const current = files[index];
+    const copy: ModuleFile = {
+      ...current,
+      id: Date.now() + Math.floor(Math.random() * 1_000),
+      uuid: crypto.randomUUID(),
+      label: `${current.label || current.name || "REFERENCE"} COPY`,
+      name: `${current.name || current.label || "REFERENCE"} COPY`,
+      modified: new Date().toISOString(),
+    };
+    nextFiles = [...files];
+    nextFiles.splice(index + 1, 0, copy);
+    inverse = { id: crypto.randomUUID(), type: "reference.remove_copy", imageId: copy.uuid };
+  } else if (action.type === "reference.remove_copy") {
+    const index = files.findIndex((file) => file.uuid === action.imageId);
+    if (index < 0) throw new Error(`Duplicate ${action.imageId} is no longer available.`);
+    const current = files[index];
+    nextFiles = files.filter((_, fileIndex) => fileIndex !== index);
+    inverse = { id: crypto.randomUUID(), type: "reference.duplicate", imageId: current.uuid };
   } else {
     const index = files.findIndex((file) => file.uuid === action.imageId);
     if (index < 0) throw new Error(`Reference ${action.imageId} is no longer available.`);
@@ -129,5 +189,5 @@ export function applyAgentAppAction({ action, projectName, files, runId }: Apply
     summary: describeAgentAppAction(action),
     createdAt,
   };
-  return { projectName: nextProjectName, files: nextFiles, event };
+  return { projectName: nextProjectName, files: nextFiles, folders: nextFolders, event };
 }

@@ -254,6 +254,7 @@ export default function PromptBar() {
   const agentToolPendingRef = useRef(false);
   const activeProjectIdRef = useRef(activeProjectId);
   const moduleFilesRef = useRef(moduleContext.files);
+  const moduleFoldersRef = useRef(moduleContext.folders);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
@@ -262,6 +263,10 @@ export default function PromptBar() {
   useEffect(() => {
     moduleFilesRef.current = moduleContext.files;
   }, [moduleContext.files]);
+
+  useEffect(() => {
+    moduleFoldersRef.current = moduleContext.folders;
+  }, [moduleContext.folders]);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -1125,18 +1130,36 @@ export default function PromptBar() {
   };
 
   const persistAppActionResult = async (
+    projectId: number,
     action: AgentAppAction,
     projectName: string,
     files: typeof moduleContext.files,
+    folders: typeof moduleContext.folders,
     event: AgentAppEvent,
+    previousFiles: typeof moduleContext.files,
   ) => {
-    if (!activeProjectId) throw new Error("No active project.");
     if (action.type === "project.rename") {
-      await DB.agentEvents.recordProjectMutation(activeProjectId, { name: projectName }, event);
+      await DB.agentEvents.recordProjectMutation(projectId, { name: projectName }, event);
+    } else if (action.type === "folder.create" || action.type === "folder.remove") {
+      await DB.agentEvents.recordModuleMutation(projectId, { folders }, event);
+    } else if (action.type === "reference.duplicate") {
+      const copyId = event.inverse?.type === "reference.remove_copy" ? event.inverse.imageId : null;
+      const copy = copyId ? files.find((candidate) => candidate.uuid === copyId) : null;
+      if (!copy) throw new Error("The duplicated reference could not be resolved.");
+      await DB.agentEvents.recordReferenceCreation(
+        projectId,
+        moduleFileForStorage(copy),
+        copy.url,
+        event,
+      );
+    } else if (action.type === "reference.remove_copy") {
+      const removed = previousFiles.find((candidate) => candidate.uuid === action.imageId);
+      if (!removed) throw new Error(`Duplicate ${action.imageId} is no longer available.`);
+      await DB.agentEvents.recordReferenceDeletion(projectId, removed.id, removed.uuid, event);
     } else {
       const file = files.find((candidate) => candidate.uuid === action.imageId);
       if (!file) throw new Error(`Reference ${action.imageId} is no longer available.`);
-      await DB.agentEvents.recordReferenceMutation(activeProjectId, moduleFileForStorage(file), event);
+      await DB.agentEvents.recordReferenceMutation(projectId, moduleFileForStorage(file), event);
     }
   };
 
@@ -1146,6 +1169,7 @@ export default function PromptBar() {
     const project = await DB.projects.get(activeProjectId) as { name?: string } | undefined;
     let projectName = project?.name || "Project";
     let files = moduleFilesRef.current;
+    let folders = moduleFoldersRef.current;
     const events: AgentAppEvent[] = [];
     for (const action of actions) {
       if (activeProjectIdRef.current !== executionProjectId) {
@@ -1166,13 +1190,18 @@ export default function PromptBar() {
       }
       try {
         files = moduleFilesRef.current;
-        const result = applyAgentAppAction({ action, projectName, files, runId });
-        await persistAppActionResult(action, result.projectName, result.files, result.event);
+        folders = moduleFoldersRef.current;
+        const previousFiles = files;
+        const result = applyAgentAppAction({ action, projectName, files, folders, runId });
+        await persistAppActionResult(executionProjectId, action, result.projectName, result.files, result.folders, result.event, previousFiles);
         projectName = result.projectName;
         files = result.files;
+        folders = result.folders;
         if (activeProjectIdRef.current === executionProjectId) {
           moduleFilesRef.current = files;
+          moduleFoldersRef.current = folders;
           moduleContext.setFiles(files);
+          moduleContext.setFolders(folders);
         }
         events.push(result.event);
       } catch (error) {
@@ -1300,6 +1329,7 @@ export default function PromptBar() {
       action: target.inverse,
       projectName: project?.name || "Project",
       files: moduleFilesRef.current,
+      folders: moduleFoldersRef.current,
       runId: target.runId,
     });
     const undoEvent: AgentAppEvent = {
@@ -1308,10 +1338,20 @@ export default function PromptBar() {
       summary: `undid ${target.summary}`,
       undoOf: target.id,
     };
-    await persistAppActionResult(target.inverse, result.projectName, result.files, undoEvent);
+    await persistAppActionResult(
+      activeProjectId,
+      target.inverse,
+      result.projectName,
+      result.files,
+      result.folders,
+      undoEvent,
+      moduleFilesRef.current,
+    );
     await DB.agentEvents.put(activeProjectId, { ...target, status: "undone", undoneAt: undoEvent.createdAt });
     moduleContext.setFiles(result.files);
     moduleFilesRef.current = result.files;
+    moduleContext.setFolders(result.folders);
+    moduleFoldersRef.current = result.folders;
     addLocalAgentMessage(`UNDO OK · ${target.summary}`, "inspect");
   };
 

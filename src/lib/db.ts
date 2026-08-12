@@ -303,6 +303,15 @@ const references = {
   delete: (id: number) => ready.then(() => wrap(tx(S.REFERENCES, 'readwrite').objectStore(S.REFERENCES).delete(id)))
 };
 
+const moduleState = {
+  get: (projectId: number) => ready.then(() =>
+    wrap(tx(S.MODULE_STATE).objectStore(S.MODULE_STATE).get(projectId))
+  ),
+  put: (projectId: number, data: any) => ready.then(() =>
+    wrap(tx(S.MODULE_STATE, 'readwrite').objectStore(S.MODULE_STATE).put({ ...data, project_id: projectId }))
+  ),
+};
+
 const descriptions = {
   get: (uuid: string) => ready.then(() => wrap(tx(S.DESCRIPTIONS).objectStore(S.DESCRIPTIONS).get(uuid))),
   put: (uuid: string, description: string) => ready.then(() => 
@@ -389,9 +398,31 @@ const agentEvents = {
     transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
     await transactionDone(transaction);
   }),
+  recordModuleMutation: (projectId: number, moduleData: any, event: any) => ready.then(async () => {
+    const transaction = tx([S.MODULE_STATE, S.AGENT_EVENTS], 'readwrite');
+    transaction.objectStore(S.MODULE_STATE).put({ ...moduleData, project_id: projectId });
+    transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
+    await transactionDone(transaction);
+  }),
+  recordReferenceCreation: (projectId: number, reference: any, imageDataUrl: string, event: any) => ready.then(async () => {
+    const transaction = tx([S.REFERENCES, S.IMAGES, S.AGENT_EVENTS], 'readwrite');
+    transaction.objectStore(S.REFERENCES).put({ ...reference, project_id: projectId });
+    if (reference.uuid && imageDataUrl) {
+      transaction.objectStore(S.IMAGES).put({ uuid: reference.uuid, dataUrl: imageDataUrl, project_id: projectId });
+    }
+    transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
+    await transactionDone(transaction);
+  }),
+  recordReferenceDeletion: (projectId: number, referenceId: number, imageUuid: string, event: any) => ready.then(async () => {
+    const transaction = tx([S.REFERENCES, S.IMAGES, S.AGENT_EVENTS], 'readwrite');
+    transaction.objectStore(S.REFERENCES).delete(referenceId);
+    if (imageUuid) transaction.objectStore(S.IMAGES).delete(imageUuid);
+    transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
+    await transactionDone(transaction);
+  }),
 };
 
-const DB = { ready, projects, images, videos, studioState, gallery, references, descriptions, generationJobs, agentRuns, agentEvents };
+const DB = { ready, projects, images, videos, studioState, gallery, references, moduleState, descriptions, generationJobs, agentRuns, agentEvents };
 export default DB;
 
 

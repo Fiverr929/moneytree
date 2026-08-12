@@ -38,6 +38,15 @@ assert.equal(parsed[0].type, "reference.set_role");
 assert.equal(parsed[1].type, "reference.set_strength");
 assert.equal(parsed[1].strength, 100, "strength must be clamped");
 
+const expanded = parseAgentAppActions([
+  { type: "folder.create", folder: "mood" },
+  { type: "folder.create", folder: "invalid" },
+  { type: "reference.duplicate", imageId: "image-a" },
+], workspace);
+assert.equal(expanded.length, 2, "only approved folder presets and valid duplicate targets are allowed");
+assert.equal(expanded[0].type, "folder.create");
+assert.equal(expanded[1].type, "reference.duplicate");
+
 const file = {
   id: 1,
   uuid: "image-a",
@@ -61,6 +70,42 @@ assert.equal(applied.event.inverse?.type, "reference.set_role");
 
 const undone = applyAgentAppAction({ action: applied.event.inverse, projectName: "Original", files: applied.files, runId: "run-1" });
 assert.equal(undone.files[0].mode, "UNASSIGNED", "inverse action must restore the previous role");
+
+const folderCreated = applyAgentAppAction({
+  action: expanded[0],
+  projectName: "Original",
+  files: [file],
+  folders: [],
+  runId: "run-1",
+});
+assert.equal(folderCreated.folders[0].id, "MOOD");
+const folderUndone = applyAgentAppAction({
+  action: folderCreated.event.inverse,
+  projectName: "Original",
+  files: folderCreated.files,
+  folders: folderCreated.folders,
+  runId: "run-1",
+});
+assert.equal(folderUndone.folders.length, 0, "undo must remove an unused agent-created folder");
+
+const duplicated = applyAgentAppAction({
+  action: expanded[1],
+  projectName: "Original",
+  files: [file],
+  folders: [],
+  runId: "run-1",
+});
+assert.equal(duplicated.files.length, 2);
+assert.notEqual(duplicated.files[1].uuid, file.uuid);
+assert.equal(duplicated.files[1].url, file.url, "duplicate must preserve the source image data");
+const duplicateUndone = applyAgentAppAction({
+  action: duplicated.event.inverse,
+  projectName: "Original",
+  files: duplicated.files,
+  folders: duplicated.folders,
+  runId: "run-1",
+});
+assert.equal(duplicateUndone.files.length, 1, "undo must remove only the created duplicate");
 
 const proposal = createAgentActionProposal(parsed, "run-1", 1);
 assert.equal(proposal.status, "pending");

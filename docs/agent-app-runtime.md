@@ -21,8 +21,10 @@ The default planner uses Gemini 3.6 Flash at medium thinking. Reference reading 
 - `reference.set_strength`
 - `reference.set_visibility`
 - `reference.move`
+- `reference.duplicate`
+- `folder.create`
 
-Generation, editing, deletion, replacement, upload, and publishing are intentionally excluded. Paid generation continues through the existing prompt approval flow.
+Generation, editing, deletion of user-owned content, replacement, upload, and publishing are intentionally excluded. Paid generation continues through the existing prompt approval flow.
 
 ## Safety invariants
 

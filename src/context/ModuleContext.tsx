@@ -5,6 +5,7 @@ import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 import { moduleFileForStorage } from "@/lib/moduleFiles";
 import { pruneProjectImages } from "@/lib/projectImageGc";
+import { MODULE_FOLDER_PRESETS } from "@/lib/moduleFolderPresets";
 export type ModuleFile = {
   id: number;
   uuid: string;
@@ -120,6 +121,7 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
   const [showInfo, setShowInfo] = useState(false);
   const responsiveCollapseInitialized = useRef(false);
   const responsiveAutoCollapsed = useRef(false);
+  const foldersHydratedProjectRef = useRef<number | null>(null);
 
   const { activeProjectId } = useApp();
 
@@ -148,8 +150,38 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    foldersHydratedProjectRef.current = null;
+    setFolders([]);
 
     if (activeProjectId) {
+      void Promise.all([
+        DB.moduleState.get(activeProjectId),
+        DB.references.getByProject(activeProjectId),
+      ]).then(([value, references]) => {
+        if (cancelled) return;
+        const stored = value as { folders?: unknown } | undefined;
+        const storedFolders = Array.isArray(stored?.folders)
+          ? stored.folders.filter((folder): folder is ModuleFolder => Boolean(
+            folder && typeof folder === "object"
+            && typeof (folder as ModuleFolder).id === "string"
+            && typeof (folder as ModuleFolder).name === "string"
+            && typeof (folder as ModuleFolder).accent === "string"
+          ))
+          : [];
+        const referencedFolderIds = new Set((references as ModuleFile[]).map((file) => file.folder).filter(Boolean));
+        const inferredFolders = MODULE_FOLDER_PRESETS.filter((preset) => referencedFolderIds.has(preset.id));
+        const nextFolders = [
+          ...storedFolders,
+          ...inferredFolders.filter((preset) => !storedFolders.some((folder) => folder.id === preset.id)),
+        ];
+        foldersHydratedProjectRef.current = activeProjectId;
+        setFolders(nextFolders);
+      }).catch((error) => {
+        if (!cancelled) {
+          foldersHydratedProjectRef.current = activeProjectId;
+          console.error("Failed to restore module folders", error);
+        }
+      });
       DB.references.getByProject(activeProjectId).then(async data => {
         const storedFiles = data as ModuleFile[];
         const visibleFiles = storedFiles.map((file) => ({ ...file, url: "" }));
@@ -197,6 +229,13 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!activeProjectId || foldersHydratedProjectRef.current !== activeProjectId) return;
+    void DB.moduleState.put(activeProjectId, { folders }).catch((error) => (
+      console.error("Failed to persist module folders", error)
+    ));
+  }, [activeProjectId, folders]);
 
   const value = useMemo(() => ({
     files, setFiles,

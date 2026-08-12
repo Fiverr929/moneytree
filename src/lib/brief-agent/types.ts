@@ -9,7 +9,11 @@ export type AgentAppAction =
   | { id: string; type: "reference.set_role"; imageId: string; role: BriefReferenceRole }
   | { id: string; type: "reference.set_strength"; imageId: string; strength: number }
   | { id: string; type: "reference.set_visibility"; imageId: string; visible: boolean }
-  | { id: string; type: "reference.move"; imageId: string; folder: string | null };
+  | { id: string; type: "reference.move"; imageId: string; folder: string | null }
+  | { id: string; type: "reference.duplicate"; imageId: string }
+  | { id: string; type: "reference.remove_copy"; imageId: string }
+  | { id: string; type: "folder.create"; folder: string }
+  | { id: string; type: "folder.remove"; folder: string };
 
 export type AgentAppEvent = {
   id: string;
