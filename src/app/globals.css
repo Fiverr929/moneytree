@@ -9246,6 +9246,12 @@ body.module-collapsed .module-panel {
     row-gap: 5px;
   }
 
+  .prompt-inline-error {
+    left: 72px;
+    right: 88px;
+    top: 8px;
+  }
+
   .prompt-input-area {
     display: contents;
   }
