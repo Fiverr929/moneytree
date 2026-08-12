@@ -43,6 +43,14 @@ function validateRequest(request: Request, value: unknown): GenAIRequest {
 }
 
 function describeError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  if (normalized.includes("billing_disabled") || normalized.includes("billing to be enabled") || normalized.includes("billing is disabled")) {
+    return {
+      message: "Google Cloud billing is disabled for the configured Vertex AI project. Enable billing, or on localhost add a Gemini API key in Settings.",
+      status: 403,
+    };
+  }
   if (error instanceof ApiError) {
     return {
       message: error.message,
@@ -52,7 +60,6 @@ function describeError(error: unknown) {
       ),
     };
   }
-  const message = error instanceof Error ? error.message : String(error);
   if (
     message.includes("default credentials")
     || message.includes("Could not load the default credentials")
@@ -74,11 +81,14 @@ export async function POST(request: Request) {
     }
 
     const input = validateRequest(request, await request.json());
+    const localApiKey = process.env.NODE_ENV === "production"
+      ? null
+      : request.headers.get("x-cafehtml-local-gemini-key");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 90_000);
 
     try {
-      const ai = createGoogleGenAI();
+      const ai = createGoogleGenAI({ apiKey: localApiKey });
       const result = await ai.models.generateContent({
         ...input,
         config: {

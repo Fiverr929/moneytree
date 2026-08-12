@@ -2,10 +2,13 @@ import { GoogleGenAI } from "@google/genai";
 
 type GoogleGenAIOptions = {
   enterprise?: boolean;
+  apiKey?: string | null;
 };
 
 export function createGoogleGenAI(options: GoogleGenAIOptions = {}) {
-  const apiKey = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim();
+  const apiKey = options.apiKey?.trim()
+    || process.env.GEMINI_API_KEY?.trim()
+    || process.env.GOOGLE_API_KEY?.trim();
   if (apiKey) {
     return new GoogleGenAI({ apiKey });
   }

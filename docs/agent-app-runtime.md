@@ -1,0 +1,52 @@
+# CafeHTML Agent App Runtime
+
+CafeHTML's agent is a creative workspace operator, not only a prompt writer. The app runtime is the boundary between model suggestions and durable project changes.
+
+The default planner uses Gemini 3.6 Flash at medium thinking. Reference reading remains on Gemini 3.1 Flash-Lite so stronger planning does not make routine vision scans unnecessarily expensive.
+
+## Execution model
+
+1. The browser sends a compact workspace snapshot with exact project, folder, and reference identifiers.
+2. The model may return conversational output plus a bounded list of safe `appActions`.
+3. The server validates action types, values, folders, and targets against that snapshot.
+4. The browser revalidates each target against current state, applies one typed action, and persists the mutation and event atomically.
+5. The console prints `ACTION OK` or `ACTION FAILED` from actual execution. Model text is never treated as proof that an action succeeded.
+
+## Safe action set
+
+- `project.rename`
+- `reference.rename`
+- `reference.set_role`
+- `reference.set_strength`
+- `reference.set_visibility`
+- `reference.move`
+
+Generation, editing, deletion, replacement, upload, and publishing are intentionally excluded. Paid generation continues through the existing prompt approval flow.
+
+## Safety invariants
+
+- At most eight app actions are accepted from one model response.
+- Unknown action types, targets, roles, folders, and malformed values are discarded server-side.
+- Names are normalized and length-limited; strength is clamped to `0..100`.
+- App actions execute only when the active project still matches the project that launched the request.
+- Each durable mutation and its event record share one IndexedDB transaction.
+- Multi-action responses report partial success explicitly instead of pretending the batch was atomic.
+- `/undo` applies the stored inverse of the latest eligible completed agent action.
+- Destructive and paid operations require separate approval-aware tools in a later milestone.
+- Planner, reference-reader, and generation-inspection calls emit structured token telemetry with separate operation names.
+
+## CLI commands
+
+- `/generate <prompt>` — enter the existing paid generation approval flow.
+- `/actions` — show the latest app-runtime events for the active project.
+- `/undo` — undo the latest eligible completed agent action.
+- `/clear` — end the current agent run and clear the console.
+- `/help` — list commands.
+
+## Next runtime milestones
+
+1. Route manual UI mutations through the same typed command layer.
+2. Add approval objects for paid generation, image editing, replacement, and destructive actions.
+3. Add action/observation iterations so the model can inspect results and choose a bounded next step.
+4. Add content-addressed vision memory and structured project preferences.
+5. Add replayable end-to-end evaluations for target resolution, permissions, undo, interruption, and result verification.

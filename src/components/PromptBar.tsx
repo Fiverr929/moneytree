@@ -14,7 +14,9 @@ import {
 } from "@/lib/brief-agent/referenceSnapshot";
 import { ReferenceReadRequestError, requestBriefAgent, requestGenerationInspection, requestReferenceRead } from "@/lib/brief-agent/client";
 import { requestGenerationEvaluation, type AiGenerationEvaluation } from "@/lib/evaluationReview";
-import type { AgentMessage, BriefAgentAction, BriefDraft, BriefGenerationEvidence, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot } from "@/lib/brief-agent/types";
+import type { AgentAppAction, AgentAppEvent, AgentMessage, BriefAgentAction, BriefDraft, BriefGenerationEvidence, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot, CafeWorkspaceSnapshot } from "@/lib/brief-agent/types";
+import { applyAgentAppAction, describeAgentAppAction } from "@/lib/brief-agent/appActions";
+import { moduleFileForStorage } from "@/lib/moduleFiles";
 import {
   observeAgentGeneration,
   observeAgentReview,
@@ -36,6 +38,8 @@ const CANVAS_COMMANDS = [
   { value: GENERATE_COMMAND, label: "/generate", description: "Generate a frame" },
   { value: "/help", label: "/help", description: "Show canvas commands" },
   { value: "/clear", label: "/clear", description: "Clear agent console" },
+  { value: "/undo", label: "/undo", description: "Undo the last agent app action" },
+  { value: "/actions", label: "/actions", description: "Show recent agent app actions" },
 ];
 const DEFAULT_FRAME_RATIO = "1:1";
 const DEFAULT_FRAME_VARIATIONS = 1;
@@ -184,7 +188,7 @@ function promptLexicalDiff(previousPrompt: string, nextPrompt: string) {
 
 function parseCanvasLocalCommand(text: string) {
   const command = text.trim().toLowerCase();
-  return command === "/help" || command === "/clear" ? command : null;
+  return command === "/help" || command === "/clear" || command === "/undo" || command === "/actions" ? command : null;
 }
 
 function normalizeFrameVariations(value: unknown) {
@@ -241,6 +245,16 @@ export default function PromptBar() {
   const referenceReadInFlightRef = useRef(new Set<string>());
   const referenceReadAttemptsRef = useRef(new Map<string, number>());
   const agentRunHydratedProjectRef = useRef<number | null>(null);
+  const activeProjectIdRef = useRef(activeProjectId);
+  const moduleFilesRef = useRef(moduleContext.files);
+
+  useEffect(() => {
+    activeProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    moduleFilesRef.current = moduleContext.files;
+  }, [moduleContext.files]);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -740,7 +754,22 @@ export default function PromptBar() {
         };
       });
 
+    const imageIdsNeedingRead = new Set(
+      moduleContext.files
+        .filter((file) => file.eye !== false && file.url && !file.folder && !file.visualRead?.trim())
+        .map((file) => file.uuid || String(file.id)),
+    );
+    const imagesToRead = images.filter((image) => imageIdsNeedingRead.has(image.imageId));
+
     if (!images.length) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!imagesToRead.length) {
+      referenceReadAttemptsRef.current.delete(referenceFingerprint);
+      setReferenceSnapshot(fallbackSnapshot);
       return () => {
         cancelled = true;
       };
@@ -769,17 +798,23 @@ export default function PromptBar() {
 
       requestReferenceRead({
         sourceFingerprint: referenceFingerprint,
-        images,
-      }).then((response) => {
+        images: imagesToRead,
+      }, settings.geminiApiKey).then((response) => {
         if (cancelled) return;
+        const newObservations = new Map(response.snapshot.observations.map((observation) => [observation.imageId, observation]));
+        const mergedSnapshot: BriefReferenceSnapshot = {
+          ...response.snapshot,
+          sourceFingerprint: referenceFingerprint,
+          observations: fallbackSnapshot.observations.map((observation) => newObservations.get(observation.imageId) || observation),
+        };
         referenceReadAttemptsRef.current.delete(referenceFingerprint);
         setReferenceReadError("");
-        setReferenceSnapshot(response.snapshot);
+        setReferenceSnapshot(mergedSnapshot);
         setReferenceReadModel(response.model);
-        applyReferenceSnapshotToModules(response.snapshot);
+        applyReferenceSnapshotToModules(mergedSnapshot);
         writeReferenceSnapshotCache({
           sourceFingerprint: referenceFingerprint,
-          snapshot: response.snapshot,
+          snapshot: mergedSnapshot,
           model: response.model,
           cachedAt: new Date().toISOString(),
         });
@@ -811,7 +846,7 @@ export default function PromptBar() {
       clearTimeout(debounceTimer);
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [applyReferenceSnapshotToModules, moduleContext.files, referenceFingerprint, referenceReadRetryTick]);
+  }, [applyReferenceSnapshotToModules, moduleContext.files, referenceFingerprint, referenceReadRetryTick, settings.geminiApiKey]);
 
   const currentReferenceContext = (): NonNullable<AgentMessage["context"]> => ({
     refCount: activeModuleCount,
@@ -875,7 +910,7 @@ export default function PromptBar() {
           dataUrl: cell.imgUrl!,
           prompt: cell.effectivePrompt || cell.prompt || "",
         })),
-      });
+      }, settings.geminiApiKey);
       const inspectedAt = new Date().toISOString();
       inspectionEntries = response.observations.map((observation) => ({
         cacheKey,
@@ -1013,7 +1048,8 @@ export default function PromptBar() {
         session: agentDraft?.session || null,
         run: revisionRun,
         generations: currentGenerationEvidence(),
-      });
+        workspace: await currentWorkspace(),
+      }, settings.geminiApiKey);
       setAgentBrain(response.brain);
       setAgentModel(response.model);
       setAgentDraft(response.draft);
@@ -1053,9 +1089,134 @@ export default function PromptBar() {
     setAgentConsoleOpen(true);
   };
 
-  const runCanvasLocalCommand = (command: "/help" | "/clear") => {
+  const currentWorkspace = async (): Promise<CafeWorkspaceSnapshot | null> => {
+    if (!activeProjectId) return null;
+    const project = await DB.projects.get(activeProjectId) as { id?: number; name?: string } | undefined;
+    return {
+      project: { id: activeProjectId, name: project?.name || "Project" },
+      folders: moduleContext.folders.map((folder) => ({ id: folder.id, name: folder.name })),
+      references: moduleFilesRef.current.map((file, index) => {
+        const role = String(file.mode || "UNASSIGNED").toUpperCase();
+        return {
+          position: index + 1,
+          imageId: file.uuid || String(file.id),
+          name: file.name || file.label || "UNLABELED",
+          label: file.label || file.name || "UNLABELED",
+          role: role === "SUBJECT" || role === "SCENE" || role === "STYLE" ? role as BriefReferenceRole : "UNASSIGNED",
+          strength: Number.isFinite(file.strength) ? file.strength : 50,
+          visible: file.eye !== false,
+          folder: file.folder || null,
+        };
+      }),
+    };
+  };
+
+  const persistAppActionResult = async (
+    action: AgentAppAction,
+    projectName: string,
+    files: typeof moduleContext.files,
+    event: AgentAppEvent,
+  ) => {
+    if (!activeProjectId) throw new Error("No active project.");
+    if (action.type === "project.rename") {
+      await DB.agentEvents.recordProjectMutation(activeProjectId, { name: projectName }, event);
+    } else {
+      const file = files.find((candidate) => candidate.uuid === action.imageId);
+      if (!file) throw new Error(`Reference ${action.imageId} is no longer available.`);
+      await DB.agentEvents.recordReferenceMutation(activeProjectId, moduleFileForStorage(file), event);
+    }
+  };
+
+  const executeAppActions = async (actions: AgentAppAction[], runId: string) => {
+    if (!actions.length || !activeProjectId) return [];
+    const executionProjectId = activeProjectId;
+    const project = await DB.projects.get(activeProjectId) as { name?: string } | undefined;
+    let projectName = project?.name || "Project";
+    let files = moduleFilesRef.current;
+    const events: AgentAppEvent[] = [];
+    for (const action of actions) {
+      if (activeProjectIdRef.current !== executionProjectId) break;
+      try {
+        files = moduleFilesRef.current;
+        const result = applyAgentAppAction({ action, projectName, files, runId });
+        await persistAppActionResult(action, result.projectName, result.files, result.event);
+        projectName = result.projectName;
+        files = result.files;
+        if (activeProjectIdRef.current === executionProjectId) {
+          moduleFilesRef.current = files;
+          moduleContext.setFiles(files);
+        }
+        events.push(result.event);
+      } catch (error) {
+        const failedEvent: AgentAppEvent = {
+          id: crypto.randomUUID(),
+          runId,
+          actor: "agent",
+          action,
+          inverse: null,
+          status: "failed",
+          summary: describeAgentAppAction(action),
+          error: error instanceof Error ? error.message : "Action failed.",
+          createdAt: new Date().toISOString(),
+        };
+        await DB.agentEvents.put(activeProjectId, failedEvent).catch(() => undefined);
+        events.push(failedEvent);
+      }
+    }
+    return events;
+  };
+
+  const undoLastAppAction = async () => {
+    if (!activeProjectId) return;
+    const events = await DB.agentEvents.getByProject(activeProjectId) as AgentAppEvent[];
+    const undoneIds = new Set(events.filter((event) => event.undoOf).map((event) => event.undoOf));
+    const target = [...events].reverse().find((event) => event.status === "completed" && event.inverse && !event.undoOf && !undoneIds.has(event.id));
+    if (!target?.inverse) {
+      addLocalAgentMessage("No agent app action is available to undo.", "inspect");
+      return;
+    }
+    const project = await DB.projects.get(activeProjectId) as { name?: string } | undefined;
+    const result = applyAgentAppAction({
+      action: target.inverse,
+      projectName: project?.name || "Project",
+      files: moduleFilesRef.current,
+      runId: target.runId,
+    });
+    const undoEvent: AgentAppEvent = {
+      ...result.event,
+      actor: "user",
+      summary: `undid ${target.summary}`,
+      undoOf: target.id,
+    };
+    await persistAppActionResult(target.inverse, result.projectName, result.files, undoEvent);
+    await DB.agentEvents.put(activeProjectId, { ...target, status: "undone", undoneAt: undoEvent.createdAt });
+    moduleContext.setFiles(result.files);
+    moduleFilesRef.current = result.files;
+    addLocalAgentMessage(`UNDO OK · ${target.summary}`, "inspect");
+  };
+
+  const showRecentAppActions = async () => {
+    if (!activeProjectId) return;
+    const events = await DB.agentEvents.getByProject(activeProjectId) as AgentAppEvent[];
+    const recent = events.slice(-8).reverse();
+    addLocalAgentMessage(recent.length
+      ? recent.map((event) => `${event.status.toUpperCase()} · ${event.summary}`).join("\n")
+      : "No agent app actions recorded for this project.", "inspect");
+  };
+
+  const runCanvasLocalCommand = (command: "/help" | "/clear" | "/undo" | "/actions") => {
     setCommandMenuOpen(false);
     setHistoryIndex(-1);
+    if (command === "/undo") {
+      setPromptText("");
+      void undoLastAppAction().catch((error) => setAgentError(error instanceof Error ? error.message : "Undo failed."));
+      return;
+    }
+    if (command === "/actions") {
+      setPromptText("");
+      void showRecentAppActions().catch((error) => setAgentError(error instanceof Error ? error.message : "Could not read actions."));
+      return;
+    }
     if (command === "/clear") {
       if (activeProjectId) {
         window.localStorage.setItem(agentRunClearedStorageKey(activeProjectId), new Date().toISOString());
@@ -1080,6 +1241,8 @@ export default function PromptBar() {
     addLocalAgentMessage([
       "/generate <prompt> starts a frame.",
       "/clear resets this console.",
+      "/undo reverses the latest completed agent app action.",
+      "/actions shows the recent app action log.",
       "/help shows commands.",
     ].join("\n"), "inspect");
     setPromptText("");
@@ -1089,6 +1252,7 @@ export default function PromptBar() {
     const trimmed = (inputOverride ?? promptText).trim();
     if (!trimmed || agentPending) return;
     const createdAt = new Date().toISOString();
+    const requestProjectId = activeProjectId;
     const previousSession = agentDraft?.session || null;
     const userMessage: AgentMessage = {
       id: crypto.randomUUID(),
@@ -1108,13 +1272,19 @@ export default function PromptBar() {
     setPromptText("");
     try {
       const generations = await inspectGenerationsForMessage(trimmed, currentGenerationEvidence());
+      const workspace = await currentWorkspace();
       const response = await requestBriefAgent({
         referenceSnapshot,
         messages: nextUserMessages,
         session: previousSession,
         run: agentRun,
         generations,
-      });
+        workspace,
+      }, settings.geminiApiKey);
+      if (activeProjectIdRef.current !== requestProjectId) {
+        throw new Error("Project changed while the agent was working. No app actions were applied.");
+      }
+      const appEvents = await executeAppActions(response.appActions || [], response.run.id);
       setAgentBrain(response.brain);
       setAgentModel(response.model);
       setAgentDraft(response.draft);
@@ -1125,6 +1295,16 @@ export default function PromptBar() {
           ...response.message,
           context: currentReferenceContext(),
         },
+        ...(appEvents.length ? [{
+          id: crypto.randomUUID(),
+          role: "system" as const,
+          text: appEvents.map((event) => event.status === "completed"
+            ? `ACTION OK · ${event.summary}`
+            : `ACTION FAILED · ${event.summary} · ${event.error || "unknown error"}`).join("\n"),
+          action: "inspect" as const,
+          createdAt: new Date().toISOString(),
+          context: currentReferenceContext(),
+        }] : []),
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Brief agent failed.";
@@ -1408,6 +1588,7 @@ export default function PromptBar() {
           className="agent-console-close"
           type="button"
           aria-label="Close chat"
+          title="Close chat"
           disabled={!agentConsoleOpen}
           tabIndex={agentConsoleOpen ? 0 : -1}
           onClick={() => {
@@ -1415,7 +1596,7 @@ export default function PromptBar() {
             setAgentConsoleOpen(false);
           }}
         >
-          Close
+          <span aria-hidden="true">&times;</span>
         </button>
         <div className="agent-console-scroll" ref={agentConsoleScrollRef}>
           {agentIdle ? (

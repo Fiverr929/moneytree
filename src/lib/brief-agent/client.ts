@@ -19,10 +19,20 @@ export class ReferenceReadRequestError extends Error {
   }
 }
 
-export async function requestGenerationInspection(input: GenerationInspectionRequest): Promise<GenerationInspectionResponse> {
+function localGeminiHeaders(apiKey?: string | null): Record<string, string> {
+  if (typeof window === "undefined" || !apiKey?.trim()) return {};
+  const hostname = window.location.hostname.toLowerCase();
+  if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "[::1]") return {};
+  return { "X-CafeHTML-Local-Gemini-Key": apiKey.trim() };
+}
+
+export async function requestGenerationInspection(
+  input: GenerationInspectionRequest,
+  apiKey?: string | null,
+): Promise<GenerationInspectionResponse> {
   const response = await fetch("/api/brief-agent/inspect-generations", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...localGeminiHeaders(apiKey) },
     body: JSON.stringify(input),
   });
   const data = await response.json().catch(() => null);
@@ -46,11 +56,12 @@ function apiErrorMessage(data: unknown, fallback: string) {
   return fallback;
 }
 
-export async function requestBriefAgent(input: BriefAgentRequest): Promise<BriefAgentResponse> {
+export async function requestBriefAgent(input: BriefAgentRequest, apiKey?: string | null): Promise<BriefAgentResponse> {
   const response = await fetch("/api/brief-agent", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...localGeminiHeaders(apiKey),
     },
     body: JSON.stringify(input),
   });
@@ -64,11 +75,15 @@ export async function requestBriefAgent(input: BriefAgentRequest): Promise<Brief
   return data as BriefAgentResponse;
 }
 
-export async function requestReferenceRead(input: BriefReferenceReadRequest): Promise<BriefReferenceReadResponse> {
+export async function requestReferenceRead(
+  input: BriefReferenceReadRequest,
+  apiKey?: string | null,
+): Promise<BriefReferenceReadResponse> {
   const response = await fetch("/api/brief-agent/read-references", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...localGeminiHeaders(apiKey),
     },
     body: JSON.stringify(input),
   });

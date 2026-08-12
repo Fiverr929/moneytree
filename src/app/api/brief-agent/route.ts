@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { ThinkingLevel } from "@google/genai";
 import { applySkillContract, BRIEF_AGENT_SKILL_CONTRACT } from "@/lib/brief-agent/skillContract";
 import { advanceAgentRun, type AgentRun } from "@/lib/brief-agent/runState";
 import { REFERENCE_INFLUENCE_SKILL } from "@/lib/brief-agent/skills/referenceInfluence";
 import { createVisualUnderstanding } from "@/lib/brief-agent/visualUnderstanding";
 import { getReferenceInfluence } from "@/lib/pipeline/strength";
 import { createGoogleGenAI } from "@/lib/server/googleGenAI";
+import { logModelUsage } from "@/lib/server/modelUsage";
+import { parseAgentAppActions } from "@/lib/brief-agent/appActions";
 import type {
   AgentMessage,
   BriefAgentAction,
@@ -16,12 +19,13 @@ import type {
   BriefPlan,
   BriefReferenceSnapshot,
   BriefSessionState,
+  CafeWorkspaceSnapshot,
 } from "@/lib/brief-agent/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const DEFAULT_BRIEF_AGENT_MODEL = "gemini-3.1-flash-lite";
+const DEFAULT_BRIEF_AGENT_MODEL = "gemini-3.6-flash";
 const MAX_MESSAGE_COUNT = 24;
 const MAX_MODEL_MESSAGE_COUNT = 10;
 const MAX_MESSAGE_CHARS = 2_000;
@@ -148,6 +152,36 @@ function validateGenerationEvidence(value: unknown): BriefGenerationEvidence[] {
   });
 }
 
+function validateWorkspace(value: unknown): CafeWorkspaceSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const workspace = value as Partial<CafeWorkspaceSnapshot>;
+  if (!workspace.project || !Array.isArray(workspace.references)) return null;
+  const projectId = Number(workspace.project.id);
+  if (!Number.isFinite(projectId)) return null;
+  return {
+    project: { id: projectId, name: trimText(String(workspace.project.name || "Project"), 120) },
+    folders: Array.isArray(workspace.folders) ? workspace.folders.slice(0, 100).flatMap((folder) => (
+      folder && typeof folder.id === "string"
+        ? [{ id: trimText(folder.id, 120), name: trimText(String(folder.name || folder.id), 120) }]
+        : []
+    )) : [],
+    references: workspace.references.slice(0, 100).flatMap((reference, index) => {
+      if (!reference || typeof reference !== "object" || typeof reference.imageId !== "string") return [];
+      const role = String(reference.role || "UNASSIGNED").toUpperCase();
+      return [{
+        position: index + 1,
+        imageId: trimText(reference.imageId, 160),
+        name: trimText(String(reference.name || reference.label || "UNLABELED"), 120),
+        label: trimText(String(reference.label || reference.name || "UNLABELED"), 120),
+        role: role === "SUBJECT" || role === "SCENE" || role === "STYLE" ? role : "UNASSIGNED",
+        strength: Math.max(0, Math.min(100, Math.round(Number(reference.strength) || 0))),
+        visible: reference.visible !== false,
+        folder: typeof reference.folder === "string" ? trimText(reference.folder, 120) : null,
+      }];
+    }),
+  };
+}
+
 function validateRequest(request: Request, value: unknown): BriefAgentRequest {
   const origin = request.headers.get("origin");
   if (process.env.NODE_ENV === "production" && !origin) {
@@ -171,6 +205,7 @@ function validateRequest(request: Request, value: unknown): BriefAgentRequest {
     session: validateSession(input.session),
     run: validateRun(input.run),
     generations: validateGenerationEvidence(input.generations),
+    workspace: validateWorkspace(input.workspace),
   };
 }
 
@@ -483,11 +518,12 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     readSource: observation.readSource || null,
   }));
   const generations = input.generations || [];
+  const workspace = input.workspace || null;
 
   return [
     "You are CafeHTML Brief Agent, a prompt-planning agent for modular image generation.",
     "Work like a terse coding agent in a terminal: answer directly, clarify briefly, draft only when the user gives a creative image direction, and never execute generation yourself.",
-    "Choose exactly one action for the latest user message: talk, inspect, plan, ask, or draft.",
+    "Choose exactly one conversational action for the latest user message: talk, inspect, plan, ask, or draft. You may also return safe appActions when the user explicitly requests an app change.",
     "talk = casual conversation or quick status; inspect = answer how the current references/UI/agent state works; plan = outline an approach or creative direction; ask = one missing detail blocks the next useful move; draft = produce a generation-ready image prompt.",
     "Action behavior:",
     "- talk: reply in one or two short natural lines. No prompt draft language, no planning template.",
@@ -501,6 +537,15 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "If the latest user message is casual chat, a greeting, a status question, or a question about the UI/agent, use action talk or inspect. Do not produce finalPrompt.",
     "Use action draft and produce finalPrompt only when the latest user message asks to create, generate, compose, edit, transform, or otherwise describes the desired image/frame.",
     "If action is talk, inspect, plan, or ask, finalPrompt must be an empty string.",
+    "App control:",
+    "- appActions are commands for CafeHTML itself, separate from the conversational action.",
+    "- Emit an app action only when the latest user message explicitly requests that change. Never infer extra cleanup or organization.",
+    "- Resolve image targets only from Current workspace. Use the exact imageId. If a target is ambiguous, ask and return no appActions.",
+    "- Allowed actions: project.rename, reference.rename, reference.set_role, reference.set_strength, reference.set_visibility, reference.move.",
+    "- Action shapes: {type:'project.rename',name}; {type:'reference.rename',imageId,name}; {type:'reference.set_role',imageId,role}; {type:'reference.set_strength',imageId,strength}; {type:'reference.set_visibility',imageId,visible}; {type:'reference.move',imageId,folder}.",
+    "- role is SUBJECT, SCENE, STYLE, or UNASSIGNED. strength is 0..100. visible is boolean. folder is an exact folder id or null for root.",
+    "- Never claim an app change succeeded in reply; say what you are requesting. The client reports actual execution results.",
+    "- Generation, editing, deletion, replacement, upload, publishing, and other costly or destructive operations are not appActions.",
     "Recent generation evidence is an on-demand inspection catalog. Recency 1 means the latest generation.",
     "User feedback is authoritative evidence of preference. visualReview is an automatic quality review. visionObservation is the result of an explicit on-demand image inspection.",
     "When visionObservation is present, you may answer from its visible evidence and comparison, and you must identify the generation or generations used.",
@@ -522,7 +567,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "Ask concise clarification questions only when the request lacks a necessary target or choosing one would likely betray the user's intent.",
     "If the latest message is an image direction and a reasonable image can be drafted, produce a concise finalPrompt instead of asking.",
     "Return JSON only with this shape:",
-    "{\"action\":\"talk|inspect|plan|ask|draft\",\"reply\":\"string\",\"clarification\":{\"needed\":boolean,\"reason\":string|null,\"questions\":[\"string\"]},\"plan\":{\"intent\":\"string\",\"subjectPolicy\":\"string\",\"scenePolicy\":\"string\",\"stylePolicy\":\"string\"},\"session\":{\"projectIntent\":\"string\",\"selectedDirection\":\"string\",\"directions\":[\"string\"],\"lastDraftPrompt\":\"string\",\"unresolvedQuestions\":[\"string\"],\"notes\":[\"string\"]},\"finalPrompt\":\"string\",\"warnings\":[\"string\"],\"readyToExecute\":false}",
+    "{\"action\":\"talk|inspect|plan|ask|draft\",\"reply\":\"string\",\"clarification\":{\"needed\":boolean,\"reason\":string|null,\"questions\":[\"string\"]},\"plan\":{\"intent\":\"string\",\"subjectPolicy\":\"string\",\"scenePolicy\":\"string\",\"stylePolicy\":\"string\"},\"session\":{\"projectIntent\":\"string\",\"selectedDirection\":\"string\",\"directions\":[\"string\"],\"lastDraftPrompt\":\"string\",\"unresolvedQuestions\":[\"string\"],\"notes\":[\"string\"]},\"finalPrompt\":\"string\",\"warnings\":[\"string\"],\"readyToExecute\":false,\"appActions\":[{\"type\":\"project.rename|reference.rename|reference.set_role|reference.set_strength|reference.set_visibility|reference.move\",\"imageId\":\"exact id when required\"}]}",
     "",
     `Latest user instruction: ${JSON.stringify(latestInstruction)}`,
     `Latest message is creative image direction: ${JSON.stringify(shouldDraft)}`,
@@ -531,6 +576,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     `Compact reference reads: ${JSON.stringify(references)}`,
     `Recent generation evidence: ${JSON.stringify(generations)}`,
     `Recent conversation: ${JSON.stringify(conversation)}`,
+    `Current workspace: ${JSON.stringify(workspace)}`,
     `Current draft state: ${JSON.stringify({
       action: fallback.action,
       clarification: fallback.clarification,
@@ -540,9 +586,9 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
   ].join("\n");
 }
 
-async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft) {
+async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft, localApiKey?: string | null) {
   const model = process.env.BRIEF_AGENT_MODEL?.trim() || DEFAULT_BRIEF_AGENT_MODEL;
-  const ai = createGoogleGenAI();
+  const ai = createGoogleGenAI({ apiKey: localApiKey });
   const result = await ai.models.generateContent({
     model,
     contents: [{
@@ -552,13 +598,20 @@ async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft) 
     config: {
       temperature: 0.25,
       responseMimeType: "application/json",
+      maxOutputTokens: 4_096,
+      thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
     },
+  });
+  logModelUsage("brief-agent.plan", model, result, {
+    referenceCount: input.referenceSnapshot.observations.length,
+    messageCount: input.messages.length,
   });
   const text = extractResponseText(result);
   const json = parseJsonObject(text);
   return {
     draft: draftFromModelJson(json, baseline),
     model,
+    appActions: parseAgentAppActions(json.appActions, input.workspace),
   };
 }
 
@@ -566,7 +619,7 @@ function describeBriefAgentError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
   if (lower.includes("billing_disabled") || lower.includes("billing to be enabled") || lower.includes("billing is disabled")) {
-    return { message: "Google Cloud billing is disabled for the configured Vertex AI project. Enable billing, wait for it to propagate, then try again.", status: 403 };
+    return { message: "Google Cloud billing is disabled for the configured Vertex AI project. Enable billing, or on localhost add a Gemini API key in Settings, then try again.", status: 403 };
   }
   if (lower.includes("token") || lower.includes("context") || lower.includes("too long") || lower.includes("request too large")) {
     return { message: "Brief agent context is still too large. Clear the agent console or reduce active references, then try again.", status: 413 };
@@ -586,8 +639,11 @@ function describeBriefAgentError(error: unknown) {
 export async function POST(request: Request) {
   try {
     const input = validateRequest(request, await request.json());
+    const localApiKey = process.env.NODE_ENV === "production"
+      ? null
+      : request.headers.get("x-cafehtml-local-gemini-key");
     const baseline = createBaselineDraft(input);
-    const modelResult = await createModelDraft(input, baseline);
+    const modelResult = await createModelDraft(input, baseline, localApiKey);
     const draft = applySkillContract(modelResult.draft);
     const run = advanceAgentRun(input.run, draft, input.referenceSnapshot);
     const isPromptRevision = input.run?.steps.at(-1)?.action.type === "request_prompt_revision";
@@ -617,7 +673,7 @@ export async function POST(request: Request) {
         }
         : undefined,
     };
-    const response: BriefAgentResponse = { draft, message, run, brain: "model", model: modelResult.model };
+    const response: BriefAgentResponse = { draft, message, run, brain: "model", model: modelResult.model, appActions: modelResult.appActions };
     return NextResponse.json(response);
   } catch (error) {
     const described = describeBriefAgentError(error);

@@ -41,6 +41,7 @@ type GenerateOptions = {
   imageRefs?: ImageReferenceInput[];
   imageSize?: string;
   thinkingLevel?: string;
+  apiKey?: string | null;
   debugRunId?: string;
   onVariationReady?: (dataUrl: string, idx: number) => void;
   onVariationFailed?: (idx: number, statusLabel?: string) => void;
@@ -74,7 +75,7 @@ function isRetryMeaningful(statusLabel?: string): boolean {
 }
 
 export async function googleGenerate(opts: GenerateOptions) {
-  const { modelId, prompt, numImages, aspectRatio, imageRefs, imageSize, thinkingLevel, debugRunId, onVariationReady, onVariationFailed, onVariationBlocked } = opts;
+  const { modelId, prompt, numImages, aspectRatio, imageRefs, imageSize, thinkingLevel, apiKey, debugRunId, onVariationReady, onVariationFailed, onVariationBlocked } = opts;
   
   const arMap: Record<string, string> = { '1:1': '1:1', '16:9': '16:9', '9:16': '9:16', '4:3': '4:3', '3:4': '3:4' };
   const ar = arMap[aspectRatio] || '1:1';
@@ -127,7 +128,7 @@ export async function googleGenerate(opts: GenerateOptions) {
 
   for (let idx = 0; idx < numImages; idx += 1) {
     try {
-      const result = await sendGenerationRequest(request);
+      const result = await sendGenerationRequest(request, 95_000, apiKey);
       const prediction = findImagePrediction(result);
       let blockedReason = result.promptFeedback?.blockReason
         ? String(result.promptFeedback.blockReason)
@@ -453,6 +454,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
       imageRefs,
       imageSize,
       thinkingLevel: thinkingLevel || undefined,
+      apiKey: settings.geminiApiKey,
       debugRunId,
       onVariationReady: (dataUrl, idx) => {
         const lid = loadingIds[idx] || loadingIds[0];
@@ -492,7 +494,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
         }, debugRunId);
         const runRetry = (newLid: string) => {
           void googleGenerate({
-            modelId: model!.id, prompt: effectivePrompt, numImages: 1, aspectRatio: ratio, imageRefs, imageSize, thinkingLevel: thinkingLevel || undefined, debugRunId,
+            modelId: model!.id, prompt: effectivePrompt, numImages: 1, aspectRatio: ratio, imageRefs, imageSize, thinkingLevel: thinkingLevel || undefined, apiKey: settings.geminiApiKey, debugRunId,
             onVariationReady: (dataUrl) => {
               const retryResults = getGenerationDebug()?.results;
               patchGenerationDebug({
@@ -555,6 +557,7 @@ export type StudioGenerateOptions = {
   imageSize?: string;
   aspectRatio?: string;
   flavor?: 'normal' | 'creative';
+  apiKey?: string | null;
 };
 
 type StudioReferenceAction = 'INSERT' | 'REPLACE' | 'REMOVE' | 'KEEP';
@@ -643,7 +646,7 @@ function buildStudioPrompt(prompt: string, hasReferences: boolean, hasAnnotation
 }
 
 export async function studioGenerate(opts: StudioGenerateOptions): Promise<string> {
-  const { modelId, prompt, baseImageUrl, annotationImageUrl, references, imageSize, aspectRatio, flavor = 'normal' } = opts;
+  const { modelId, prompt, baseImageUrl, annotationImageUrl, references, imageSize, aspectRatio, flavor = 'normal', apiKey } = opts;
 
   const parts: Part[] = [];
   parts.push({ text: buildStudioPrompt(prompt, !!references?.length, !!annotationImageUrl, flavor) });
@@ -691,7 +694,7 @@ export async function studioGenerate(opts: StudioGenerateOptions): Promise<strin
     config: generationConfig
   };
 
-  const result = await sendGenerationRequest(request);
+  const result = await sendGenerationRequest(request, 95_000, apiKey);
   const prediction = findImagePrediction(result);
 
   if (!prediction) {

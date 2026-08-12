@@ -3,6 +3,43 @@ import type { AgentRun } from "./runState";
 export type BriefReferenceRole = "SUBJECT" | "SCENE" | "STYLE" | "UNASSIGNED";
 export type BriefAgentAction = "talk" | "inspect" | "plan" | "ask" | "draft";
 
+export type AgentAppAction =
+  | { id: string; type: "project.rename"; name: string }
+  | { id: string; type: "reference.rename"; imageId: string; name: string }
+  | { id: string; type: "reference.set_role"; imageId: string; role: BriefReferenceRole }
+  | { id: string; type: "reference.set_strength"; imageId: string; strength: number }
+  | { id: string; type: "reference.set_visibility"; imageId: string; visible: boolean }
+  | { id: string; type: "reference.move"; imageId: string; folder: string | null };
+
+export type AgentAppEvent = {
+  id: string;
+  runId: string;
+  actor: "agent" | "user" | "system";
+  action: AgentAppAction;
+  inverse: AgentAppAction | null;
+  status: "completed" | "failed" | "undone";
+  summary: string;
+  createdAt: string;
+  undoneAt?: string;
+  undoOf?: string;
+  error?: string;
+};
+
+export type CafeWorkspaceSnapshot = {
+  project: { id: number; name: string };
+  folders: Array<{ id: string; name: string }>;
+  references: Array<{
+    position: number;
+    imageId: string;
+    name: string;
+    label: string;
+    role: BriefReferenceRole;
+    strength: number;
+    visible: boolean;
+    folder: string | null;
+  }>;
+};
+
 export type AgentMessage = {
   id: string;
   role: "user" | "agent" | "system";
@@ -121,6 +158,7 @@ export type BriefAgentRequest = {
   session?: BriefSessionState | null;
   run?: AgentRun | null;
   generations?: BriefGenerationEvidence[];
+  workspace?: CafeWorkspaceSnapshot | null;
 };
 
 export type BriefGenerationEvidence = {
@@ -177,6 +215,7 @@ export type BriefAgentResponse = {
   run: AgentRun;
   brain: "model";
   model: string | null;
+  appActions: AgentAppAction[];
 };
 
 export type BriefReferenceImageInput = {

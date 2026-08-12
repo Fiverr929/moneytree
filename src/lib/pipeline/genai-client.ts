@@ -42,9 +42,17 @@ export function toThinkingLevel(value?: string) {
   return value ? levels[value.toLowerCase()] : undefined;
 }
 
+function localGeminiHeaders(apiKey?: string | null): Record<string, string> {
+  if (typeof window === "undefined" || !apiKey?.trim()) return {};
+  const hostname = window.location.hostname.toLowerCase();
+  if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "[::1]") return {};
+  return { "X-CafeHTML-Local-Gemini-Key": apiKey.trim() };
+}
+
 export async function sendGenerationRequest(
   request: GenAIRequest,
   timeoutMs = 95_000,
+  apiKey?: string | null,
 ): Promise<GenerateContentResponse> {
   const controller = new AbortController();
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
@@ -52,7 +60,7 @@ export async function sendGenerationRequest(
   try {
     const response = await fetch("/api/image/generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...localGeminiHeaders(apiKey) },
       body: JSON.stringify(request),
       signal: controller.signal,
     });

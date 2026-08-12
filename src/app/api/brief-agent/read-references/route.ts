@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { BRIEF_AGENT_SKILL_CONTRACT } from "@/lib/brief-agent/skillContract";
 import { createGoogleGenAI } from "@/lib/server/googleGenAI";
+import { logModelUsage } from "@/lib/server/modelUsage";
 import type {
   BriefReferenceImageInput,
   BriefReferenceReadRequest,
@@ -141,7 +142,7 @@ function describeReaderError(error: unknown) {
   const normalized = raw.toLowerCase();
   if (normalized.includes("billing_disabled") || normalized.includes("billing to be enabled") || normalized.includes("billing is disabled")) {
     return {
-      message: "Google Cloud billing is disabled for the configured Vertex AI project.",
+      message: "Google Cloud billing is disabled for the configured Vertex AI project. Enable billing, or on localhost add a Gemini API key in Settings.",
       status: 403,
       retryAfterSeconds: null,
     };
@@ -168,11 +169,10 @@ function describeReaderError(error: unknown) {
   return { message: raw, status: 400, retryAfterSeconds: null };
 }
 
-async function readReferences(input: BriefReferenceReadRequest) {
+async function readReferences(input: BriefReferenceReadRequest, localApiKey?: string | null) {
   const model = process.env.BRIEF_REFERENCE_MODEL?.trim()
-    || process.env.BRIEF_AGENT_MODEL?.trim()
     || DEFAULT_REFERENCE_READER_MODEL;
-  const ai = createGoogleGenAI();
+  const ai = createGoogleGenAI({ apiKey: localApiKey });
   const parts = [
     { text: buildInstruction(input.images) },
     ...input.images.flatMap((image, index) => {
@@ -191,6 +191,7 @@ async function readReferences(input: BriefReferenceReadRequest) {
       responseMimeType: "application/json",
     },
   });
+  logModelUsage("brief-agent.read-references", model, result, { imageCount: input.images.length });
   const json = parseJsonObject(extractResponseText(result));
   const observationsJson = Array.isArray(json.observations) ? json.observations : [];
   const observations = input.images.map((image) => {
@@ -206,7 +207,10 @@ async function readReferences(input: BriefReferenceReadRequest) {
 export async function POST(request: Request) {
   try {
     const input = validateRequest(request, await request.json());
-    const { model, observations } = await readReferences(input);
+    const localApiKey = process.env.NODE_ENV === "production"
+      ? null
+      : request.headers.get("x-cafehtml-local-gemini-key");
+    const { model, observations } = await readReferences(input, localApiKey);
     const response: BriefReferenceReadResponse = {
       brain: "vision",
       model,

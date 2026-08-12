@@ -136,7 +136,7 @@ export default function Studio() {
   } = useStudio();
   
   const { addCell } = useGallery();
-  const { activeModel } = useSettings();
+  const { activeModel, geminiApiKey } = useSettings();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
@@ -625,6 +625,7 @@ export default function Studio() {
           annotationImageUrl: isUpscale ? undefined : annotationImageUrl,
           references: isUpscale ? [] : references,
           imageSize: isUpscale ? parsedCommand.imageSize : undefined,
+          apiKey: geminiApiKey,
           flavor: studioFlavor,
           aspectRatio: currentAspectRatio,
         });

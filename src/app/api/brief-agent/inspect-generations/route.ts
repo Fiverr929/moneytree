@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { GenerationInspectionRequest, GenerationInspectionResponse } from "@/lib/brief-agent/types";
 import { createGoogleGenAI } from "@/lib/server/googleGenAI";
+import { logModelUsage } from "@/lib/server/modelUsage";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
@@ -65,7 +66,7 @@ function describeError(error: unknown) {
   const raw = error instanceof Error ? error.message : "Generation inspection failed.";
   const lower = raw.toLowerCase();
   if (lower.includes("billing_disabled") || lower.includes("billing to be enabled") || lower.includes("billing is disabled")) {
-    return { message: "Google Cloud billing is disabled for the configured Vertex AI project.", status: 403 };
+    return { message: "Google Cloud billing is disabled for the configured Vertex AI project. Enable billing, or on localhost add a Gemini API key in Settings.", status: 403 };
   }
   if (lower.includes("429") || lower.includes("resource_exhausted") || lower.includes("resource exhausted") || lower.includes("quota")) {
     return { message: "Generation vision is temporarily busy. Try inspection again shortly.", status: 429 };
@@ -82,6 +83,9 @@ function describeError(error: unknown) {
 export async function POST(request: Request) {
   try {
     const input = validateRequest(request, await request.json());
+    const localApiKey = process.env.NODE_ENV === "production"
+      ? null
+      : request.headers.get("x-cafehtml-local-gemini-key");
     const model = process.env.BRIEF_GENERATION_INSPECTION_MODEL?.trim()
       || process.env.BRIEF_REFERENCE_MODEL?.trim()
       || DEFAULT_MODEL;
@@ -103,12 +107,13 @@ export async function POST(request: Request) {
         ];
       }),
     ];
-    const ai = createGoogleGenAI();
+    const ai = createGoogleGenAI({ apiKey: localApiKey });
     const result = await ai.models.generateContent({
       model,
       contents: [{ role: "user", parts }],
       config: { temperature: 0.1, responseMimeType: "application/json" },
     });
+    logModelUsage("brief-agent.inspect-generations", model, result, { imageCount: input.images.length });
     const json = parseJson(responseText(result));
     const rawObservations = Array.isArray(json.observations) ? json.observations : [];
     const observations = input.images.map((image) => {

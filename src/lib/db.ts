@@ -15,7 +15,8 @@ const S = {
   DESCRIPTIONS: 'descriptions',
   STUDIO_STATE: 'studio-state',
   GENERATION_JOBS: 'generation-jobs',
-  AGENT_RUNS: 'agent-runs'
+  AGENT_RUNS: 'agent-runs',
+  AGENT_EVENTS: 'agent-events'
 };
 
 const ready = new Promise<IDBDatabase>((resolve, reject) => {
@@ -39,6 +40,7 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
                            !db.objectStoreNames.contains(S.DESCRIPTIONS) ||
                            !db.objectStoreNames.contains(S.GENERATION_JOBS) ||
                           !db.objectStoreNames.contains(S.AGENT_RUNS) ||
+                         !db.objectStoreNames.contains(S.AGENT_EVENTS) ||
                          !hasIndex(S.PROJECTS, 'by_modified') ||
                          !hasIndex(S.REFERENCES, 'by_project') ||
                          !hasIndex(S.GALLERY, 'by_project') ||
@@ -46,7 +48,8 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
                          !hasIndex(S.VIDEOS, 'by_project') ||
                           !hasIndex(S.GENERATION_JOBS, 'by_project') ||
                           !hasIndex(S.AGENT_RUNS, 'by_project') ||
-                          !hasIndex(S.AGENT_RUNS, 'by_project_active');
+                          !hasIndex(S.AGENT_RUNS, 'by_project_active') ||
+                          !hasIndex(S.AGENT_EVENTS, 'by_project_created');
     db.close();
 
     const targetVersion = needsUpgrade ? currentVersion + 1 : currentVersion;
@@ -111,6 +114,13 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
         if (!ars.indexNames.contains('by_project')) ars.createIndex('by_project', 'project_id');
         if (!ars.indexNames.contains('by_project_active')) ars.createIndex('by_project_active', ['project_id', 'active']);
       }
+      if (!db2.objectStoreNames.contains(S.AGENT_EVENTS)) {
+        const aes = db2.createObjectStore(S.AGENT_EVENTS, { keyPath: 'id' });
+        aes.createIndex('by_project_created', ['project_id', 'createdAt']);
+      } else {
+        const aes = e2.target.transaction.objectStore(S.AGENT_EVENTS);
+        if (!aes.indexNames.contains('by_project_created')) aes.createIndex('by_project_created', ['project_id', 'createdAt']);
+      }
     };
 
     req.onsuccess = (e2: any) => {
@@ -172,6 +182,7 @@ async function deleteProjectCascade(id: number) {
       S.STUDIO_STATE,
       S.GENERATION_JOBS,
       S.AGENT_RUNS,
+      S.AGENT_EVENTS,
     ],
     "readwrite",
   );
@@ -197,6 +208,16 @@ async function deleteProjectCascade(id: number) {
   transaction.objectStore(S.STUDIO_STATE).delete(id);
   deleteProjectRecordsByIndex(transaction.objectStore(S.GENERATION_JOBS), id);
   deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_RUNS), id);
+  const agentEventsStore = transaction.objectStore(S.AGENT_EVENTS);
+  const agentEventsRequest = agentEventsStore.index('by_project_created').openKeyCursor(
+    IDBKeyRange.bound([id, ""], [id, "\uffff"]),
+  );
+  agentEventsRequest.onsuccess = () => {
+    const cursor = agentEventsRequest.result;
+    if (!cursor) return;
+    agentEventsStore.delete(cursor.primaryKey);
+    cursor.continue();
+  };
   transaction.objectStore(S.PROJECTS).delete(id);
 
   await transactionDone(transaction);
@@ -345,7 +366,32 @@ const agentRuns = {
   }),
 };
 
-const DB = { ready, projects, images, videos, studioState, gallery, references, descriptions, generationJobs, agentRuns };
+const agentEvents = {
+  put: (projectId: number, data: any) => ready.then(() =>
+    wrap(tx(S.AGENT_EVENTS, 'readwrite').objectStore(S.AGENT_EVENTS).put({ ...data, project_id: projectId }))
+  ),
+  getByProject: (projectId: number) => ready.then(() => {
+    const index = tx(S.AGENT_EVENTS).objectStore(S.AGENT_EVENTS).index('by_project_created');
+    return wrap(index.getAll(IDBKeyRange.bound([projectId, ""], [projectId, "\uffff"])));
+  }),
+  recordProjectMutation: (projectId: number, projectData: any, event: any) => ready.then(async () => {
+    const transaction = tx([S.PROJECTS, S.AGENT_EVENTS], 'readwrite');
+    const projectsStore = transaction.objectStore(S.PROJECTS);
+    const existing = await wrap(projectsStore.get(projectId));
+    if (!existing) throw new Error('[DB] project not found: ' + projectId);
+    projectsStore.put({ ...existing, ...projectData, id: projectId, date_modified: new Date().toISOString() });
+    transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
+    await transactionDone(transaction);
+  }),
+  recordReferenceMutation: (projectId: number, reference: any, event: any) => ready.then(async () => {
+    const transaction = tx([S.REFERENCES, S.AGENT_EVENTS], 'readwrite');
+    transaction.objectStore(S.REFERENCES).put({ ...reference, project_id: projectId });
+    transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
+    await transactionDone(transaction);
+  }),
+};
+
+const DB = { ready, projects, images, videos, studioState, gallery, references, descriptions, generationJobs, agentRuns, agentEvents };
 export default DB;
 
 
