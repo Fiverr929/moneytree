@@ -1791,15 +1791,6 @@ export default function PromptBar() {
         )}
       </div>
       <div id="agentConsole" className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
-        <div className="agent-console-header">
-          <div className="agent-terminal-title">
-            <span className={`agent-status-dot ${agentPending || activeGenerationCount > 0 ? "busy" : ""}`}></span>
-            <span>CAFEHTML AGENT</span>
-          </div>
-          <div className="agent-terminal-status">
-            {agentPending ? "THINKING" : activeGenerationCount > 0 ? "GENERATING" : queuedAgentInputs.length ? `${queuedAgentInputs.length} QUEUED` : "READY"}
-          </div>
-        </div>
         <button
           className="agent-console-close"
           type="button"

@@ -5165,6 +5165,80 @@
 #gallery-panel {
   transition: right 0.09s cubic-bezier(0.2, 0, 0.2, 1) 0s, top 0.18s ease !important;
 }
+
+/* The only chat visual override: keep the main generate control square and icon-only. */
+#promptBar .btn-frame {
+  width: 47px;
+  min-width: 47px;
+  height: 47px;
+  padding: 0;
+  font-size: 0;
+  letter-spacing: 0;
+}
+
+#promptBar textarea.prompt-text-field {
+  border: 0;
+  resize: none;
+  font-family: inherit;
+}
+
+#promptBar textarea.prompt-text-field::placeholder {
+  color: #c7c7c7;
+  opacity: 1;
+}
+
+#promptBar .generate-icon {
+  position: relative;
+  display: block;
+  width: 17px;
+  height: 14px;
+}
+
+#promptBar .generate-icon::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 16px;
+  height: 2px;
+  background: currentColor;
+}
+
+#promptBar .generate-icon::after {
+  content: "";
+  position: absolute;
+  right: 1px;
+  top: 2px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+#promptBar .btn-frame.cafe-loading .generate-icon {
+  animation: generate-icon-run 0.8s steps(2, end) infinite;
+}
+
+@keyframes generate-icon-run {
+  50% { transform: translateX(3px); opacity: 0.55; }
+}
+
+@media (min-width: 901px) {
+  #promptBar .btn-frame { width: 42px; min-width: 42px; height: 42px; }
+}
+
+@media (min-width: 681px) and (max-width: 900px) {
+  #promptBar .btn-frame { width: 44px; min-width: 44px; height: 44px; }
+}
+
+@media (max-width: 680px) {
+  #promptBar .btn-frame { width: 40px; min-width: 40px; height: 40px; }
+}
+
+@media (max-width: 430px) {
+  #promptBar .btn-frame { width: 36px; min-width: 36px; height: 36px; }
+}
 .module-panel {
   transition: height 0.17s cubic-bezier(0.22, 1, 0.36, 1) 0.05s !important;
 }
@@ -6910,352 +6984,6 @@ body.module-collapsed .module-panel {
   height: 12px;
   border: 1px solid #999997;
   touch-action: none;
-}
-
-/* Agent terminal: durable input, high-contrast transcript, and explicit run state. */
-#promptBar {
-  --terminal-bg: #999997;
-  --terminal-panel: #999997;
-  --terminal-line: rgba(199, 199, 199, 0.42);
-  --terminal-text: #c7c7c7;
-  --terminal-muted: rgba(199, 199, 199, 0.72);
-  --terminal-green: #5271ff;
-  --terminal-blue: #5271ff;
-  --terminal-orange: #ea5823;
-  filter: drop-shadow(0 10px 24px rgba(18, 19, 18, 0.18));
-}
-
-#promptBar .prompt-bar-row {
-  min-height: 52px;
-  border: 1px solid var(--terminal-orange);
-  background: var(--terminal-bg);
-}
-
-#promptBar .btn-upload-ref,
-#promptBar .btn-settings,
-#promptBar .prompt-input-area,
-#promptBar .prompt-text-field,
-#promptBar .btn-frame {
-  height: 50px;
-}
-
-#promptBar .btn-upload-ref {
-  width: 50px;
-  border: 0;
-  border-right: 1px solid var(--terminal-line);
-  background: var(--terminal-blue);
-}
-
-#promptBar .btn-upload-ref::before,
-#promptBar .btn-upload-ref::after {
-  background: #c7c7c7;
-}
-
-#promptBar .btn-settings {
-  width: 50px;
-  border: 0;
-  border-right: 1px solid var(--terminal-line);
-  background: var(--terminal-panel);
-}
-
-#promptBar .prompt-input-area {
-  border: 0;
-  background: var(--terminal-bg);
-}
-
-#promptBar .prompt-text-field {
-  min-height: 50px;
-  padding: 13px 15px 11px;
-  border: 0;
-  resize: none;
-  overflow: hidden;
-  background: transparent;
-  color: var(--terminal-text);
-  font-family: "Courier New", monospace;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 24px;
-  letter-spacing: 0.015em;
-  text-transform: none;
-  caret-color: var(--terminal-green);
-}
-
-#promptBar .prompt-text-field::placeholder {
-  color: #c7c7c7;
-  opacity: 1;
-}
-
-#promptBar .prompt-text-field.has-placeholder::before {
-  display: none;
-}
-
-#promptBar .btn-frame {
-  width: 50px;
-  border: 0;
-  border-left: 1px solid var(--terminal-line);
-  background: var(--terminal-orange);
-  color: #c7c7c7;
-  padding: 0;
-}
-
-#promptBar .generate-icon {
-  position: relative;
-  display: block;
-  width: 17px;
-  height: 14px;
-}
-
-#promptBar .generate-icon::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 6px;
-  width: 16px;
-  height: 2px;
-  background: currentColor;
-}
-
-#promptBar .generate-icon::after {
-  content: "";
-  position: absolute;
-  right: 1px;
-  top: 2px;
-  width: 8px;
-  height: 8px;
-  border-top: 2px solid currentColor;
-  border-right: 2px solid currentColor;
-  transform: rotate(45deg);
-}
-
-#promptBar .btn-frame.cafe-loading .generate-icon {
-  animation: generate-icon-run 0.8s steps(2, end) infinite;
-}
-
-@keyframes generate-icon-run {
-  50% { transform: translateX(3px); opacity: 0.55; }
-}
-
-#promptBar .btn-frame:hover:not(:disabled) {
-  filter: brightness(0.92);
-}
-
-#promptBar .agent-console {
-  border: 0;
-  background: var(--terminal-bg);
-  color: var(--terminal-text);
-}
-
-#promptBar .agent-console.open {
-  height: clamp(320px, 48dvh, 540px);
-  border: 1px solid var(--terminal-orange);
-  border-top: 0;
-  box-shadow: 0 20px 42px rgba(18, 19, 18, 0.28);
-}
-
-#promptBar .agent-console-header {
-  position: absolute;
-  inset: 0 0 auto;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 34px;
-  padding: 0 42px 0 14px;
-  border-bottom: 1px solid var(--terminal-line);
-  background: #8f8f8b;
-  color: var(--terminal-muted);
-  font-family: "Courier New", monospace;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-}
-
-#promptBar .agent-terminal-title,
-#promptBar .agent-terminal-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-#promptBar .agent-terminal-status {
-  color: var(--terminal-green);
-}
-
-#promptBar .agent-status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--terminal-green);
-  box-shadow: 0 0 0 3px rgba(82, 113, 255, 0.12);
-}
-
-#promptBar .agent-status-dot.busy {
-  background: var(--terminal-orange);
-  box-shadow: 0 0 0 3px rgba(255, 99, 50, 0.12);
-  animation: agent-status-pulse 1.15s ease-in-out infinite;
-}
-
-@keyframes agent-status-pulse {
-  50% { opacity: 0.35; }
-}
-
-#promptBar .agent-console-close {
-  top: 6px;
-  right: 8px;
-  width: 22px;
-  min-width: 22px;
-  height: 22px;
-  border: 1px solid var(--terminal-line);
-  background: transparent;
-  color: var(--terminal-muted);
-  font-family: "Courier New", monospace;
-}
-
-#promptBar .agent-console-close:hover {
-  border-color: var(--terminal-orange);
-  color: var(--terminal-orange);
-}
-
-#promptBar .agent-console-scroll {
-  padding: 46px 16px 16px;
-  color: var(--terminal-text);
-  scrollbar-color: var(--terminal-blue) transparent;
-  font-size: 12px;
-  line-height: 1.62;
-  text-transform: none;
-}
-
-#promptBar .agent-section {
-  border-bottom-color: var(--terminal-line);
-}
-
-#promptBar .agent-turn {
-  margin: 10px 0 14px;
-  padding-left: 12px;
-  border-left: 2px solid transparent;
-}
-
-#promptBar .agent-turn.user {
-  border-left-color: var(--terminal-blue);
-  color: var(--terminal-text);
-}
-
-#promptBar .agent-turn.agent {
-  border-left-color: var(--terminal-green);
-}
-
-#promptBar .agent-turn.system {
-  border-left-color: var(--terminal-orange);
-}
-
-#promptBar .agent-speaker {
-  color: var(--terminal-muted);
-  font-size: 9px;
-  letter-spacing: 0.16em;
-}
-
-#promptBar .agent-turn.agent .agent-speaker {
-  color: var(--terminal-green);
-}
-
-#promptBar .agent-line,
-#promptBar .agent-tool-actions,
-#promptBar .agent-current-draft {
-  color: inherit;
-  text-transform: none;
-}
-
-#promptBar .agent-muted {
-  color: var(--terminal-muted);
-}
-
-#promptBar .agent-prompt-box {
-  margin-top: 8px;
-  padding: 12px 14px;
-  border: 1px solid rgba(113, 135, 255, 0.4);
-  background: rgba(113, 135, 255, 0.08);
-  color: var(--terminal-text);
-}
-
-#promptBar .agent-artifact-head {
-  justify-content: flex-start;
-}
-
-#promptBar .agent-artifact-head > span:first-child {
-  margin-right: auto;
-}
-
-#promptBar .agent-artifact-head mark,
-#promptBar .agent-line mark {
-  background: transparent;
-  color: var(--terminal-green);
-}
-
-#promptBar .agent-tool-proposal {
-  padding: 11px 12px;
-  border-color: rgba(255, 99, 50, 0.58);
-  background: rgba(255, 99, 50, 0.06);
-}
-
-#promptBar .agent-auto-run-status {
-  color: var(--terminal-green);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-#promptBar .agent-queue {
-  padding: 8px 10px;
-  border: 1px dashed rgba(255, 99, 50, 0.45);
-  color: var(--terminal-muted);
-}
-
-#promptBar .canvas-command-menu {
-  top: calc(100% + 5px);
-  border-color: var(--terminal-orange);
-  background: var(--terminal-bg);
-  box-shadow: 0 16px 32px rgba(18, 19, 18, 0.28);
-}
-
-#promptBar .canvas-command-head {
-  background: var(--terminal-orange);
-  color: var(--terminal-text);
-}
-
-#promptBar .canvas-command-option {
-  border-top-color: var(--terminal-line);
-  background: var(--terminal-panel);
-  color: var(--terminal-text);
-}
-
-#promptBar .canvas-command-option.active,
-#promptBar .canvas-command-option:hover {
-  background: var(--terminal-blue);
-  color: var(--terminal-text);
-}
-
-body.agent-console-open {
-  --agent-console-offset: calc(clamp(320px, 48dvh, 540px) + 12px);
-}
-
-@media (max-width: 720px) {
-  #promptBar .btn-frame {
-    width: 44px;
-    height: 44px;
-  }
-
-  #promptBar .prompt-text-field {
-    padding-inline: 10px;
-    font-size: 12px;
-  }
-
-  #promptBar .agent-console.open {
-    height: clamp(280px, 44dvh, 430px);
-  }
-
-  body.agent-console-open {
-    --agent-console-offset: calc(clamp(280px, 44dvh, 430px) + 8px);
-  }
 }
 
 #studio-overlay #studioDrawLayer,
@@ -9690,12 +9418,6 @@ body.agent-console-open {
     color: #c7c7c7;
     font-size: 15px;
     letter-spacing: 0.06em;
-  }
-
-  #promptBar .btn-frame {
-    width: 36px;
-    height: 36px;
-    min-width: 36px;
   }
 
   #promptBar .btn-frame:active {
