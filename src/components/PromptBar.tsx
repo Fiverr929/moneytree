@@ -1757,12 +1757,14 @@ export default function PromptBar() {
             id="generateBtn"
             type="button"
             disabled={!activeProjectId}
+            aria-label={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
+            title={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
             onClick={() => {
               if (parseGenerateCommand(promptText) !== null) void handleGenerate();
               else void submitAgentMessage();
             }}
           >
-            {activeGenerationCount > 0 ? "RUNNING" : "GENERATE"}
+            <span className="generate-icon" aria-hidden="true"></span>
           </button>
         </div>
         {commandMenuOpen && filteredCommands.length > 0 && (
