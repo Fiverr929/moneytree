@@ -3,6 +3,13 @@ import {
   applyAgentAppAction,
   parseAgentAppActions,
 } from "../src/lib/brief-agent/appActions.ts";
+import {
+  canResolveAgentActionProposal,
+  createAgentActionProposal,
+  proposalStatusFromEvents,
+  recoverInterruptedActionProposal,
+  resolveAgentActionProposal,
+} from "../src/lib/brief-agent/actionApproval.ts";
 
 const workspace = {
   project: { id: 1, name: "Original" },
@@ -54,5 +61,18 @@ assert.equal(applied.event.inverse?.type, "reference.set_role");
 
 const undone = applyAgentAppAction({ action: applied.event.inverse, projectName: "Original", files: applied.files, runId: "run-1" });
 assert.equal(undone.files[0].mode, "UNASSIGNED", "inverse action must restore the previous role");
+
+const proposal = createAgentActionProposal(parsed, "run-1", 1);
+assert.equal(proposal.status, "pending");
+assert.equal(proposal.actions.length, 2);
+assert.equal(canResolveAgentActionProposal(proposal), true);
+
+const rejected = resolveAgentActionProposal(proposal, "rejected");
+assert.equal(rejected.status, "rejected");
+assert.equal(canResolveAgentActionProposal(rejected), false, "resolved proposals cannot execute twice");
+assert.equal(recoverInterruptedActionProposal({ ...proposal, status: "executing" }).status, "stale");
+assert.equal(proposalStatusFromEvents([applied.event]), "completed");
+assert.equal(proposalStatusFromEvents([{ ...applied.event, status: "failed" }]), "failed");
+assert.equal(proposalStatusFromEvents([applied.event, { ...applied.event, id: "failed", status: "failed" }]), "partially_failed");
 
 console.log("Agent app-action checks passed");

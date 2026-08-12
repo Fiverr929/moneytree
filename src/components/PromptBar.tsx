@@ -14,8 +14,9 @@ import {
 } from "@/lib/brief-agent/referenceSnapshot";
 import { ReferenceReadRequestError, requestBriefAgent, requestGenerationInspection, requestReferenceRead } from "@/lib/brief-agent/client";
 import { requestGenerationEvaluation, type AiGenerationEvaluation } from "@/lib/evaluationReview";
-import type { AgentAppAction, AgentAppEvent, AgentMessage, BriefAgentAction, BriefDraft, BriefGenerationEvidence, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot, CafeWorkspaceSnapshot } from "@/lib/brief-agent/types";
+import type { AgentActionProposalStatus, AgentAppAction, AgentAppEvent, AgentMessage, BriefAgentAction, BriefDraft, BriefGenerationEvidence, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot, CafeWorkspaceSnapshot } from "@/lib/brief-agent/types";
 import { applyAgentAppAction, describeAgentAppAction } from "@/lib/brief-agent/appActions";
+import { canResolveAgentActionProposal, createAgentActionProposal, proposalStatusFromEvents, recoverInterruptedActionProposal, resolveAgentActionProposal } from "@/lib/brief-agent/actionApproval";
 import { moduleFileForStorage } from "@/lib/moduleFiles";
 import {
   observeAgentGeneration,
@@ -40,6 +41,9 @@ const CANVAS_COMMANDS = [
   { value: "/clear", label: "/clear", description: "Clear agent console" },
   { value: "/undo", label: "/undo", description: "Undo the last agent app action" },
   { value: "/actions", label: "/actions", description: "Show recent agent app actions" },
+  { value: "/approve", label: "/approve", description: "Approve the latest proposed app actions" },
+  { value: "/reject", label: "/reject", description: "Reject the latest proposed app actions" },
+  { value: "/pending", label: "/pending", description: "Show actions waiting for approval" },
 ];
 const DEFAULT_FRAME_RATIO = "1:1";
 const DEFAULT_FRAME_VARIATIONS = 1;
@@ -188,7 +192,8 @@ function promptLexicalDiff(previousPrompt: string, nextPrompt: string) {
 
 function parseCanvasLocalCommand(text: string) {
   const command = text.trim().toLowerCase();
-  return command === "/help" || command === "/clear" || command === "/undo" || command === "/actions" ? command : null;
+  return command === "/help" || command === "/clear" || command === "/undo" || command === "/actions"
+    || command === "/approve" || command === "/reject" || command === "/pending" ? command : null;
 }
 
 function normalizeFrameVariations(value: unknown) {
@@ -221,6 +226,7 @@ export default function PromptBar() {
   const [agentConsoleOpen, setAgentConsoleOpen] = useState(false);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [agentPending, setAgentPending] = useState(false);
+  const [agentToolPending, setAgentToolPending] = useState(false);
   const [agentError, setAgentError] = useState("");
   const [agentBrain, setAgentBrain] = useState<"model" | "local">("local");
   const [agentModel, setAgentModel] = useState<string | null>(null);
@@ -245,6 +251,7 @@ export default function PromptBar() {
   const referenceReadInFlightRef = useRef(new Set<string>());
   const referenceReadAttemptsRef = useRef(new Map<string, number>());
   const agentRunHydratedProjectRef = useRef<number | null>(null);
+  const agentToolPendingRef = useRef(false);
   const activeProjectIdRef = useRef(activeProjectId);
   const moduleFilesRef = useRef(moduleContext.files);
 
@@ -378,6 +385,8 @@ export default function PromptBar() {
     setDraftProjectId(null);
     setGenerationError("");
     setAgentMessages([]);
+    setAgentToolPending(false);
+    agentToolPendingRef.current = false;
     setAgentError("");
     setAgentBrain("local");
     setAgentModel(null);
@@ -416,7 +425,11 @@ export default function PromptBar() {
         if (state && validPersistedAgentRun(state.run)) {
           const restoredRun = recoverInterruptedAgentRun(state.run);
           setAgentRun(restoredRun);
-          setAgentMessages(Array.isArray(state.messages) ? state.messages : []);
+          setAgentMessages(Array.isArray(state.messages) ? state.messages.map((message) => (
+            message.toolProposal
+              ? { ...message, toolProposal: recoverInterruptedActionProposal(message.toolProposal) }
+              : message
+          )) : []);
           setAgentDraft(state.draft || null);
           setAgentBrain(state.brain === "model" ? "model" : "local");
           setAgentModel(typeof state.model === "string" ? state.model : null);
@@ -1135,7 +1148,22 @@ export default function PromptBar() {
     let files = moduleFilesRef.current;
     const events: AgentAppEvent[] = [];
     for (const action of actions) {
-      if (activeProjectIdRef.current !== executionProjectId) break;
+      if (activeProjectIdRef.current !== executionProjectId) {
+        const failedEvent: AgentAppEvent = {
+          id: crypto.randomUUID(),
+          runId,
+          actor: "agent",
+          action,
+          inverse: null,
+          status: "failed",
+          summary: describeAgentAppAction(action),
+          error: "Project changed before this action could execute.",
+          createdAt: new Date().toISOString(),
+        };
+        await DB.agentEvents.put(executionProjectId, failedEvent).catch(() => undefined);
+        events.push(failedEvent);
+        continue;
+      }
       try {
         files = moduleFilesRef.current;
         const result = applyAgentAppAction({ action, projectName, files, runId });
@@ -1159,11 +1187,103 @@ export default function PromptBar() {
           error: error instanceof Error ? error.message : "Action failed.",
           createdAt: new Date().toISOString(),
         };
-        await DB.agentEvents.put(activeProjectId, failedEvent).catch(() => undefined);
+        await DB.agentEvents.put(executionProjectId, failedEvent).catch(() => undefined);
         events.push(failedEvent);
       }
     }
     return events;
+  };
+
+  const latestPendingActionProposal = () => [...agentMessages].reverse().find((message) => (
+    message.toolProposal?.status === "pending"
+  ));
+
+  const setActionProposalStatus = (
+    messageId: string,
+    status: Exclude<AgentActionProposalStatus, "pending">,
+    error?: string,
+  ) => {
+    setAgentMessages((messages) => messages.map((message) => {
+      if (message.id !== messageId || !message.toolProposal) return message;
+      const proposal = status === "executing"
+        ? { ...message.toolProposal, status }
+        : resolveAgentActionProposal(
+          message.toolProposal,
+          status,
+          error,
+        );
+      return { ...message, toolProposal: proposal };
+    }));
+  };
+
+  const approveActionProposal = async (messageId?: string) => {
+    if (agentToolPendingRef.current) return;
+    const proposalMessage = messageId
+      ? agentMessages.find((message) => message.id === messageId)
+      : latestPendingActionProposal();
+    const proposal = proposalMessage?.toolProposal;
+    if (!proposalMessage || !proposal || !canResolveAgentActionProposal(proposal)) {
+      addLocalAgentMessage("No app actions are waiting for approval.", "inspect");
+      return;
+    }
+    if (!activeProjectId || proposal.projectId !== activeProjectId) {
+      setActionProposalStatus(proposalMessage.id, "stale", "The active project changed before approval.");
+      addLocalAgentMessage("APPROVAL STALE - The active project changed. No actions were executed.", "inspect");
+      return;
+    }
+
+    agentToolPendingRef.current = true;
+    setAgentToolPending(true);
+    setActionProposalStatus(proposalMessage.id, "executing");
+    try {
+      const events = await executeAppActions(proposal.actions, proposal.runId);
+      const status = proposalStatusFromEvents(events);
+      const resultText = events.length
+        ? events.map((event) => event.status === "completed"
+          ? `ACTION OK - ${event.summary}`
+          : `ACTION FAILED - ${event.summary} - ${event.error || "unknown error"}`).join("\n")
+        : "ACTION FAILED - No actions were executed.";
+      setAgentMessages((messages) => [
+        ...messages.map((message) => message.id === proposalMessage.id && message.toolProposal
+          ? { ...message, toolProposal: resolveAgentActionProposal(message.toolProposal, status) }
+          : message),
+        {
+          id: crypto.randomUUID(),
+          role: "system" as const,
+          text: resultText,
+          action: "inspect" as const,
+          createdAt: new Date().toISOString(),
+          context: currentReferenceContext(),
+        },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Action execution failed.";
+      setActionProposalStatus(proposalMessage.id, "failed", message);
+      addLocalAgentMessage(`ACTION FAILED - ${message}`, "inspect");
+    } finally {
+      agentToolPendingRef.current = false;
+      setAgentToolPending(false);
+    }
+  };
+
+  const rejectActionProposal = (messageId?: string) => {
+    if (agentToolPendingRef.current) return;
+    const proposalMessage = messageId
+      ? agentMessages.find((message) => message.id === messageId)
+      : latestPendingActionProposal();
+    if (!proposalMessage?.toolProposal || !canResolveAgentActionProposal(proposalMessage.toolProposal)) {
+      addLocalAgentMessage("No app actions are waiting for approval.", "inspect");
+      return;
+    }
+    setActionProposalStatus(proposalMessage.id, "rejected");
+    addLocalAgentMessage(`REJECTED - ${proposalMessage.toolProposal.actions.length} proposed app action${proposalMessage.toolProposal.actions.length === 1 ? "" : "s"}.`, "inspect");
+  };
+
+  const showPendingActionProposals = () => {
+    const pending = agentMessages.filter((message) => message.toolProposal?.status === "pending");
+    addLocalAgentMessage(pending.length
+      ? pending.map((message) => message.toolProposal!.actions.map((action) => `PENDING - ${describeAgentAppAction(action)}`).join("\n")).join("\n")
+      : "No app actions are waiting for approval.", "inspect");
   };
 
   const undoLastAppAction = async () => {
@@ -1204,7 +1324,7 @@ export default function PromptBar() {
       : "No agent app actions recorded for this project.", "inspect");
   };
 
-  const runCanvasLocalCommand = (command: "/help" | "/clear" | "/undo" | "/actions") => {
+  const runCanvasLocalCommand = (command: "/help" | "/clear" | "/undo" | "/actions" | "/approve" | "/reject" | "/pending") => {
     setCommandMenuOpen(false);
     setHistoryIndex(-1);
     if (command === "/undo") {
@@ -1217,12 +1337,29 @@ export default function PromptBar() {
       void showRecentAppActions().catch((error) => setAgentError(error instanceof Error ? error.message : "Could not read actions."));
       return;
     }
+    if (command === "/approve") {
+      setPromptText("");
+      void approveActionProposal().catch((error) => setAgentError(error instanceof Error ? error.message : "Approval failed."));
+      return;
+    }
+    if (command === "/reject") {
+      setPromptText("");
+      rejectActionProposal();
+      return;
+    }
+    if (command === "/pending") {
+      setPromptText("");
+      showPendingActionProposals();
+      return;
+    }
     if (command === "/clear") {
       if (activeProjectId) {
         window.localStorage.setItem(agentRunClearedStorageKey(activeProjectId), new Date().toISOString());
         void DB.agentRuns.clearActive(activeProjectId).catch((error) => console.error("Failed to end agent run", error));
       }
       setAgentMessages([]);
+      setAgentToolPending(false);
+      agentToolPendingRef.current = false;
       setAgentDraft(null);
       setAgentRun(null);
       setAgentReviewTargets([]);
@@ -1243,6 +1380,9 @@ export default function PromptBar() {
       "/clear resets this console.",
       "/undo reverses the latest completed agent app action.",
       "/actions shows the recent app action log.",
+      "/approve executes the latest proposed app actions.",
+      "/reject rejects the latest proposed app actions.",
+      "/pending shows actions waiting for approval.",
       "/help shows commands.",
     ].join("\n"), "inspect");
     setPromptText("");
@@ -1284,7 +1424,18 @@ export default function PromptBar() {
       if (activeProjectIdRef.current !== requestProjectId) {
         throw new Error("Project changed while the agent was working. No app actions were applied.");
       }
-      const appEvents = await executeAppActions(response.appActions || [], response.run.id);
+      const proposedActions = response.appActions || [];
+      const proposalMessage: AgentMessage | null = proposedActions.length && requestProjectId
+        ? {
+          id: crypto.randomUUID(),
+          role: "system",
+          text: `APPROVAL REQUIRED - ${proposedActions.length} app action${proposedActions.length === 1 ? "" : "s"}. Review before execution.`,
+          action: "inspect",
+          createdAt: new Date().toISOString(),
+          context: currentReferenceContext(),
+          toolProposal: createAgentActionProposal(proposedActions, response.run.id, requestProjectId),
+        }
+        : null;
       setAgentBrain(response.brain);
       setAgentModel(response.model);
       setAgentDraft(response.draft);
@@ -1295,16 +1446,7 @@ export default function PromptBar() {
           ...response.message,
           context: currentReferenceContext(),
         },
-        ...(appEvents.length ? [{
-          id: crypto.randomUUID(),
-          role: "system" as const,
-          text: appEvents.map((event) => event.status === "completed"
-            ? `ACTION OK · ${event.summary}`
-            : `ACTION FAILED · ${event.summary} · ${event.error || "unknown error"}`).join("\n"),
-          action: "inspect" as const,
-          createdAt: new Date().toISOString(),
-          context: currentReferenceContext(),
-        }] : []),
+        ...(proposalMessage ? [proposalMessage] : []),
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Brief agent failed.";
@@ -1658,6 +1800,40 @@ export default function PromptBar() {
                         })()}
                         {message.promptArtifact.sourceFingerprint && message.promptArtifact.sourceFingerprint !== referenceFingerprint && (
                           <div className="agent-line agent-muted">&gt; REFS CHANGED SINCE THIS PROMPT.</div>
+                        )}
+                      </div>
+                    )}
+                    {message.toolProposal && (
+                      <div className={`agent-tool-proposal status-${message.toolProposal.status}`}>
+                        <div className="agent-artifact-head">
+                          <span>&gt; <mark>APP ACTIONS</mark></span>
+                          <span className="agent-tool-status">{message.toolProposal.status.replace("_", " ").toUpperCase()}</span>
+                        </div>
+                        <div className="agent-tool-actions">
+                          {message.toolProposal.actions.map((action, index) => (
+                            <div key={action.id}>{index + 1}. {describeAgentAppAction(action)}</div>
+                          ))}
+                        </div>
+                        {message.toolProposal.error && (
+                          <div className="agent-line agent-muted">{message.toolProposal.error}</div>
+                        )}
+                        {message.toolProposal.status === "pending" && (
+                          <div className="agent-tool-controls">
+                            <button
+                              type="button"
+                              disabled={agentPending || agentToolPending}
+                              onClick={() => void approveActionProposal(message.id)}
+                            >
+                              APPROVE
+                            </button>
+                            <button
+                              type="button"
+                              disabled={agentPending || agentToolPending}
+                              onClick={() => rejectActionProposal(message.id)}
+                            >
+                              REJECT
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}

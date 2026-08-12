@@ -611,6 +611,63 @@
       line-height: 1.45;
     }
 
+    .agent-tool-proposal {
+      margin-top: 7px;
+      padding: 7px 8px 8px;
+      border: 1px solid rgba(82, 113, 255, 0.8);
+      background: rgba(82, 113, 255, 0.08);
+    }
+
+    .agent-tool-proposal.status-executing {
+      border-color: #ea5823;
+    }
+
+    .agent-tool-proposal.status-completed,
+    .agent-tool-proposal.status-rejected,
+    .agent-tool-proposal.status-stale,
+    .agent-tool-proposal.status-failed,
+    .agent-tool-proposal.status-partially_failed {
+      opacity: 0.72;
+    }
+
+    .agent-tool-status {
+      color: #ea5823;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+    }
+
+    .agent-tool-actions {
+      margin: 5px 0 7px;
+      color: #c7c7c7;
+      line-height: 1.5;
+      text-transform: none;
+    }
+
+    .agent-tool-controls {
+      display: flex;
+      gap: 5px;
+    }
+
+    .agent-tool-controls button {
+      min-width: 72px;
+      height: 22px;
+      border: 1px solid #5271ff;
+      background: #5271ff;
+      color: #c7c7c7;
+      padding: 0 8px;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .agent-tool-controls button:last-child {
+      background: transparent;
+    }
+
+    .agent-tool-controls button:disabled {
+      opacity: 0.5;
+      cursor: wait;
+    }
+
     .agent-turn {
       margin: 8px 0 10px;
     }

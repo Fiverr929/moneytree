@@ -25,6 +25,26 @@ export type AgentAppEvent = {
   error?: string;
 };
 
+export type AgentActionProposalStatus =
+  | "pending"
+  | "executing"
+  | "completed"
+  | "partially_failed"
+  | "failed"
+  | "rejected"
+  | "stale";
+
+export type AgentActionProposal = {
+  id: string;
+  runId: string;
+  projectId: number;
+  status: AgentActionProposalStatus;
+  actions: AgentAppAction[];
+  createdAt: string;
+  resolvedAt?: string;
+  error?: string;
+};
+
 export type CafeWorkspaceSnapshot = {
   project: { id: number; name: string };
   folders: Array<{ id: string; name: string }>;
@@ -60,6 +80,7 @@ export type AgentMessage = {
     refCount?: number;
     previousPrompt?: string;
   };
+  toolProposal?: AgentActionProposal;
   context?: {
     refCount: number;
   };

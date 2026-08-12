@@ -9,8 +9,9 @@ The default planner uses Gemini 3.6 Flash at medium thinking. Reference reading 
 1. The browser sends a compact workspace snapshot with exact project, folder, and reference identifiers.
 2. The model may return conversational output plus a bounded list of safe `appActions`.
 3. The server validates action types, values, folders, and targets against that snapshot.
-4. The browser revalidates each target against current state, applies one typed action, and persists the mutation and event atomically.
-5. The console prints `ACTION OK` or `ACTION FAILED` from actual execution. Model text is never treated as proof that an action succeeded.
+4. The browser renders a typed proposal with `APPROVE` and `REJECT`; no mutation occurs while it is pending.
+5. Approval revalidates the project and every target against current state, then applies and persists each mutation and event atomically.
+6. The console prints `ACTION OK` or `ACTION FAILED` from actual execution. Model text is never treated as proof that an action succeeded.
 
 ## Safe action set
 
@@ -29,6 +30,8 @@ Generation, editing, deletion, replacement, upload, and publishing are intention
 - Unknown action types, targets, roles, folders, and malformed values are discarded server-side.
 - Names are normalized and length-limited; strength is clamped to `0..100`.
 - App actions execute only when the active project still matches the project that launched the request.
+- Pending and resolved proposals persist with the agent run; interrupted execution becomes stale instead of running twice.
+- Every proposal is single-use. Repeated approval and rejection attempts are ignored.
 - Each durable mutation and its event record share one IndexedDB transaction.
 - Multi-action responses report partial success explicitly instead of pretending the batch was atomic.
 - `/undo` applies the stored inverse of the latest eligible completed agent action.
@@ -43,10 +46,12 @@ Generation, editing, deletion, replacement, upload, and publishing are intention
 - `/clear` — end the current agent run and clear the console.
 - `/help` — list commands.
 
+Approval commands: `/pending` shows waiting proposals, `/approve` executes the latest proposal, and `/reject` declines it.
+
 ## Next runtime milestones
 
 1. Route manual UI mutations through the same typed command layer.
-2. Add approval objects for paid generation, image editing, replacement, and destructive actions.
+2. Extend approval objects to image editing, replacement, and destructive actions.
 3. Add action/observation iterations so the model can inspect results and choose a bounded next step.
 4. Add content-addressed vision memory and structured project preferences.
 5. Add replayable end-to-end evaluations for target resolution, permissions, undo, interruption, and result verification.
