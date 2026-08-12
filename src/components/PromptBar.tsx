@@ -1752,20 +1752,37 @@ export default function PromptBar() {
             onChange={(e) => setPromptText(e.currentTarget.value)}
             onKeyDown={handleKeyDown}
           />
-          <button
-            className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`}
-            id="generateBtn"
-            type="button"
-            disabled={!activeProjectId}
-            aria-label={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
-            title={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
-            onClick={() => {
-              if (parseGenerateCommand(promptText) !== null) void handleGenerate();
-              else void submitAgentMessage();
-            }}
-          >
-            <span className="generate-icon" aria-hidden="true"></span>
-          </button>
+          <div className="prompt-submit-controls">
+            <button
+              className="prompt-clear-input"
+              type="button"
+              disabled={!promptText}
+              aria-label="Clear input"
+              title="Clear input"
+              onClick={() => {
+                setPromptText("");
+                setCommandMenuOpen(false);
+                setHistoryIndex(-1);
+                inputRef.current?.focus();
+              }}
+            >
+              <span aria-hidden="true">&times;</span>
+            </button>
+            <button
+              className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`}
+              id="generateBtn"
+              type="button"
+              disabled={!activeProjectId}
+              aria-label={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
+              title={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
+              onClick={() => {
+                if (parseGenerateCommand(promptText) !== null) void handleGenerate();
+                else void submitAgentMessage();
+              }}
+            >
+              <span className="generate-icon" aria-hidden="true"></span>
+            </button>
+          </div>
         </div>
         {commandMenuOpen && filteredCommands.length > 0 && (
           <div className="canvas-command-menu" role="listbox" aria-label="Canvas commands">
@@ -1791,17 +1808,6 @@ export default function PromptBar() {
         )}
       </div>
       <div id="agentConsole" className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
-        <button
-          className="agent-console-clear"
-          type="button"
-          aria-label="Clear chat"
-          title="Clear chat"
-          disabled={!agentConsoleOpen}
-          tabIndex={agentConsoleOpen ? 0 : -1}
-          onClick={() => runCanvasLocalCommand("/clear")}
-        >
-          <span aria-hidden="true">&times;</span>
-        </button>
         <button
           className="agent-console-retract"
           type="button"
