@@ -1819,6 +1819,19 @@ export default function PromptBar() {
           </div>
         </div>
 
+        <button
+          className={`agent-console-toggle ${agentConsoleOpen ? "open" : ""}`}
+          type="button"
+          aria-label={agentConsoleOpen ? "Retract chat" : "Open chat"}
+          title={agentConsoleOpen ? "Retract chat" : "Open chat"}
+          aria-expanded={agentConsoleOpen}
+          aria-controls="agentConsole"
+          onClick={() => {
+            if (agentConsoleOpen) inputRef.current?.blur();
+            setAgentConsoleOpen((open) => !open);
+          }}
+        ></button>
+
         {generationError && (
           <button
             className="prompt-inline-error"
@@ -1902,18 +1915,6 @@ export default function PromptBar() {
         )}
       </div>
       <div id="agentConsole" className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
-        <button
-          className="agent-console-retract"
-          type="button"
-          aria-label="Retract chat"
-          title="Retract chat"
-          disabled={!agentConsoleOpen}
-          tabIndex={agentConsoleOpen ? 0 : -1}
-          onClick={() => {
-            inputRef.current?.blur();
-            setAgentConsoleOpen(false);
-          }}
-        ></button>
         <div className="agent-console-scroll" ref={agentConsoleScrollRef}>
           {agentIdle ? (
             <div className="agent-idle">

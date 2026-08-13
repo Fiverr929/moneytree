@@ -478,34 +478,33 @@
       line-height: 1;
     }
 
-    .agent-console-retract {
-      position: absolute;
-      top: 6px;
-      right: max(8px, env(safe-area-inset-right));
-      z-index: 2;
+    .agent-console-toggle {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 26px;
-      min-width: 26px;
-      height: 26px;
+      width: 47px;
+      min-width: 47px;
+      height: 47px;
       padding: 0;
       border: 0;
+      border-right: 1px solid #c7c7c7;
       background: #ea5823;
       cursor: pointer;
+      flex: 0 0 auto;
     }
 
-    .agent-console-retract::before {
+    .agent-console-toggle::before {
       content: '';
       width: 0;
       height: 0;
       border-left: 5px solid transparent;
       border-right: 5px solid transparent;
       border-top: 8px solid #5271ff;
+      transition: transform 0.2s ease;
     }
 
-    .agent-console-retract:disabled {
-      pointer-events: none;
+    .agent-console-toggle.open::before {
+      transform: rotate(180deg);
     }
 
     .agent-console-scroll {
@@ -5212,7 +5211,6 @@
   height: 47px;
   padding: 0;
   border: 0;
-  border-left: 1px solid #c7c7c7;
   background: transparent;
   color: #c7c7c7;
   font-size: 18px;
@@ -5293,23 +5291,38 @@
 }
 
 @media (min-width: 901px) {
+  #promptBar .agent-console-toggle { width: 42px; min-width: 42px; height: 42px; }
   #promptBar .prompt-clear-input { height: 42px; }
   #promptBar .btn-frame { width: 42px; min-width: 42px; height: 42px; }
 }
 
 @media (min-width: 681px) and (max-width: 900px) {
+  #promptBar .agent-console-toggle { width: 44px; min-width: 44px; height: 44px; }
   #promptBar .prompt-clear-input { height: 44px; }
   #promptBar .btn-frame { width: 44px; min-width: 44px; height: 44px; }
 }
 
 @media (max-width: 680px) {
+  #promptBar .agent-console-toggle { width: 40px; min-width: 40px; height: 40px; }
   #promptBar .prompt-clear-input { height: 40px; }
   #promptBar .btn-frame { width: 40px; min-width: 40px; height: 40px; }
 }
 
 @media (max-width: 430px) {
-  #promptBar .prompt-submit-controls {
+  #promptBar .prompt-bar-row {
+    grid-template-columns: 36px 36px 36px minmax(0, 1fr);
+  }
+
+  #promptBar .agent-console-toggle {
     grid-column: 3;
+    grid-row: 1;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+  }
+
+  #promptBar .prompt-submit-controls {
+    grid-column: 4;
     grid-row: 1;
     justify-self: end;
     height: 36px;
