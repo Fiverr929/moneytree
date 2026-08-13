@@ -462,7 +462,7 @@
 
     .agent-console-collapse {
       position: absolute;
-      top: 7px;
+      top: 1px;
       right: max(8px, env(safe-area-inset-right));
       z-index: 3;
       display: flex;
@@ -506,6 +506,12 @@
 
     .agent-console-scroll::-webkit-scrollbar-thumb {
       background: #5271ff;
+    }
+
+    .agent-console-scroll::-webkit-scrollbar-button {
+      display: none;
+      width: 0;
+      height: 0;
     }
 
     .agent-idle {
@@ -9478,6 +9484,11 @@ body.module-collapsed .module-panel {
 
 /* Final cascade guard: the X stays inside the field; chat retract stays in its panel. */
 #promptBar .prompt-clear-input {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  z-index: 2;
+  transform: translateY(-50%);
   display: flex;
   visibility: visible;
   opacity: 1;
@@ -9486,23 +9497,32 @@ body.module-collapsed .module-panel {
   outline: 0;
   background: transparent;
   color: #ea5823;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+#promptBar .prompt-input-area .prompt-text-field {
+  width: 100%;
+  padding-right: 36px;
 }
 
 @media (min-width: 901px) {
   #promptBar .prompt-clear-input {
-    height: 42px;
+    height: 24px;
   }
 }
 
 @media (min-width: 681px) and (max-width: 900px) {
   #promptBar .prompt-clear-input {
-    height: 44px;
+    height: 24px;
   }
 }
 
 @media (min-width: 431px) and (max-width: 680px) {
   #promptBar .prompt-clear-input {
-    height: 40px;
+    height: 24px;
   }
 }
 
@@ -9526,13 +9546,14 @@ body.module-collapsed .module-panel {
     height: 56px;
     min-height: 56px;
     border: 0;
-    padding-right: 4px;
+    padding-right: 36px;
   }
 
   #promptBar .prompt-input-area .prompt-clear-input {
-    width: 28px;
-    min-width: 28px;
-    height: 56px;
+    right: 5px;
+    width: 24px;
+    min-width: 24px;
+    height: 24px;
   }
 
   #promptBar .btn-frame {
@@ -9545,7 +9566,7 @@ body.module-collapsed .module-panel {
   }
 
   #promptBar .agent-console-collapse {
-    top: 5px;
+    top: 1px;
     right: max(8px, env(safe-area-inset-right));
     width: 26px;
     min-width: 26px;
