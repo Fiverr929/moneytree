@@ -356,6 +356,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      position: relative;
       overflow: hidden;
       border: 1.134px solid var(--accent);
       border-left: 0;
@@ -459,52 +460,30 @@
       transform: translateY(0);
     }
 
-    .agent-console-close {
+    .agent-console-collapse {
       position: absolute;
       top: 7px;
       right: max(8px, env(safe-area-inset-right));
-      z-index: 2;
+      z-index: 3;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 24px;
-      min-width: 24px;
-      height: 24px;
-      padding: 0;
-      border: 1px solid #ea5823;
-      background: #999997;
-      color: #e8e6e6;
-      font-size: 18px;
-      line-height: 1;
-    }
-
-    .agent-console-toggle {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 47px;
-      min-width: 47px;
-      height: 47px;
+      width: 26px;
+      min-width: 26px;
+      height: 26px;
       padding: 0;
       border: 0;
-      border-right: 1px solid #c7c7c7;
       background: #ea5823;
       cursor: pointer;
-      flex: 0 0 auto;
     }
 
-    .agent-console-toggle::before {
+    .agent-console-collapse::before {
       content: '';
       width: 0;
       height: 0;
       border-left: 5px solid transparent;
       border-right: 5px solid transparent;
       border-top: 8px solid #5271ff;
-      transition: transform 0.2s ease;
-    }
-
-    .agent-console-toggle.open::before {
-      transform: rotate(180deg);
     }
 
     .agent-console-scroll {
@@ -5195,13 +5174,6 @@
   transition: right 0.09s cubic-bezier(0.2, 0, 0.2, 1) 0s, top 0.18s ease !important;
 }
 
-/* The only chat visual override: keep the main generate control square and icon-only. */
-.prompt-submit-controls {
-  display: flex;
-  align-items: stretch;
-  flex: 0 0 auto;
-}
-
 #promptBar .prompt-clear-input {
   display: flex;
   align-items: center;
@@ -5212,7 +5184,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: #c7c7c7;
+  color: #ea5823;
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -5291,43 +5263,21 @@
 }
 
 @media (min-width: 901px) {
-  #promptBar .agent-console-toggle { width: 42px; min-width: 42px; height: 42px; }
   #promptBar .prompt-clear-input { height: 42px; }
   #promptBar .btn-frame { width: 42px; min-width: 42px; height: 42px; }
 }
 
 @media (min-width: 681px) and (max-width: 900px) {
-  #promptBar .agent-console-toggle { width: 44px; min-width: 44px; height: 44px; }
   #promptBar .prompt-clear-input { height: 44px; }
   #promptBar .btn-frame { width: 44px; min-width: 44px; height: 44px; }
 }
 
 @media (max-width: 680px) {
-  #promptBar .agent-console-toggle { width: 40px; min-width: 40px; height: 40px; }
   #promptBar .prompt-clear-input { height: 40px; }
   #promptBar .btn-frame { width: 40px; min-width: 40px; height: 40px; }
 }
 
 @media (max-width: 430px) {
-  #promptBar .prompt-bar-row {
-    grid-template-columns: 36px 36px 36px minmax(0, 1fr);
-  }
-
-  #promptBar .agent-console-toggle {
-    grid-column: 3;
-    grid-row: 1;
-    width: 36px;
-    min-width: 36px;
-    height: 36px;
-  }
-
-  #promptBar .prompt-submit-controls {
-    grid-column: 4;
-    grid-row: 1;
-    justify-self: end;
-    height: 36px;
-  }
-
   #promptBar .prompt-clear-input { height: 36px; }
   #promptBar .btn-frame { width: 36px; min-width: 36px; height: 36px; }
 }
@@ -9526,32 +9476,7 @@ body.module-collapsed .module-panel {
   }
 }
 
-/* Final cascade guard: these controls must stay visible on every breakpoint. */
-#promptBar .agent-console-toggle {
-  position: relative;
-  z-index: 4;
-  display: flex;
-  visibility: visible;
-  opacity: 1;
-  flex: 0 0 auto;
-}
-
-#promptBar .agent-console-toggle::before {
-  display: block;
-  visibility: visible;
-  opacity: 1;
-}
-
-#promptBar .prompt-submit-controls {
-  position: relative;
-  z-index: 4;
-  display: flex;
-  visibility: visible;
-  opacity: 1;
-  align-items: stretch;
-  flex: 0 0 auto;
-}
-
+/* Final cascade guard: the X stays inside the field; chat retract stays in its panel. */
 #promptBar .prompt-clear-input {
   display: flex;
   visibility: visible;
@@ -9564,24 +9489,18 @@ body.module-collapsed .module-panel {
 }
 
 @media (min-width: 901px) {
-  #promptBar .agent-console-toggle,
-  #promptBar .prompt-submit-controls,
   #promptBar .prompt-clear-input {
     height: 42px;
   }
 }
 
 @media (min-width: 681px) and (max-width: 900px) {
-  #promptBar .agent-console-toggle,
-  #promptBar .prompt-submit-controls,
   #promptBar .prompt-clear-input {
     height: 44px;
   }
 }
 
 @media (min-width: 431px) and (max-width: 680px) {
-  #promptBar .agent-console-toggle,
-  #promptBar .prompt-submit-controls,
   #promptBar .prompt-clear-input {
     height: 40px;
   }
@@ -9589,36 +9508,47 @@ body.module-collapsed .module-panel {
 
 @media (max-width: 430px) {
   #promptBar .prompt-bar-row {
-    grid-template-columns: 36px 36px 36px minmax(64px, 1fr);
+    grid-template-columns: 36px 36px minmax(0, 1fr);
   }
 
-  #promptBar .agent-console-toggle {
-    grid-column: 3;
-    grid-row: 1;
-    width: 36px;
-    min-width: 36px;
-    height: 36px;
+  #promptBar .prompt-input-area {
+    display: flex;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    height: 58px;
+    border: 1px solid var(--accent);
   }
 
-  #promptBar .prompt-submit-controls {
-    grid-column: 4;
-    grid-row: 1;
-    justify-self: end;
-    height: 36px;
-  }
-
-  #promptBar .prompt-submit-controls .prompt-clear-input {
-    width: 28px;
-    min-width: 28px;
-    height: 36px;
-  }
-
-  #promptBar .prompt-submit-controls .btn-frame {
+  #promptBar .prompt-input-area .prompt-text-field {
     grid-column: auto;
     grid-row: auto;
-    justify-self: auto;
+    height: 56px;
+    min-height: 56px;
+    border: 0;
+    padding-right: 4px;
+  }
+
+  #promptBar .prompt-input-area .prompt-clear-input {
+    width: 28px;
+    min-width: 28px;
+    height: 56px;
+  }
+
+  #promptBar .btn-frame {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
     width: 36px;
     min-width: 36px;
     height: 36px;
+  }
+
+  #promptBar .agent-console-collapse {
+    top: 5px;
+    right: max(8px, env(safe-area-inset-right));
+    width: 26px;
+    min-width: 26px;
+    height: 26px;
   }
 }

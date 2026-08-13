@@ -1819,19 +1819,6 @@ export default function PromptBar() {
           </div>
         </div>
 
-        <button
-          className={`agent-console-toggle ${agentConsoleOpen ? "open" : ""}`}
-          type="button"
-          aria-label={agentConsoleOpen ? "Retract chat" : "Open chat"}
-          title={agentConsoleOpen ? "Retract chat" : "Open chat"}
-          aria-expanded={agentConsoleOpen}
-          aria-controls="agentConsole"
-          onClick={() => {
-            if (agentConsoleOpen) inputRef.current?.blur();
-            setAgentConsoleOpen((open) => !open);
-          }}
-        ></button>
-
         {generationError && (
           <button
             className="prompt-inline-error"
@@ -1859,37 +1846,35 @@ export default function PromptBar() {
             onChange={(e) => setPromptText(e.currentTarget.value)}
             onKeyDown={handleKeyDown}
           />
-          <div className="prompt-submit-controls">
-            <button
-              className="prompt-clear-input"
-              type="button"
-              aria-label="Clear input"
-              title="Clear input"
-              onClick={() => {
-                setPromptText("");
-                setCommandMenuOpen(false);
-                setHistoryIndex(-1);
-                inputRef.current?.focus();
-              }}
-            >
-              <span aria-hidden="true">&times;</span>
-            </button>
-            <button
-              className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`}
-              id="generateBtn"
-              type="button"
-              disabled={!activeProjectId}
-              aria-label={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
-              title={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
-              onClick={() => {
-                if (parseGenerateCommand(promptText) !== null) void handleGenerate();
-                else void submitAgentMessage();
-              }}
-            >
-              <span className="generate-icon" aria-hidden="true"></span>
-            </button>
-          </div>
+          <button
+            className="prompt-clear-input"
+            type="button"
+            aria-label="Clear input"
+            title="Clear input"
+            onClick={() => {
+              setPromptText("");
+              setCommandMenuOpen(false);
+              setHistoryIndex(-1);
+              inputRef.current?.focus();
+            }}
+          >
+            <span aria-hidden="true">&times;</span>
+          </button>
         </div>
+        <button
+          className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`}
+          id="generateBtn"
+          type="button"
+          disabled={!activeProjectId}
+          aria-label={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
+          title={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
+          onClick={() => {
+            if (parseGenerateCommand(promptText) !== null) void handleGenerate();
+            else void submitAgentMessage();
+          }}
+        >
+          <span className="generate-icon" aria-hidden="true"></span>
+        </button>
         {commandMenuOpen && filteredCommands.length > 0 && (
           <div className="canvas-command-menu" role="listbox" aria-label="Canvas commands">
             <div className="canvas-command-head">
@@ -1914,6 +1899,16 @@ export default function PromptBar() {
         )}
       </div>
       <div id="agentConsole" className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
+        <button
+          className="agent-console-collapse"
+          type="button"
+          aria-label="Retract chat"
+          title="Retract chat"
+          onClick={() => {
+            inputRef.current?.blur();
+            setAgentConsoleOpen(false);
+          }}
+        ></button>
         <div className="agent-console-scroll" ref={agentConsoleScrollRef}>
           {agentIdle ? (
             <div className="agent-idle">
