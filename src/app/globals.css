@@ -462,8 +462,8 @@
 
     .agent-console-collapse {
       position: absolute;
-      top: 1px;
-      right: 8px;
+      top: 6px;
+      right: 13px;
       z-index: 3;
       display: flex;
       align-items: center;
@@ -9566,8 +9566,8 @@ body.module-collapsed .module-panel {
   }
 
   #promptBar .agent-console-collapse {
-    top: 1px;
-    right: 8px;
+    top: 6px;
+    right: 13px;
     width: 26px;
     min-width: 26px;
     height: 26px;
