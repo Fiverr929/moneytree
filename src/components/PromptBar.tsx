@@ -1851,11 +1851,16 @@ export default function PromptBar() {
             type="button"
             aria-label="Clear input"
             title="Clear input"
-            onClick={() => {
+            onPointerDown={(event) => {
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
               setPromptText("");
               setCommandMenuOpen(false);
               setHistoryIndex(-1);
-              inputRef.current?.focus();
+              window.requestAnimationFrame(() => inputRef.current?.focus());
             }}
           >
             <span aria-hidden="true">&times;</span>

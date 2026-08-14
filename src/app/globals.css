@@ -9485,10 +9485,10 @@ body.module-collapsed .module-panel {
 /* Final cascade guard: the X stays inside the field; chat retract stays in its panel. */
 #promptBar .prompt-clear-input {
   position: absolute;
-  top: 50%;
-  right: 5px;
+  top: 0;
+  right: 0;
   z-index: 2;
-  transform: translateY(-50%);
+  transform: none;
   display: flex;
   visibility: visible;
   opacity: 1;
@@ -9497,32 +9497,32 @@ body.module-collapsed .module-panel {
   outline: 0;
   background: transparent;
   color: #ea5823;
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
+  width: 36px;
+  min-width: 36px;
+  height: 100%;
   padding: 0;
 }
 
 #promptBar .prompt-input-area .prompt-text-field {
   width: 100%;
-  padding-right: 36px;
+  padding-right: 44px;
 }
 
 @media (min-width: 901px) {
   #promptBar .prompt-clear-input {
-    height: 24px;
+    height: 100%;
   }
 }
 
 @media (min-width: 681px) and (max-width: 900px) {
   #promptBar .prompt-clear-input {
-    height: 24px;
+    height: 100%;
   }
 }
 
 @media (min-width: 431px) and (max-width: 680px) {
   #promptBar .prompt-clear-input {
-    height: 24px;
+    height: 100%;
   }
 }
 
@@ -9546,14 +9546,14 @@ body.module-collapsed .module-panel {
     height: 56px;
     min-height: 56px;
     border: 0;
-    padding-right: 36px;
+    padding-right: 44px;
   }
 
   #promptBar .prompt-input-area .prompt-clear-input {
-    right: 5px;
-    width: 24px;
-    min-width: 24px;
-    height: 24px;
+    right: 0;
+    width: 36px;
+    min-width: 36px;
+    height: 100%;
   }
 
   #promptBar .btn-frame {
