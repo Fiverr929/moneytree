@@ -7686,7 +7686,7 @@ body.module-collapsed .module-panel {
   padding: 18px;
 }
 .evaluation-panel {
-  width: min(680px, calc(100vw - 36px));
+  width: min(620px, calc(100vw - 36px));
   max-height: calc(100vh - 36px);
   display: flex;
   flex-direction: column;
@@ -7733,7 +7733,7 @@ body.module-collapsed .module-panel {
 .evaluation-content {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   padding: 16px;
 }
 .evaluation-meta {
@@ -7767,11 +7767,11 @@ body.module-collapsed .module-panel {
   gap: 6px;
 }
 .evaluation-reactions button {
-  height: 38px;
+  min-height: 44px;
   border: 1px solid rgba(199, 199, 199, 0.34);
   background: transparent;
   color: #c7c7c7;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -7779,28 +7779,6 @@ body.module-collapsed .module-panel {
 .evaluation-reactions button.active { background: #5271ff; border-color: #5271ff; }
 .evaluation-reactions button.active.like { background: #39745c; border-color: #39745c; }
 .evaluation-reactions button.active.dislike { background: #a34334; border-color: #a34334; }
-.evaluation-aspects {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
-}
-.evaluation-aspects button {
-  min-height: 30px;
-  display: grid;
-  grid-template-columns: 16px 1fr;
-  align-items: center;
-  border: 1px solid rgba(199, 199, 199, 0.28);
-  background: transparent;
-  color: #c7c7c7;
-  padding: 0 8px;
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  text-align: left;
-  text-transform: uppercase;
-}
-.evaluation-aspects button.keep { border-color: #4c9476; background: rgba(57, 116, 92, 0.28); }
-.evaluation-aspects button.change { border-color: #c35e49; background: rgba(163, 67, 52, 0.26); }
-.evaluation-aspects button span { font-size: 15px; line-height: 1; }
 .evaluation-row {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
@@ -7846,7 +7824,7 @@ body.module-collapsed .module-panel {
 }
 .evaluation-comment textarea {
   width: 100%;
-  min-height: 86px;
+  min-height: 72px;
   resize: vertical;
   border: 1px solid rgba(232, 230, 230, 0.34);
   border-radius: 0;
