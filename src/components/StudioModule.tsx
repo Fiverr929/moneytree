@@ -148,11 +148,14 @@ export default function StudioModule() {
     <div className="studio-module-panel">
       <div className="studio-module-header">
         REFERENCE
-        <div 
+        <button
+          type="button"
           className={`sm-header-add ${headerMenuOpen ? 'active' : ''}`}
           id="sm-header-add"
+          aria-label="Add reference group"
+          aria-expanded={headerMenuOpen}
           onClick={(e) => { e.stopPropagation(); setHeaderMenuOpen(!headerMenuOpen); setActionDrawerId(null); setEditingGroupId(null); }}
-        ></div>
+        ></button>
       </div>
 
       <div className="studio-module-scroll">
@@ -179,9 +182,15 @@ export default function StudioModule() {
               <div key={gIdx} className={`layer-group ${isEditingName ? 'drawer-open' : ''} ${isActionOpen ? 'action-drawer-open' : ''}`}>
                 <div className="plr">
                   {g.images.length === 1 && (
-                    <div className="plr-x blue" onClick={() => removeGroup(gIdx)}>
-                      <img src="assets/icon-x-inactive.svg" alt="x" />
-                    </div>
+                    <button
+                      type="button"
+                      className="plr-x blue"
+                      title="Remove reference group"
+                      aria-label="Remove reference group"
+                      onClick={() => removeGroup(gIdx)}
+                    >
+                      <img src="assets/icon-x-inactive.svg" alt="" />
+                    </button>
                   )}
                   <button 
                     type="button" 
@@ -190,12 +199,13 @@ export default function StudioModule() {
                   >
                     {action}
                   </button>
-                  <div 
+                  <button
+                    type="button"
                     className="plr-name blue" 
                     onClick={(e) => { e.stopPropagation(); setEditingGroupId(gIdx); setEditingGroupName(g.name); setActionDrawerId(null); setHeaderMenuOpen(false); }}
                   >
                     {g.name}
-                  </div>
+                  </button>
                 </div>
 
                 {isActionOpen && (
@@ -243,55 +253,64 @@ export default function StudioModule() {
                   </div>
                 )}
 
-                <div className="layer-children">
+                <div className={`layer-children sm-image-count-${Math.min(g.images.length, MAX_IMAGES)} ${g.images.length > 1 ? 'has-multiple' : ''}`}>
                   {g.images.map((img, iIdx) => {
                     const hidden = img.visible === false;
                     return (
                     <div key={img.uuid} className={`clr ${hidden ? 'reference-hidden' : ''}`}>
-                      <button
-                        type="button"
-                        className={`clr-toggle ${hidden ? 'off' : ''}`}
-                        title={hidden ? "Include reference" : "Hide reference"}
-                        aria-label={hidden ? "Include reference" : "Hide reference"}
-                        onClick={() => toggleImageVisibility(gIdx, iIdx)}
-                      >
-                        <img
-                          src={hidden ? "assets/icon-eye-off.svg" : "assets/icon-eye-on.svg"}
-                          alt={hidden ? "hidden" : "visible"}
-                        />
-                      </button>
-                      {g.images.length > 1 && (
-                        <div className="clr-x" onClick={() => removeImage(gIdx, iIdx)}>
-                          <img src="assets/icon-trash.svg" alt="remove" />
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        className="clr-replace"
-                        title="Replace reference"
-                        aria-label="Replace reference"
-                        onClick={() => {
-                          setPendingUpload({ type: 'replace', index: gIdx, imageIndex: iIdx });
-                          fileInputRef.current?.click();
-                        }}
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                          <path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h8V3l-3.35 3.35Z" />
-                        </svg>
-                      </button>
                       <div className="clr-main img-a">
                         <img src={img.url} style={{width: '100%', height: '100%', objectFit: 'cover'}} alt="image" />
+                      </div>
+                      <div className="clr-controls" aria-label={`Reference image ${iIdx + 1} controls`}>
+                        <button
+                          type="button"
+                          className={`clr-toggle ${hidden ? 'off' : ''}`}
+                          title={hidden ? "Include reference" : "Hide reference"}
+                          aria-label={hidden ? "Include reference" : "Hide reference"}
+                          onClick={() => toggleImageVisibility(gIdx, iIdx)}
+                        >
+                          <img
+                            src={hidden ? "assets/icon-eye-off.svg" : "assets/icon-eye-on.svg"}
+                            alt=""
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          className="clr-replace"
+                          title="Replace reference"
+                          aria-label="Replace reference"
+                          onClick={() => {
+                            setPendingUpload({ type: 'replace', index: gIdx, imageIndex: iIdx });
+                            fileInputRef.current?.click();
+                          }}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h8V3l-3.35 3.35Z" />
+                          </svg>
+                        </button>
+                        {g.images.length > 1 && (
+                          <button
+                            type="button"
+                            className="clr-x"
+                            title="Remove reference"
+                            aria-label="Remove reference"
+                            onClick={() => removeImage(gIdx, iIdx)}
+                          >
+                            <img src="assets/icon-trash.svg" alt="" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   )})}
                   <div className={`add-child-row ${g.images.length >= MAX_IMAGES ? 'disabled' : ''}`}>
-                    <div className="btn-add-child" onClick={() => {
+                    <button type="button" className="btn-add-child" aria-label="Add another reference image" onClick={() => {
                       if (g.images.length >= MAX_IMAGES) return;
                       setPendingUpload({ type: 'insert', index: gIdx });
                       fileInputRef.current?.click();
                     }}>
-                      <img src="assets/icon-add-child.svg" alt="+" />
-                    </div>
+                      <img src="assets/icon-add-child.svg" alt="" />
+                      <span>ADD IMAGE</span>
+                    </button>
                   </div>
                 </div>
               </div>
