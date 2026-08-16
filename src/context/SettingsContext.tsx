@@ -36,6 +36,16 @@ export const MODELS: Record<string, ModelConfig> = {
     thinkingLevel: 'minimal',
     thinkingLevels: ['minimal', 'high']
   },
+  'google-nano-banana-2-lite': {
+    id: 'gemini-3.1-flash-lite-image',
+    label: 'NANO BANANA 2 LITE',
+    provider: 'google',
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+    resolutions: ['1K'],
+    defaultResolution: '1K',
+    costByResolution: { '1K': 0.0336 },
+    thinkingLevel: null
+  },
   'nano-banana-pro': {
     id: 'gemini-3-pro-image',
     label: 'NANO BANANA PRO',

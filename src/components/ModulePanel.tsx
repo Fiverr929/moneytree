@@ -856,7 +856,15 @@ export default function ModulePanel() {
             suppressNextRowClickRef.current = false;
             return;
           }
-          if (collapsed) return;
+
+          if (collapsed) {
+            setCollapsed(false);
+            setView("file");
+            setActiveFileId(f.id);
+            setShowInfo(false);
+            setLabelEditOpen(false);
+            return;
+          }
 
           if (selectMode) {
             const next = new Set(selectedIds);
@@ -869,15 +877,6 @@ export default function ModulePanel() {
             setShowInfo(false);
             setLabelEditOpen(false);
           }
-        }}
-        onDoubleClick={() => {
-          if (!collapsed) return;
-
-          setCollapsed(false);
-          setView("file");
-          setActiveFileId(f.id);
-          setShowInfo(false);
-          setLabelEditOpen(false);
         }}
       >
         {selectMode && (

@@ -381,6 +381,7 @@ The Projects modal is owned by `logic/prompt-bar.js`; persistence lives in `logi
 |---|---|---|---|
 | NANO BANANA | `gemini-2.5-flash-image` | none | default only |
 | NANO BANANA 2 | `gemini-3.1-flash-image` | minimal / high (user-selectable, default minimal) | 512, 1K, 2K, 4K |
+| NANO BANANA 2 LITE | `gemini-3.1-flash-lite-image` | none | 1K |
 | NANO BANANA PRO | `gemini-3-pro-image` | on by default, not configurable | 1K, 2K, 4K |
 
 `thinkingLevel` values are lowercase (`minimal` / `high`). Only NB2 exposes a selectable level — a "Thinking" control appears on the settings API page when NB2 is active (`CafeSettings.getActiveThinkingLevel()`). `seed` is **not** supported by any of these models (Imagen-only) and is not sent.
