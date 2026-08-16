@@ -1,0 +1,387 @@
+"use client";
+
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useGallery, GalleryCell } from "@/context/GalleryContext";
+import { useApp } from "@/context/AppContext";
+import DB from "@/lib/db";
+import { galleryCellForStorage, isHudImageCell } from "@/lib/galleryCells";
+
+const SKELETON_RATIOS = ["1:1", "16:9", "1:1", "9:16", "4:3", "1:1", "3:4", "1:1", "16:9"];
+
+type GalleryTileProps = {
+  cell: GalleryCell;
+  isSelected: boolean;
+  selectMode: boolean;
+  position: number;
+  isGalleryLoading: boolean;
+  onCellClick: (cellId: number) => void;
+  onRetry: (cell: GalleryCell) => void;
+};
+
+const GalleryTile = memo(function GalleryTile({
+  cell,
+  isSelected,
+  selectMode,
+  position,
+  isGalleryLoading,
+  onCellClick,
+  onRetry,
+}: GalleryTileProps) {
+  const tileRef = useRef<HTMLDivElement>(null);
+  const [shouldLoadImage, setShouldLoadImage] = useState(false);
+  const isPendingImage = isGalleryLoading && !cell.imgUrl;
+
+  useEffect(() => {
+    if (!cell.imgUrl) {
+      setShouldLoadImage(false);
+      return;
+    }
+
+    const node = tileRef.current;
+    if (!node || !("IntersectionObserver" in window)) {
+      setShouldLoadImage(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setShouldLoadImage(true);
+        observer.disconnect();
+      },
+      { rootMargin: "700px 0px" },
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [cell.imgUrl]);
+
+  return (
+    <div
+      ref={tileRef}
+      className={`gallery-cell ${cell.imgUrl ? "has-image" : "is-pending-image"} ${isSelected ? "selected" : ""}`}
+      data-id={cell.id}
+      data-ratio={cell.ratio}
+      data-loading-id={cell.loadingId}
+      role="button"
+      tabIndex={cell.loadingId ? -1 : 0}
+      aria-label={selectMode
+        ? `${isSelected ? "Deselect" : "Select"} gallery image ${position}`
+        : `Open gallery image ${position}`}
+      aria-pressed={selectMode ? isSelected : undefined}
+      onDragStart={(event) => event.preventDefault()}
+      onClick={() => !cell.loadingId && onCellClick(cell.id)}
+      onKeyDown={(event) => {
+        if (!cell.loadingId && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onCellClick(cell.id);
+        }
+      }}
+    >
+      <div
+        className={`cell-inner ${cell.phClass || ""} ${((cell.loadingId && !cell.blocked && !cell.error) || isPendingImage) ? "cafe-loading" : ""} ${cell.blocked ? "cell-blocked" : ""} ${cell.error ? "cell-error" : ""}`}
+        style={{
+          backgroundColor: cell.loadingId ? "#ea5823" : (isPendingImage ? "#999997" : undefined),
+        }}
+      >
+        {shouldLoadImage && cell.imgUrl && (
+          <img className="cell-img" src={cell.imgUrl} alt="" loading="lazy" decoding="async" draggable={false} />
+        )}
+        {cell.blocked && <span className="cell-blocked-label">{cell.statusLabel || "BLOCKED"}</span>}
+        {cell.error && (
+          <span
+            className="cell-error-label"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetry(cell);
+            }}
+            style={{ cursor: cell.retryFn ? 'pointer' : 'default' }}
+          >
+            {cell.retryFn ? "RETRY" : (cell.statusLabel || "FAILED")}
+          </span>
+        )}
+      </div>
+      <div className="cell-check"></div>
+    </div>
+  );
+});
+
+export default function Gallery() {
+  const { 
+    cells, setCells,
+    isGalleryLoading,
+    selectMode, setSelectMode,
+    selectedIds, setSelectedIds,
+    currentView, setCurrentView,
+    sortOrder, setSortOrder,
+    ratioFilter, setRatioFilter,
+    setHudOpen, setHudIndex
+  } = useGallery();
+  const { activeProjectId } = useApp();
+
+  const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
+  const [threeDotDropdownOpen, setThreeDotDropdownOpen] = useState(false);
+
+  const filterRef = useRef<HTMLDivElement>(null);
+  const threeDotRef = useRef<HTMLDivElement>(null);
+
+  const persistCell = async (cell: GalleryCell) => {
+    if (!cell.uuid || !cell.imgUrl) return;
+    if (!activeProjectId) return;
+    await DB.images.put(cell.uuid, cell.imgUrl, activeProjectId);
+    await DB.gallery.put(galleryCellForStorage({ ...cell, project_id: activeProjectId }));
+  };
+
+  // Close dropdowns on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+        setFilterDropdownOpen(false);
+      }
+      if (threeDotRef.current && !threeDotRef.current.contains(e.target as Node)) {
+        setThreeDotDropdownOpen(false);
+      }
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setThreeDotDropdownOpen(false);
+    setHudOpen(false);
+  }, [activeProjectId, setHudOpen, setSelectMode, setSelectedIds]);
+
+  // Filter and Sort Cells
+  const visibleCells = useMemo(() => {
+    const filteredCells = cells.filter(cell => {
+      if (ratioFilter === 'landscape') return ['16:9', '21:9', '4:3'].includes(cell.ratio);
+      if (ratioFilter === 'portrait')  return ['9:16', '3:4'].includes(cell.ratio);
+      if (ratioFilter === 'square')    return cell.ratio === '1:1';
+      return true;
+    });
+    return sortOrder === "oldest" ? [...filteredCells].reverse() : filteredCells;
+  }, [cells, ratioFilter, sortOrder]);
+  const hudCells = useMemo(() => visibleCells.filter(isHudImageCell), [visibleCells]);
+
+  const handleCellClick = (cellId: number) => {
+    if (selectMode) {
+      const next = new Set(selectedIds);
+      if (next.has(cellId)) next.delete(cellId);
+      else next.add(cellId);
+      setSelectedIds(next);
+    } else {
+      const idx = hudCells.findIndex(c => c.id === cellId);
+      if (idx !== -1) {
+        setHudIndex(idx);
+        setHudOpen(true);
+      }
+    }
+  };
+
+  const handleDuplicateSelected = () => {
+    const newCells: GalleryCell[] = [];
+    selectedIds.forEach(id => {
+      const cell = cells.find(c => c.id === id);
+      if (cell) {
+        const newCell = {
+          ...cell,
+          id: crypto.getRandomValues(new Uint32Array(1))[0],
+          uuid: crypto.randomUUID(),
+          type: "Duplicate",
+          kind: "image" as const,
+          origin: "duplicate" as const,
+          sourceUuid: cell.uuid,
+          updatedAt: new Date().toISOString(),
+          date: new Date().toISOString(),
+          _imgUuid: undefined,
+          _dbId: undefined,
+          loadingId: undefined,
+          blocked: undefined,
+          error: undefined,
+          retryFn: undefined,
+        };
+        newCells.push(newCell);
+        if (activeProjectId) {
+          void persistCell(newCell).catch((error) => console.error("Failed to persist duplicate", error));
+        }
+      }
+    });
+    setCells(prev => [...newCells, ...prev]);
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setThreeDotDropdownOpen(false);
+  };
+
+  const handleDeleteSelected = () => {
+    selectedIds.forEach(id => {
+      const cell = cells.find(c => c.id === id);
+      void DB.gallery.delete(id).catch((error) => console.error("Failed to delete gallery record", error));
+      if (cell?.uuid) {
+        void DB.images.delete(cell.uuid).catch((error) => console.error("Failed to delete gallery image", error));
+      }
+    });
+    setCells(prev => prev.filter(c => !selectedIds.has(c.id)));
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setThreeDotDropdownOpen(false);
+  };
+
+  const handleDownloadSelected = () => {
+    const selected = visibleCells.filter((cell) => selectedIds.has(cell.id) && !!cell.imgUrl);
+    selected.forEach((cell, index) => {
+      const mimeType = cell.imgUrl?.match(/^data:(image\/[^;,]+)/i)?.[1]?.toLowerCase();
+      const extension = mimeType === "image/jpeg"
+        ? "jpg"
+        : mimeType === "image/webp"
+          ? "webp"
+          : "png";
+      const link = document.createElement("a");
+      link.href = cell.imgUrl!;
+      link.download = `cafehtml-image-${String(index + 1).padStart(2, "0")}.${extension}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    });
+    setThreeDotDropdownOpen(false);
+  };
+
+  const handleRetryCell = (cell: GalleryCell) => {
+    if (cell.retryFn && cell.loadingId) {
+      setCells((current) => current.map((entry) =>
+        entry.loadingId === cell.loadingId
+          ? { ...entry, error: false, blocked: false, statusLabel: undefined, phClass: "loading" }
+          : entry
+      ));
+      cell.retryFn(cell.loadingId);
+    }
+  };
+
+  const hasSelected = selectedIds.size > 0;
+  const isFilterActive = sortOrder === "oldest" || ratioFilter !== "all";
+  const skeletonCells = useMemo(() => (
+    Array.from({ length: currentView === "small" ? 18 : currentView === "large" ? 9 : 12 }, (_, index) => ({
+      id: index,
+      ratio: SKELETON_RATIOS[index % SKELETON_RATIOS.length],
+      delayMs: (index % 6) * 70,
+    }))
+  ), [currentView]);
+
+  return (
+    <div id="gallery-panel" data-loading={isGalleryLoading ? "true" : "false"}>
+      <div id="gallery-controls">
+        <div id="threedot-wrap" className={selectMode ? "visible" : ""} ref={threeDotRef}>
+          <button 
+            id="btn-threedot" 
+            className={`${!hasSelected ? "btn-disabled" : ""} ${threeDotDropdownOpen ? "active" : ""}`}
+            onClick={() => { if (hasSelected) setThreeDotDropdownOpen(!threeDotDropdownOpen); }}
+            title="More actions"
+            aria-label="Selected image actions"
+            aria-expanded={threeDotDropdownOpen}
+            aria-haspopup="menu"
+            disabled={!hasSelected}
+          >
+            <span></span><span></span><span></span>
+          </button>
+          <div className={`cmp-menu gallery-action-menu ${threeDotDropdownOpen ? "open" : ""}`} id="threedot-dropdown" hidden={!threeDotDropdownOpen}>
+            <div className="cmp-menu-title">SELECTED</div>
+            <button id="ddrop-download" disabled={!hasSelected} onClick={handleDownloadSelected}>DOWNLOAD</button>
+            <div className="cafe-menu-divider"></div>
+            <button id="ddrop-duplicate" disabled={!hasSelected} onClick={handleDuplicateSelected}>DUPLICATE</button>
+            <button className="danger" id="ddrop-delete" disabled={!hasSelected} onClick={handleDeleteSelected}>DELETE</button>
+          </div>
+        </div>
+
+        <button 
+          id="btn-select" 
+          className={selectMode ? "active" : ""}
+          aria-pressed={selectMode}
+          onClick={() => {
+            if (selectMode) {
+              setSelectedIds(new Set());
+              setThreeDotDropdownOpen(false);
+            }
+            setSelectMode(!selectMode);
+          }}
+        >
+          {selectMode ? "DONE" : "SELECT"}
+        </button>
+
+        <div className="ctrl-spacer"></div>
+
+        <div className="view-toggles">
+          <button className={`btn-view ${currentView === "small" ? "active" : ""}`} data-view-target="small" aria-label="Small gallery view" aria-pressed={currentView === "small"} title="Small gallery view" onClick={() => setCurrentView("small")}>
+            <svg width="18" height="18" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="3" height="3" fill="currentColor"/><rect x="4" y="0" width="3" height="3" fill="currentColor"/><rect x="8" y="0" width="3" height="3" fill="currentColor"/><rect x="12" y="0" width="3" height="3" fill="currentColor"/><rect x="0" y="4" width="3" height="3" fill="currentColor"/><rect x="4" y="4" width="3" height="3" fill="currentColor"/><rect x="8" y="4" width="3" height="3" fill="currentColor"/><rect x="12" y="4" width="3" height="3" fill="currentColor"/><rect x="0" y="8" width="3" height="3" fill="currentColor"/><rect x="4" y="8" width="3" height="3" fill="currentColor"/><rect x="8" y="8" width="3" height="3" fill="currentColor"/><rect x="12" y="8" width="3" height="3" fill="currentColor"/><rect x="0" y="12" width="3" height="3" fill="currentColor"/><rect x="4" y="12" width="3" height="3" fill="currentColor"/><rect x="8" y="12" width="3" height="3" fill="currentColor"/><rect x="12" y="12" width="3" height="3" fill="currentColor"/></svg>
+          </button>
+          <button className={`btn-view ${currentView === "medium" ? "active" : ""}`} data-view-target="medium" aria-label="Medium gallery view" aria-pressed={currentView === "medium"} title="Medium gallery view" onClick={() => setCurrentView("medium")}>
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="6" height="6" fill="currentColor"/><rect x="7" y="0" width="6" height="6" fill="currentColor"/><rect x="14" y="0" width="6" height="6" fill="currentColor"/><rect x="0" y="7" width="6" height="6" fill="currentColor"/><rect x="7" y="7" width="6" height="6" fill="currentColor"/><rect x="14" y="7" width="6" height="6" fill="currentColor"/><rect x="0" y="14" width="6" height="6" fill="currentColor"/><rect x="7" y="14" width="6" height="6" fill="currentColor"/><rect x="14" y="14" width="6" height="6" fill="currentColor"/></svg>
+          </button>
+          <button className={`btn-view ${currentView === "large" ? "active" : ""}`} data-view-target="large" aria-label="Large gallery view" aria-pressed={currentView === "large"} title="Large gallery view" onClick={() => setCurrentView("large")}>
+            <svg width="18" height="18" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="7" height="7" fill="currentColor"/><rect x="8" y="0" width="7" height="7" fill="currentColor"/><rect x="0" y="8" width="7" height="7" fill="currentColor"/><rect x="8" y="8" width="7" height="7" fill="currentColor"/></svg>
+          </button>
+        </div>
+
+        <div className="ctrl-spacer"></div>
+
+        <div id="filter-wrap" ref={filterRef}>
+          <button 
+            id="btn-filter"
+            className={`${isFilterActive ? "has-filter" : ""} ${filterDropdownOpen ? "active" : ""}`} 
+            onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
+            title="Filter and sort gallery"
+            aria-label="Filter and sort gallery"
+            aria-expanded={filterDropdownOpen}
+            aria-haspopup="menu"
+          >
+            <svg width="21" height="12" viewBox="0 0 21 12" fill="none">
+              <rect x="0" y="0" width="21" height="2" fill="#c7c7c7" />
+              <rect x="3" y="5" width="15" height="2" fill="#c7c7c7" />
+              <rect x="6" y="10" width="9" height="2" fill="#c7c7c7" />
+            </svg>
+          </button>
+          <div className={`cmp-menu gallery-filter-menu ${filterDropdownOpen ? "open" : ""}`} id="filter-dropdown" hidden={!filterDropdownOpen}>
+            <div className="cmp-menu-title">SORT</div>
+            <button className={`filter-chip ${sortOrder === "newest" ? "active" : ""}`} onClick={() => setSortOrder("newest")}>NEWEST</button>
+            <button className={`filter-chip ${sortOrder === "oldest" ? "active" : ""}`} onClick={() => setSortOrder("oldest")}>OLDEST</button>
+            
+            <div className="cmp-menu-title">ASPECT</div>
+            <button className={`filter-chip ${ratioFilter === "all" ? "active" : ""}`} onClick={() => setRatioFilter("all")}>ALL</button>
+            <button className={`filter-chip ${ratioFilter === "landscape" ? "active" : ""}`} onClick={() => setRatioFilter("landscape")}>LANDSCAPE</button>
+            <button className={`filter-chip ${ratioFilter === "portrait" ? "active" : ""}`} onClick={() => setRatioFilter("portrait")}>PORTRAIT</button>
+            <button className={`filter-chip ${ratioFilter === "square" ? "active" : ""}`} onClick={() => setRatioFilter("square")}>SQUARE</button>
+          </div>
+        </div>
+      </div>
+      
+      <div id="gallery-scroll" data-view={currentView} data-select={selectMode ? "on" : "off"}>
+        <div id="gallery-grid" className={isGalleryLoading ? "is-hydrating" : ""}>
+          {isGalleryLoading && visibleCells.length === 0 && skeletonCells.map((skeleton) => (
+            <div
+              key={`gallery-skeleton-${skeleton.id}`}
+              className="gallery-cell gallery-skeleton"
+              data-ratio={skeleton.ratio}
+              style={{ animationDelay: `${skeleton.delayMs}ms` }}
+              aria-hidden="true"
+            >
+              <div className="cell-inner cafe-loading"></div>
+            </div>
+          ))}
+          {visibleCells.map((cell, index) => (
+            <GalleryTile
+              key={cell.loadingId || cell.id}
+              cell={cell}
+              isSelected={selectedIds.has(cell.id)}
+              selectMode={selectMode}
+              position={index + 1}
+              isGalleryLoading={isGalleryLoading}
+              onCellClick={handleCellClick}
+              onRetry={handleRetryCell}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+

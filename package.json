@@ -1,0 +1,42 @@
+{
+  "name": "moneytree",
+  "version": "0.1.0",
+  "description": "A local-first AI image generation workspace built with Next.js.",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "vinext build",
+    "build:next": "next build",
+    "build:sites": "vinext build",
+    "start": "next start",
+    "lint": "eslint",
+    "eval:brief-agent": "node scripts/run-brief-agent-eval.mjs",
+    "test:agent-run": "node --experimental-strip-types scripts/check-agent-run-state.mjs",
+    "test:agent-actions": "node --experimental-strip-types scripts/check-agent-app-actions.mjs",
+    "test:agent-skills": "node --experimental-strip-types scripts/check-agent-skills.mjs",
+    "test:agent-memory": "node --experimental-strip-types scripts/check-agent-memory.mjs"
+  },
+  "dependencies": {
+    "@google/genai": "^2.8.0",
+    "imagetracerjs": "^1.2.6",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "react-server-dom-webpack": "19.2.6",
+    "vinext": "0.0.50",
+    "vite": "8.0.13",
+    "wrangler": "4.92.0",
+    "typescript": "^5"
+  },
+  "type": "module"
+}

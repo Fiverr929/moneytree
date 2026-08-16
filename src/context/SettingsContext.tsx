@@ -1,0 +1,172 @@
+"use client";
+
+import React, { createContext, useCallback, useContext, useMemo, useState, useEffect, ReactNode } from "react";
+
+export type ModelConfig = {
+  id: string;
+  label: string;
+  provider: string;
+  aspectRatios: string[];
+  resolutions: string[];
+  defaultResolution: string | null;
+  costByResolution: Record<string, number>;
+  thinkingLevel: string | null;
+  thinkingLevels?: string[];
+};
+
+export const MODELS: Record<string, ModelConfig> = {
+  'google-nano-banana': {
+    id: 'gemini-2.5-flash-image',
+    label: 'NANO BANANA',
+    provider: 'google',
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+    resolutions: [],
+    defaultResolution: null,
+    costByResolution: { default: 0.039 },
+    thinkingLevel: null
+  },
+  'google-nano-banana-2': {
+    id: 'gemini-3.1-flash-image',
+    label: 'NANO BANANA 2',
+    provider: 'google',
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+    resolutions: ['512', '1K', '2K', '4K'],
+    defaultResolution: '1K',
+    costByResolution: { '512': 0.045, '1K': 0.067, '2K': 0.101, '4K': 0.150 },
+    thinkingLevel: 'minimal',
+    thinkingLevels: ['minimal', 'high']
+  },
+  'google-nano-banana-2-lite': {
+    id: 'gemini-3.1-flash-lite-image',
+    label: 'NANO BANANA 2 LITE',
+    provider: 'google',
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+    resolutions: ['1K'],
+    defaultResolution: '1K',
+    costByResolution: { '1K': 0.0336 },
+    thinkingLevel: null
+  },
+  'nano-banana-pro': {
+    id: 'gemini-3-pro-image',
+    label: 'NANO BANANA PRO',
+    provider: 'google',
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+    resolutions: ['1K', '2K', '4K'],
+    defaultResolution: '1K',
+    costByResolution: { '1K': 0.134, '2K': 0.134, '4K': 0.240 },
+    thinkingLevel: null
+  }
+};
+
+interface SettingsContextType {
+  geminiApiKey: string;
+  setGeminiApiKey: (val: string) => void;
+  activeModelKey: string;
+  setActiveModelKey: (val: string) => void;
+  activeResolution: string;
+  setActiveResolution: (val: string) => void;
+  thinkingLevel: string;
+  setThinkingLevel: (val: string) => void;
+  
+  // Computed helpers
+  activeModel: ModelConfig;
+  activeThinkingLevel: string | null;
+  costPerImage: number;
+}
+
+const STORAGE_KEY = 'cafehtml-settings';
+
+const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
+
+export function SettingsProvider({ children }: { children: ReactNode }) {
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [activeModelKey, setActiveModelKey] = useState("google-nano-banana");
+  const [activeResolution, setActiveResolution] = useState("1K");
+  const [thinkingLevel, setThinkingLevel] = useState("minimal");
+
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved.geminiApiKey) setGeminiApiKey(saved.geminiApiKey);
+        if (saved.activeModel && MODELS[saved.activeModel]) setActiveModelKey(saved.activeModel);
+        if (saved.activeResolution) setActiveResolution(saved.activeResolution);
+        if (saved.thinkingLevel) setThinkingLevel(saved.thinkingLevel);
+      }
+    } catch {}
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        geminiApiKey,
+        activeModel: activeModelKey,
+        activeResolution,
+        thinkingLevel
+      }));
+    } catch {}
+  }, [geminiApiKey, activeModelKey, activeResolution, thinkingLevel, mounted]);
+
+  const activeModel = MODELS[activeModelKey];
+
+  let activeThinkingLevel: string | null = null;
+  if (activeModel.thinkingLevels && activeModel.thinkingLevels.length) {
+    activeThinkingLevel = activeModel.thinkingLevels.includes(thinkingLevel) ? thinkingLevel : activeModel.thinkingLevels[0];
+  } else {
+    activeThinkingLevel = activeModel.thinkingLevel;
+  }
+
+  const costs = activeModel.costByResolution;
+  const costPerImage = costs[activeResolution] || costs['default'] || (activeModel.defaultResolution && costs[activeModel.defaultResolution]) || 0;
+
+  // Intercept setter to also update defaults when changing models
+  const handleSetActiveModelKey = useCallback((key: string) => {
+    const model = MODELS[key];
+    if (!model) return;
+    setActiveModelKey(key);
+    setActiveResolution(model.defaultResolution || (model.resolutions && model.resolutions[0]) || '1K');
+  }, []);
+
+  const value = useMemo(() => ({
+    geminiApiKey,
+    setGeminiApiKey,
+    activeModelKey,
+    setActiveModelKey: handleSetActiveModelKey,
+    activeResolution,
+    setActiveResolution,
+    thinkingLevel,
+    setThinkingLevel,
+    activeModel,
+    activeThinkingLevel,
+    costPerImage
+  }), [
+    activeModel,
+    activeModelKey,
+    activeResolution,
+    activeThinkingLevel,
+    costPerImage,
+    geminiApiKey,
+    handleSetActiveModelKey,
+    thinkingLevel,
+  ]);
+
+  return (
+    <SettingsContext.Provider value={value}>
+      {children}
+    </SettingsContext.Provider>
+  );
+}
+
+export function useSettings() {
+  const context = useContext(SettingsContext);
+  if (!context) {
+    throw new Error("useSettings must be used within a SettingsProvider");
+  }
+  return context;
+}
+

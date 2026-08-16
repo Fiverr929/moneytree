@@ -1,0 +1,111 @@
+import { ApiError } from "@google/genai";
+import { NextResponse } from "next/server";
+import type { GenAIRequest } from "@/lib/pipeline/genai-client";
+import { createGoogleGenAI } from "@/lib/server/googleGenAI";
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
+
+const MAX_REQUEST_BYTES = 60 * 1024 * 1024;
+const ALLOWED_MODELS = new Set([
+  "gemini-2.5-flash-image",
+  "gemini-3.1-flash-image",
+  "gemini-3.1-flash-lite-image",
+  "gemini-3-pro-image",
+]);
+
+function validateRequest(request: Request, value: unknown): GenAIRequest {
+  const origin = request.headers.get("origin");
+  if (process.env.NODE_ENV === "production" && !origin) {
+    throw new Error("Image generation requests require a same-origin browser request.");
+  }
+  if (origin && origin !== new URL(request.url).origin) {
+    throw new Error("Cross-origin image generation requests are not allowed.");
+  }
+  if (!value || typeof value !== "object") {
+    throw new Error("Invalid image generation request.");
+  }
+
+  const input = value as Partial<GenAIRequest>;
+  if (typeof input.model !== "string" || !ALLOWED_MODELS.has(input.model)) {
+    throw new Error("Unsupported image model.");
+  }
+  if (!Array.isArray(input.contents) || input.contents.length !== 1) {
+    throw new Error("Image generation requires one user message.");
+  }
+  const content = input.contents[0];
+  if (content?.role !== "user" || !Array.isArray(content.parts) || !content.parts.length) {
+    throw new Error("Image generation requires user content.");
+  }
+  if (!input.config || typeof input.config !== "object") {
+    throw new Error("Image generation config is required.");
+  }
+  return input as GenAIRequest;
+}
+
+function describeError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  if (normalized.includes("billing_disabled") || normalized.includes("billing to be enabled") || normalized.includes("billing is disabled")) {
+    return {
+      message: "Google Cloud billing is disabled for the configured Vertex AI project. Enable billing, or on localhost add a Gemini API key in Settings.",
+      status: 403,
+    };
+  }
+  if (error instanceof ApiError) {
+    return {
+      message: error.message,
+      status: error.status || 500,
+      details: Object.fromEntries(
+        Object.entries(error).filter(([key]) => !["name", "message", "stack"].includes(key)),
+      ),
+    };
+  }
+  if (
+    message.includes("default credentials")
+    || message.includes("Could not load the default credentials")
+    || message.includes("UNAUTHENTICATED")
+  ) {
+    return {
+      message: "Google AI authentication is not configured. Set GEMINI_API_KEY as a server secret, or configure Vertex AI server credentials.",
+      status: 401,
+    };
+  }
+  return { message, status: 500 };
+}
+
+export async function POST(request: Request) {
+  try {
+    const contentLength = Number(request.headers.get("content-length") || 0);
+    if (contentLength > MAX_REQUEST_BYTES) {
+      return NextResponse.json({ error: "Image generation request is too large." }, { status: 413 });
+    }
+
+    const input = validateRequest(request, await request.json());
+    const localApiKey = process.env.NODE_ENV === "production"
+      ? null
+      : request.headers.get("x-cafehtml-local-gemini-key");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90_000);
+
+    try {
+      const ai = createGoogleGenAI({ apiKey: localApiKey });
+      const result = await ai.models.generateContent({
+        ...input,
+        config: {
+          ...input.config,
+          abortSignal: controller.signal,
+        },
+      });
+      return NextResponse.json(result);
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (error) {
+    const described = describeError(error);
+    return NextResponse.json(
+      { error: described.message, details: described.details },
+      { status: described.status },
+    );
+  }
+}

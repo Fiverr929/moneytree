@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "description": "Lean CafeHTML IMAGE agent routing and prompt-boundary evaluation set.",
+  "cases": [
+    {
+      "id": "talk-greeting",
+      "category": "conversation",
+      "turns": ["Hello"],
+      "expectedAction": "talk",
+      "requiredPromptTerms": [],
+      "forbiddenPromptTerms": [],
+      "references": []
+    },
+    {
+      "id": "inspect-active-references",
+      "category": "conversation",
+      "turns": ["What references are active?"],
+      "expectedAction": "inspect",
+      "requiredPromptTerms": [],
+      "forbiddenPromptTerms": [],
+      "references": [
+        {
+          "imageId": "subject-watch",
+          "role": "SUBJECT",
+          "label": "WATCH",
+          "strength": 20,
+          "visualRead": "A brushed steel wristwatch with a black circular dial and narrow silver hour markers."
+        }
+      ]
+    },
+    {
+      "id": "plan-campaign-directions",
+      "category": "planning",
+      "turns": ["Give me three campaign directions for this watch."],
+      "expectedAction": "plan",
+      "requiredPromptTerms": [],
+      "forbiddenPromptTerms": [],
+      "references": [
+        {
+          "imageId": "subject-watch",
+          "role": "SUBJECT",
+          "label": "WATCH",
+          "strength": 20,
+          "visualRead": "A brushed steel wristwatch with a black circular dial and narrow silver hour markers."
+        }
+      ]
+    },
+    {
+      "id": "followup-option-two",
+      "category": "memory",
+      "turns": ["Give me three campaign directions for this watch.", "Use option 2 and draft it."],
+      "expectedAction": "draft",
+      "requiredPromptTerms": ["watch"],
+      "forbiddenPromptTerms": ["option 2"],
+      "references": [
+        {
+          "imageId": "subject-watch",
+          "role": "SUBJECT",
+          "label": "WATCH",
+          "strength": 20,
+          "visualRead": "A brushed steel wristwatch with a black circular dial and narrow silver hour markers."
+        }
+      ]
+    },
+    {
+      "id": "no-reference-product",
+      "category": "generation",
+      "turns": ["Create a clean studio product photograph of a translucent orange perfume bottle on pale stone."],
+      "expectedAction": "draft",
+      "requiredPromptTerms": ["orange", "perfume", "stone"],
+      "forbiddenPromptTerms": ["influence", "slider", "strength"],
+      "references": []
+    },
+    {
+      "id": "locked-subject-new-scene",
+      "category": "subject",
+      "turns": ["Place this exact watch on black volcanic rock in light rain, keeping the product unchanged."],
+      "expectedAction": "draft",
+      "requiredPromptTerms": ["watch", "volcanic", "rain"],
+      "forbiddenPromptTerms": ["locked", "influence", "slider", "percentage"],
+      "references": [
+        {
+          "imageId": "subject-watch",
+          "role": "SUBJECT",
+          "label": "WATCH",
+          "strength": 0,
+          "visualRead": "A brushed steel wristwatch with a black circular dial and narrow silver hour markers."
+        }
+      ]
+    },
+    {
+      "id": "scene-only-transfer",
+      "category": "scene",
+      "turns": ["Photograph a red handbag using this environment and camera composition. Do not import the reference subject."],
+      "expectedAction": "draft",
+      "requiredPromptTerms": ["handbag"],
+      "forbiddenPromptTerms": ["influence", "slider", "strength"],
+      "references": [
+        {
+          "imageId": "scene-gallery",
+          "role": "SCENE",
+          "label": "GALLERY",
+          "strength": 20,
+          "visualRead": "A wide symmetrical gallery interior, low eye-level camera, cream walls, polished concrete floor, and soft skylight."
+        }
+      ]
+    },
+    {
+      "id": "style-no-content-leak",
+      "category": "style",
+      "turns": ["Render a single white running shoe using only the reference's graphic treatment and palette."],
+      "expectedAction": "draft",
+      "requiredPromptTerms": ["shoe"],
+      "forbiddenPromptTerms": ["woman", "bicycle", "influence", "slider"],
+      "references": [
+        {
+          "imageId": "style-poster",
+          "role": "STYLE",
+          "label": "POSTER STYLE",
+          "strength": 20,
+          "visualRead": "A grainy risograph poster in cobalt blue and fluorescent orange showing a woman beside a bicycle."
+        }
+      ]
+    },
+    {
+      "id": "small-followup-edit",
+      "category": "memory",
+      "turns": [
+        "Create a close product photograph of this watch on black volcanic rock in light rain.",
+        "Make the rain subtler and keep everything else stable."
+      ],
+      "expectedAction": "draft",
+      "requiredPromptTerms": ["watch"],
+      "requiredAnyTerms": [["rain", "mist", "moisture"]],
+      "forbiddenPromptTerms": ["influence", "slider"],
+      "references": [
+        {
+          "imageId": "subject-watch",
+          "role": "SUBJECT",
+          "label": "WATCH",
+          "strength": 0,
+          "visualRead": "A brushed steel wristwatch with a black circular dial and narrow silver hour markers."
+        }
+      ]
+    },
+    {
+      "id": "ambiguous-target",
+      "category": "clarification",
+      "turns": ["Replace it with the other one."],
+      "expectedAction": "ask",
+      "requiredPromptTerms": [],
+      "forbiddenPromptTerms": [],
+      "references": []
+    }
+  ]
+}
