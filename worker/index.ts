@@ -4,12 +4,13 @@ import {
   handleImageOptimization,
 } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { handleCloudWorkspace, type CloudWorkspaceEnv } from "./cloudWorkspace";
 
 interface Fetcher {
   fetch(request: Request): Promise<Response>;
 }
 
-interface Env {
+interface Env extends CloudWorkspaceEnv {
   ASSETS: Fetcher;
   DB: D1Database;
   AUTH_SESSION_SECRET?: string;
@@ -486,6 +487,13 @@ const worker = {
 
     if (url.pathname === "/api/agent-memory") {
       return handleAgentMemory(request, env);
+    }
+
+    if (url.pathname.startsWith("/api/cloud-workspace/")) {
+      const secret = env.AUTH_SESSION_SECRET;
+      const session = secret ? await readSession(request, secret) : null;
+      if (!session) return json({ error: "Authentication required." }, 401);
+      return handleCloudWorkspace(request, env, session.username, isSameOrigin(request));
     }
 
     if (!isPublicPath(url.pathname)) {
