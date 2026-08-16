@@ -8,6 +8,13 @@
       "when": 1786359000000,
       "tag": "0000_single_user_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1786867200000,
+      "tag": "0001_agent_memory_cloud",
+      "breakpoints": true
     }
   ]
 }

@@ -178,6 +178,7 @@ export type AgentMemoryItem = {
   updatedAt: string;
   lastUsedAt?: string | null;
   useCount?: number;
+  cloudSyncedAt?: string | null;
 };
 
 export type BriefAgentMemory = Pick<AgentMemoryItem, "id" | "scope" | "kind" | "text" | "confidence" | "pinned">;
