@@ -16,7 +16,8 @@ const S = {
   STUDIO_STATE: 'studio-state',
   GENERATION_JOBS: 'generation-jobs',
   AGENT_RUNS: 'agent-runs',
-  AGENT_EVENTS: 'agent-events'
+  AGENT_EVENTS: 'agent-events',
+  AGENT_MEMORIES: 'agent-memories'
 };
 
 const ready = new Promise<IDBDatabase>((resolve, reject) => {
@@ -49,7 +50,11 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
                           !hasIndex(S.GENERATION_JOBS, 'by_project') ||
                           !hasIndex(S.AGENT_RUNS, 'by_project') ||
                           !hasIndex(S.AGENT_RUNS, 'by_project_active') ||
-                          !hasIndex(S.AGENT_EVENTS, 'by_project_created');
+                          !hasIndex(S.AGENT_EVENTS, 'by_project_created') ||
+                         !db.objectStoreNames.contains(S.AGENT_MEMORIES) ||
+                         !hasIndex(S.AGENT_MEMORIES, 'by_scope') ||
+                         !hasIndex(S.AGENT_MEMORIES, 'by_project') ||
+                         !hasIndex(S.AGENT_MEMORIES, 'by_session');
     db.close();
 
     const targetVersion = needsUpgrade ? currentVersion + 1 : currentVersion;
@@ -121,6 +126,17 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
         const aes = e2.target.transaction.objectStore(S.AGENT_EVENTS);
         if (!aes.indexNames.contains('by_project_created')) aes.createIndex('by_project_created', ['project_id', 'createdAt']);
       }
+      if (!db2.objectStoreNames.contains(S.AGENT_MEMORIES)) {
+        const ams = db2.createObjectStore(S.AGENT_MEMORIES, { keyPath: 'id' });
+        ams.createIndex('by_scope', 'scope');
+        ams.createIndex('by_project', 'projectId');
+        ams.createIndex('by_session', 'sessionId');
+      } else {
+        const ams = e2.target.transaction.objectStore(S.AGENT_MEMORIES);
+        if (!ams.indexNames.contains('by_scope')) ams.createIndex('by_scope', 'scope');
+        if (!ams.indexNames.contains('by_project')) ams.createIndex('by_project', 'projectId');
+        if (!ams.indexNames.contains('by_session')) ams.createIndex('by_session', 'sessionId');
+      }
     };
 
     req.onsuccess = (e2: any) => {
@@ -183,6 +199,7 @@ async function deleteProjectCascade(id: number) {
       S.GENERATION_JOBS,
       S.AGENT_RUNS,
       S.AGENT_EVENTS,
+      S.AGENT_MEMORIES,
     ],
     "readwrite",
   );
@@ -208,6 +225,7 @@ async function deleteProjectCascade(id: number) {
   transaction.objectStore(S.STUDIO_STATE).delete(id);
   deleteProjectRecordsByIndex(transaction.objectStore(S.GENERATION_JOBS), id);
   deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_RUNS), id);
+  deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_MEMORIES), id);
   const agentEventsStore = transaction.objectStore(S.AGENT_EVENTS);
   const agentEventsRequest = agentEventsStore.index('by_project_created').openKeyCursor(
     IDBKeyRange.bound([id, ""], [id, "\uffff"]),
@@ -422,7 +440,24 @@ const agentEvents = {
   }),
 };
 
-const DB = { ready, projects, images, videos, studioState, gallery, references, moduleState, descriptions, generationJobs, agentRuns, agentEvents };
+const agentMemories = {
+  getAll: () => ready.then(() => wrap(tx(S.AGENT_MEMORIES).objectStore(S.AGENT_MEMORIES).getAll())),
+  put: (data: any) => ready.then(() => (
+    wrap(tx(S.AGENT_MEMORIES, 'readwrite').objectStore(S.AGENT_MEMORIES).put(data))
+  )),
+  delete: (id: string) => ready.then(() => (
+    wrap(tx(S.AGENT_MEMORIES, 'readwrite').objectStore(S.AGENT_MEMORIES).delete(id))
+  )),
+  deleteMany: (ids: string[]) => ready.then(async () => {
+    if (!ids.length) return;
+    const transaction = tx(S.AGENT_MEMORIES, 'readwrite');
+    const store = transaction.objectStore(S.AGENT_MEMORIES);
+    ids.forEach((id) => store.delete(id));
+    await transactionDone(transaction);
+  }),
+};
+
+const DB = { ready, projects, images, videos, studioState, gallery, references, moduleState, descriptions, generationJobs, agentRuns, agentEvents, agentMemories };
 export default DB;
 
 

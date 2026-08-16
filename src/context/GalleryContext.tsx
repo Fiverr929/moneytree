@@ -5,6 +5,7 @@ import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 import { galleryCellForStorage } from "@/lib/galleryCells";
 import { requestGenerationEvaluation } from "@/lib/evaluationReview";
+import { rememberGenerationFeedback } from "@/lib/brief-agent/memory";
 import type { ModuleFile } from "@/context/ModuleContext";
 import type { StrengthBand } from "@/lib/pipeline/strength";
 export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string; strength?: number; strengthBand?: StrengthBand };
@@ -433,6 +434,16 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
         ...updated,
         project_id: projectId,
       }));
+      if (evaluation.userFeedback) {
+        await rememberGenerationFeedback({
+          projectId,
+          generationId: updated.uuid || String(updated.id),
+          reaction: evaluation.userFeedback.reaction,
+          keep: evaluation.userFeedback.keep,
+          change: evaluation.userFeedback.change,
+          note: evaluation.userFeedback.note,
+        });
+      }
     }
     advanceEvaluationQueue(cellId);
   }, [activeProjectId, advanceEvaluationQueue, cells]);

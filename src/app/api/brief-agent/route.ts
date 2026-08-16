@@ -16,6 +16,7 @@ import {
 } from "@/lib/brief-agent/intent";
 import type {
   AgentMessage,
+  BriefAgentMemory,
   BriefAgentAction,
   BriefAgentRequest,
   BriefAgentResponse,
@@ -42,6 +43,8 @@ const MAX_REFERENCE_READ_CHARS = 650;
 const MAX_SESSION_TEXT_CHARS = 900;
 const MAX_VISUAL_FACTS = 5;
 const MAX_GENERATION_EVIDENCE = 6;
+const MAX_MEMORY_COUNT = 10;
+const MAX_MEMORY_CHARS = 360;
 
 const BRIEF_AGENT_RESPONSE_SCHEMA = {
   type: "object",
@@ -269,6 +272,26 @@ function validateWorkspace(value: unknown): CafeWorkspaceSnapshot | null {
   };
 }
 
+function validateMemories(value: unknown): BriefAgentMemory[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, MAX_MEMORY_COUNT).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const candidate = item as Partial<BriefAgentMemory>;
+    if (typeof candidate.id !== "string" || typeof candidate.text !== "string") return [];
+    if (candidate.scope !== "user" && candidate.scope !== "project" && candidate.scope !== "session") return [];
+    const kinds = new Set(["preference", "constraint", "decision", "correction", "feedback", "summary"]);
+    if (!candidate.kind || !kinds.has(candidate.kind)) return [];
+    return [{
+      id: trimText(candidate.id, 160),
+      scope: candidate.scope,
+      kind: candidate.kind,
+      text: trimText(candidate.text, MAX_MEMORY_CHARS),
+      confidence: Math.max(0, Math.min(1, Number(candidate.confidence) || 0)),
+      pinned: candidate.pinned === true,
+    }];
+  });
+}
+
 function validateRequest(request: Request, value: unknown): BriefAgentRequest {
   const origin = request.headers.get("origin");
   if (process.env.NODE_ENV === "production" && !origin) {
@@ -293,6 +316,7 @@ function validateRequest(request: Request, value: unknown): BriefAgentRequest {
     run: validateRun(input.run),
     generations: validateGenerationEvidence(input.generations),
     workspace: validateWorkspace(input.workspace),
+    memories: validateMemories(input.memories),
   };
 }
 
@@ -594,6 +618,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
   }));
   const generations = input.generations || [];
   const workspace = input.workspace || null;
+  const memories = input.memories || [];
 
   return [
     "You are CafeHTML Brief Agent, a prompt-planning agent for modular image generation.",
@@ -608,6 +633,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "- draft: produce one generation-ready prompt in finalPrompt and a short reply that says generation is starting. Store finalPrompt in session.lastDraftPrompt.",
     "For follow-ups like 'do option 2', 'use that', 'make it moodier', or 'continue', resolve the target from session, conversation, and the last plan before choosing action.",
     "Treat short follow-ups as edits to the active objective unless the user clearly starts a new subject. Carry forward established constraints, selected direction, and requested keeps; do not make the user restate them.",
+    "Relevant memory contains previously stored user, project, and session facts. Apply only memories relevant to the latest instruction. The latest explicit user instruction always overrides memory. Never expose internal memory IDs or claim a memory was stored unless the client confirms it.",
     "When the user corrects you, accept the correction as authoritative, update session notes or selectedDirection as needed, and apply it immediately without defending the earlier interpretation.",
     "Before asking a question, inspect the session, recent conversation, workspace, references, and generation evidence. Ask only when a missing decision would materially change the result.",
     "Never report an operation as complete from intent alone. Distinguish between what you understand, what you drafted, what is generating, what needs approval, and what the client confirms as completed.",
@@ -655,6 +681,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     `Latest user instruction: ${JSON.stringify(latestInstruction)}`,
     `Creative-direction heuristic (advisory; use the instruction itself as authority): ${JSON.stringify(shouldDraft)}`,
     `Session state: ${JSON.stringify(session)}`,
+    `Relevant memory: ${JSON.stringify(memories)}`,
     `Compact visual understanding: ${JSON.stringify(visualUnderstanding)}`,
     `Compact reference reads: ${JSON.stringify(references)}`,
     `Recent generation evidence: ${JSON.stringify(generations)}`,
@@ -692,6 +719,7 @@ async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft, 
     referenceFingerprint: traceReferenceFingerprint(input.referenceSnapshot.sourceFingerprint),
     referenceCount: input.referenceSnapshot.observations.length,
     messageCount: input.messages.length,
+    memoryCount: input.memories?.length || 0,
     durationMs: Date.now() - startedAt,
   });
   const text = extractResponseText(result);

@@ -159,6 +159,29 @@ export type BriefSessionState = {
   notes: string[];
 };
 
+export type AgentMemoryScope = "user" | "project" | "session";
+export type AgentMemoryKind = "preference" | "constraint" | "decision" | "correction" | "feedback" | "summary";
+
+export type AgentMemoryItem = {
+  id: string;
+  scope: AgentMemoryScope;
+  kind: AgentMemoryKind;
+  text: string;
+  normalizedText: string;
+  projectId: number | null;
+  sessionId: string | null;
+  source: "explicit" | "conversation" | "session" | "feedback";
+  sourceId?: string | null;
+  confidence: number;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string | null;
+  useCount?: number;
+};
+
+export type BriefAgentMemory = Pick<AgentMemoryItem, "id" | "scope" | "kind" | "text" | "confidence" | "pinned">;
+
 export type BriefDraft = {
   id: string;
   status: "empty" | "needs_clarification" | "draft";
@@ -184,6 +207,7 @@ export type BriefAgentRequest = {
   run?: AgentRun | null;
   generations?: BriefGenerationEvidence[];
   workspace?: CafeWorkspaceSnapshot | null;
+  memories?: BriefAgentMemory[];
 };
 
 export type BriefGenerationEvidence = {
