@@ -17,8 +17,14 @@ const S = {
   GENERATION_JOBS: 'generation-jobs',
   AGENT_RUNS: 'agent-runs',
   AGENT_EVENTS: 'agent-events',
-  AGENT_MEMORIES: 'agent-memories'
+  AGENT_MEMORIES: 'agent-memories',
+  SYNC_TOMBSTONES: 'sync-tombstones'
 };
+
+function emitCloudChange(projectId?: number, kind = "project") {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("cafehtml:cloud-sync", { detail: { projectId, kind } }));
+}
 
 const ready = new Promise<IDBDatabase>((resolve, reject) => {
   if (typeof window === "undefined") return; // SSR check
@@ -52,6 +58,7 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
                           !hasIndex(S.AGENT_RUNS, 'by_project_active') ||
                           !hasIndex(S.AGENT_EVENTS, 'by_project_created') ||
                          !db.objectStoreNames.contains(S.AGENT_MEMORIES) ||
+                         !db.objectStoreNames.contains(S.SYNC_TOMBSTONES) ||
                          !hasIndex(S.AGENT_MEMORIES, 'by_scope') ||
                          !hasIndex(S.AGENT_MEMORIES, 'by_project') ||
                          !hasIndex(S.AGENT_MEMORIES, 'by_session');
@@ -136,6 +143,9 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
         if (!ams.indexNames.contains('by_scope')) ams.createIndex('by_scope', 'scope');
         if (!ams.indexNames.contains('by_project')) ams.createIndex('by_project', 'projectId');
         if (!ams.indexNames.contains('by_session')) ams.createIndex('by_session', 'sessionId');
+      }
+      if (!db2.objectStoreNames.contains(S.SYNC_TOMBSTONES)) {
+        db2.createObjectStore(S.SYNC_TOMBSTONES, { keyPath: 'id' });
       }
     };
 
@@ -241,22 +251,57 @@ async function deleteProjectCascade(id: number) {
   await transactionDone(transaction);
 }
 
+async function deleteProjectWithTombstone(id: number) {
+  await ready;
+  const project = await wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).get(id));
+  const cloudId = project?.cloudId || project?.memoryCloudId;
+  if (cloudId) {
+    const deletedAt = new Date().toISOString();
+    await wrap(tx(S.SYNC_TOMBSTONES, 'readwrite').objectStore(S.SYNC_TOMBSTONES).put({
+      id: `project:${cloudId}`,
+      kind: "project",
+      projectCloudId: cloudId,
+      deletedAt,
+    }));
+  }
+  await deleteProjectCascade(id);
+  emitCloudChange(undefined, "project-delete");
+}
+
 const projects = {
   getAll: () => ready.then(() => wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).getAll())),
   get: (id: number) => ready.then(() => wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).get(id))),
-  create: (data: any) => ready.then(() => {
+  create: (data: any, syncSilent = false) => ready.then(() => {
     const now = new Date().toISOString();
-    const record = { mode: 'FRAME', thumbnail: null, ...data, date_created: now, date_modified: now };
-    return wrap(tx(S.PROJECTS, 'readwrite').objectStore(S.PROJECTS).add(record));
+    const cloudId = data.cloudId || data.memoryCloudId || crypto.randomUUID();
+    const record = {
+      mode: 'FRAME', thumbnail: null, ...data, cloudId, memoryCloudId: cloudId,
+      date_created: data.date_created || now,
+      date_modified: data.date_modified || now,
+      cloudUpdatedAt: data.cloudUpdatedAt || data.date_modified || now,
+      cloudSyncedAt: data.cloudSyncedAt || null,
+    };
+    return wrap(tx(S.PROJECTS, 'readwrite').objectStore(S.PROJECTS).add(record)).then((id) => {
+      if (!syncSilent) emitCloudChange(id as number, "project");
+      return id;
+    });
   }),
-  update: (id: number, data: any) => ready.then(() => {
+  update: (id: number, data: any, syncSilent = false) => ready.then(() => {
     const store = tx(S.PROJECTS, 'readwrite').objectStore(S.PROJECTS);
     return wrap(store.get(id)).then(existing => {
       if (!existing) throw new Error('[DB] project not found: ' + id);
-      return wrap(store.put({ ...existing, ...data, id, date_modified: new Date().toISOString() }));
+      const now = new Date().toISOString();
+      const updated = syncSilent
+        ? { ...existing, ...data, id }
+        : { ...existing, ...data, id, date_modified: now, cloudUpdatedAt: now };
+      return wrap(store.put(updated)).then((result) => {
+        if (!syncSilent) emitCloudChange(id, "project");
+        return result;
+      });
     });
   }),
-  delete: deleteProjectCascade,
+  delete: deleteProjectWithTombstone,
+  deleteLocal: deleteProjectCascade,
 };
 
 const images = {
@@ -271,9 +316,29 @@ const images = {
     const idx = tx(S.IMAGES).objectStore(S.IMAGES).index('by_project');
     return wrap(idx.getAll(projectId));
   }),
-  put: (uuid: string, dataUrl: string, projectId: number) => ready.then(() => 
-    wrap(tx(S.IMAGES, 'readwrite').objectStore(S.IMAGES).put({ uuid, dataUrl, project_id: projectId }))
-  ),
+  put: (uuid: string, dataUrl: string, projectId: number, syncSilent = false) => ready.then(async () => {
+    const existing = await wrap(tx(S.IMAGES).objectStore(S.IMAGES).get(uuid));
+    const unchanged = existing?.dataUrl === dataUrl;
+    const result = await wrap(tx(S.IMAGES, 'readwrite').objectStore(S.IMAGES).put({
+      ...(unchanged ? existing : {}),
+      uuid,
+      dataUrl,
+      project_id: projectId,
+      cloudFingerprint: unchanged ? existing?.cloudFingerprint || null : null,
+      cloudSyncedAt: unchanged ? existing?.cloudSyncedAt || null : null,
+    }));
+    if (!syncSilent) emitCloudChange(projectId, "image");
+    return result;
+  }),
+  markCloudSynced: (uuid: string, fingerprint: string) => ready.then(async () => {
+    const existing = await wrap(tx(S.IMAGES).objectStore(S.IMAGES).get(uuid));
+    if (!existing) return;
+    await wrap(tx(S.IMAGES, 'readwrite').objectStore(S.IMAGES).put({
+      ...existing,
+      cloudFingerprint: fingerprint,
+      cloudSyncedAt: new Date().toISOString(),
+    }));
+  }),
   delete: (uuid: string) => ready.then(() => wrap(tx(S.IMAGES, 'readwrite').objectStore(S.IMAGES).delete(uuid)))
 };
 
@@ -317,17 +382,69 @@ const references = {
     const idx = tx(S.REFERENCES).objectStore(S.REFERENCES).index('by_project');
     return wrap(idx.getAll(projectId));
   }),
-  put: (data: any) => ready.then(() => wrap(tx(S.REFERENCES, 'readwrite').objectStore(S.REFERENCES).put(data))),
-  delete: (id: number) => ready.then(() => wrap(tx(S.REFERENCES, 'readwrite').objectStore(S.REFERENCES).delete(id)))
+  put: (data: any, syncSilent = false) => ready.then(async () => {
+    const store = tx(S.REFERENCES, 'readwrite').objectStore(S.REFERENCES);
+    const existing = data.id === undefined ? undefined : await wrap(store.get(data.id));
+    const now = new Date().toISOString();
+    if (!syncSilent && existing?.uuid && existing.uuid !== data.uuid) {
+      const project = await projects.get(data.project_id);
+      const projectCloudId = project?.cloudId || project?.memoryCloudId;
+      if (projectCloudId) {
+        await wrap(tx(S.SYNC_TOMBSTONES, 'readwrite').objectStore(S.SYNC_TOMBSTONES).put({
+          id: `reference:${projectCloudId}:${existing.uuid}`,
+          kind: "reference",
+          projectCloudId,
+          referenceCloudId: existing.uuid,
+          deletedAt: now,
+        }));
+      }
+    }
+    const record = syncSilent
+      ? { ...existing, ...data }
+      : { ...existing, ...data, cloudUpdatedAt: now, cloudSyncedAt: null };
+    const result = await wrap(tx(S.REFERENCES, 'readwrite').objectStore(S.REFERENCES).put(record));
+    if (!syncSilent) emitCloudChange(data.project_id, "reference");
+    return result;
+  }),
+  delete: (id: number, syncSilent = false) => ready.then(async () => {
+    const store = tx(S.REFERENCES, 'readwrite').objectStore(S.REFERENCES);
+    const existing = await wrap(store.get(id));
+    if (!syncSilent && existing?.uuid && existing?.project_id) {
+      const project = await projects.get(existing.project_id);
+      const projectCloudId = project?.cloudId || project?.memoryCloudId;
+      if (projectCloudId) {
+        const deletedAt = new Date().toISOString();
+        await wrap(tx(S.SYNC_TOMBSTONES, 'readwrite').objectStore(S.SYNC_TOMBSTONES).put({
+          id: `reference:${projectCloudId}:${existing.uuid}`,
+          kind: "reference",
+          projectCloudId,
+          referenceCloudId: existing.uuid,
+          deletedAt,
+        }));
+      }
+    }
+    const result = await wrap(tx(S.REFERENCES, 'readwrite').objectStore(S.REFERENCES).delete(id));
+    if (!syncSilent) emitCloudChange(existing?.project_id, "reference-delete");
+    return result;
+  })
 };
 
 const moduleState = {
   get: (projectId: number) => ready.then(() =>
     wrap(tx(S.MODULE_STATE).objectStore(S.MODULE_STATE).get(projectId))
   ),
-  put: (projectId: number, data: any) => ready.then(() =>
-    wrap(tx(S.MODULE_STATE, 'readwrite').objectStore(S.MODULE_STATE).put({ ...data, project_id: projectId }))
-  ),
+  put: (projectId: number, data: any, syncSilent = false) => ready.then(() => {
+    const now = new Date().toISOString();
+    return wrap(tx(S.MODULE_STATE, 'readwrite').objectStore(S.MODULE_STATE).put({
+      ...data,
+      project_id: projectId,
+      cloudUpdatedAt: syncSilent ? data.cloudUpdatedAt : now,
+      cloudSyncedAt: syncSilent ? data.cloudSyncedAt : null,
+    })).then((result) => {
+      if (!syncSilent) emitCloudChange(projectId, "folders");
+      return result;
+    });
+  }),
 };
 
 const descriptions = {
@@ -406,37 +523,70 @@ const agentEvents = {
     const projectsStore = transaction.objectStore(S.PROJECTS);
     const existing = await wrap(projectsStore.get(projectId));
     if (!existing) throw new Error('[DB] project not found: ' + projectId);
-    projectsStore.put({ ...existing, ...projectData, id: projectId, date_modified: new Date().toISOString() });
+    const now = new Date().toISOString();
+    projectsStore.put({ ...existing, ...projectData, id: projectId, date_modified: now, cloudUpdatedAt: now, cloudSyncedAt: null });
     transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
     await transactionDone(transaction);
+    emitCloudChange(projectId, "project");
   }),
   recordReferenceMutation: (projectId: number, reference: any, event: any) => ready.then(async () => {
     const transaction = tx([S.REFERENCES, S.AGENT_EVENTS], 'readwrite');
-    transaction.objectStore(S.REFERENCES).put({ ...reference, project_id: projectId });
+    transaction.objectStore(S.REFERENCES).put({
+      ...reference,
+      project_id: projectId,
+      cloudUpdatedAt: new Date().toISOString(),
+      cloudSyncedAt: null,
+    });
     transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
     await transactionDone(transaction);
+    emitCloudChange(projectId, "reference");
   }),
   recordModuleMutation: (projectId: number, moduleData: any, event: any) => ready.then(async () => {
     const transaction = tx([S.MODULE_STATE, S.AGENT_EVENTS], 'readwrite');
-    transaction.objectStore(S.MODULE_STATE).put({ ...moduleData, project_id: projectId });
+    transaction.objectStore(S.MODULE_STATE).put({
+      ...moduleData,
+      project_id: projectId,
+      cloudUpdatedAt: new Date().toISOString(),
+      cloudSyncedAt: null,
+    });
     transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
     await transactionDone(transaction);
+    emitCloudChange(projectId, "folders");
   }),
   recordReferenceCreation: (projectId: number, reference: any, imageDataUrl: string, event: any) => ready.then(async () => {
     const transaction = tx([S.REFERENCES, S.IMAGES, S.AGENT_EVENTS], 'readwrite');
-    transaction.objectStore(S.REFERENCES).put({ ...reference, project_id: projectId });
+    transaction.objectStore(S.REFERENCES).put({
+      ...reference,
+      project_id: projectId,
+      cloudUpdatedAt: new Date().toISOString(),
+      cloudSyncedAt: null,
+    });
     if (reference.uuid && imageDataUrl) {
       transaction.objectStore(S.IMAGES).put({ uuid: reference.uuid, dataUrl: imageDataUrl, project_id: projectId });
     }
     transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
     await transactionDone(transaction);
+    emitCloudChange(projectId, "reference");
   }),
   recordReferenceDeletion: (projectId: number, referenceId: number, imageUuid: string, event: any) => ready.then(async () => {
-    const transaction = tx([S.REFERENCES, S.IMAGES, S.AGENT_EVENTS], 'readwrite');
+    const project = await projects.get(projectId);
+    const projectCloudId = project?.cloudId || project?.memoryCloudId;
+    const transaction = tx([S.REFERENCES, S.IMAGES, S.AGENT_EVENTS, S.SYNC_TOMBSTONES], 'readwrite');
     transaction.objectStore(S.REFERENCES).delete(referenceId);
     if (imageUuid) transaction.objectStore(S.IMAGES).delete(imageUuid);
+    if (projectCloudId && imageUuid) {
+      const deletedAt = new Date().toISOString();
+      transaction.objectStore(S.SYNC_TOMBSTONES).put({
+        id: `reference:${projectCloudId}:${imageUuid}`,
+        kind: "reference",
+        projectCloudId,
+        referenceCloudId: imageUuid,
+        deletedAt,
+      });
+    }
     transaction.objectStore(S.AGENT_EVENTS).put({ ...event, project_id: projectId });
     await transactionDone(transaction);
+    emitCloudChange(projectId, "reference-delete");
   }),
 };
 
@@ -457,7 +607,29 @@ const agentMemories = {
   }),
 };
 
-const DB = { ready, projects, images, videos, studioState, gallery, references, moduleState, descriptions, generationJobs, agentRuns, agentEvents, agentMemories };
+const syncTombstones = {
+  getAll: () => ready.then(() => wrap(tx(S.SYNC_TOMBSTONES).objectStore(S.SYNC_TOMBSTONES).getAll())),
+  delete: (id: string) => ready.then(() => (
+    wrap(tx(S.SYNC_TOMBSTONES, 'readwrite').objectStore(S.SYNC_TOMBSTONES).delete(id))
+  )),
+};
+
+const DB = {
+  ready,
+  projects,
+  images,
+  videos,
+  studioState,
+  gallery,
+  references,
+  moduleState,
+  descriptions,
+  generationJobs,
+  agentRuns,
+  agentEvents,
+  agentMemories,
+  syncTombstones,
+};
 export default DB;
 
 

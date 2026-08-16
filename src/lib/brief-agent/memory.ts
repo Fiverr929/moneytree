@@ -37,10 +37,10 @@ async function getProjectMemoryKey(projectId: number) {
   const pending = projectKeyPromises.get(projectId);
   if (pending) return pending;
   const promise = (async () => {
-    const project = await DB.projects.get(projectId) as { memoryCloudId?: string } | undefined;
-    if (project?.memoryCloudId) return project.memoryCloudId;
+    const project = await DB.projects.get(projectId) as { cloudId?: string; memoryCloudId?: string } | undefined;
+    if (project?.cloudId || project?.memoryCloudId) return project.cloudId || project.memoryCloudId!;
     const memoryCloudId = crypto.randomUUID();
-    await DB.projects.update(projectId, { memoryCloudId });
+    await DB.projects.update(projectId, { cloudId: memoryCloudId, memoryCloudId }, true);
     return memoryCloudId;
   })();
   projectKeyPromises.set(projectId, promise);

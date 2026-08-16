@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect, useMemo, useRef } from "react";
 import DB from "@/lib/db";
+import { installCloudSyncListener, syncWorkspaceProjects } from "@/lib/cloudWorkspace";
 
 interface AppContextType {
   // Modals & Menus
@@ -35,11 +36,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const initializedRef = useRef(false);
 
   useEffect(() => {
+    return installCloudSyncListener();
+  }, []);
+
+  useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
 
     const initializeProject = async () => {
       try {
+        await syncWorkspaceProjects().catch((error) => console.warn("Cloud workspace sync deferred", error));
         const data = await DB.projects.getAll();
         if (data.length > 0) {
           data.sort((a, b) => b.date_modified.localeCompare(a.date_modified));

@@ -6,6 +6,7 @@ import { useApp } from "@/context/AppContext";
 import { moduleFileForStorage } from "@/lib/moduleFiles";
 import { pruneProjectImages } from "@/lib/projectImageGc";
 import { MODULE_FOLDER_PRESETS } from "@/lib/moduleFolderPresets";
+import { syncCloudProject } from "@/lib/cloudWorkspace";
 export type ModuleFile = {
   id: number;
   uuid: string;
@@ -154,10 +155,12 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
     setFolders([]);
 
     if (activeProjectId) {
-      void Promise.all([
-        DB.moduleState.get(activeProjectId),
-        DB.references.getByProject(activeProjectId),
-      ]).then(([value, references]) => {
+      const hydrateProject = async () => {
+        await syncCloudProject(activeProjectId).catch((error) => console.warn("Cloud project sync deferred", error));
+        const [value, references] = await Promise.all([
+          DB.moduleState.get(activeProjectId),
+          DB.references.getByProject(activeProjectId),
+        ]);
         if (cancelled) return;
         const stored = value as { folders?: unknown } | undefined;
         const storedFolders = Array.isArray(stored?.folders)
@@ -176,14 +179,7 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
         ];
         foldersHydratedProjectRef.current = activeProjectId;
         setFolders(nextFolders);
-      }).catch((error) => {
-        if (!cancelled) {
-          foldersHydratedProjectRef.current = activeProjectId;
-          console.error("Failed to restore module folders", error);
-        }
-      });
-      DB.references.getByProject(activeProjectId).then(async data => {
-        const storedFiles = data as ModuleFile[];
+        const storedFiles = references as ModuleFile[];
         const visibleFiles = storedFiles.map((file) => ({ ...file, url: "" }));
         if (!cancelled) setFiles(visibleFiles);
 
@@ -220,7 +216,13 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
             pruneProjectImages(activeProjectId).catch(console.error);
           }
         }
-      }).catch(console.error);
+      };
+      void hydrateProject().catch((error) => {
+        if (!cancelled) {
+          foldersHydratedProjectRef.current = activeProjectId;
+          console.error("Failed to restore synced project", error);
+        }
+      });
     } else {
       setFiles([]);
     }
