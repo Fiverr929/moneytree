@@ -4556,7 +4556,8 @@
   }
   /* ── STUDIO OVERLAY ──────────────────────────────── */
   #studio-overlay {
-    position: fixed; inset: 0; z-index: 500;
+    /* Above the HUD (510) and expanded mobile Module panel (700). */
+    position: fixed; inset: 0; z-index: 800;
     display: none; background: #c7c7c7;
     flex-direction: column;
   }
