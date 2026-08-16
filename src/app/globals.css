@@ -9129,14 +9129,14 @@ body.module-collapsed .module-panel {
   .prompt-bar-row {
     display: grid;
   }
-  .prompt-text-field {
+  #promptBar .prompt-text-field {
     white-space: pre-wrap;
     overflow-x: hidden;
     overflow-y: auto;
     overflow-wrap: anywhere;
     -webkit-overflow-scrolling: touch;
   }
-  .prompt-text-field.has-placeholder::before {
+  #promptBar .prompt-text-field.has-placeholder::before {
     transform: none;
     white-space: normal;
   }
@@ -9263,11 +9263,11 @@ body.module-collapsed .module-panel {
     height: 36px;
   }
 
-  .prompt-input-area {
+  #promptBar .prompt-input-area {
     height: 62px;
   }
 
-  .prompt-text-field {
+  #promptBar .prompt-text-field {
     font-size: 14px;
   }
 
@@ -9452,11 +9452,11 @@ body.module-collapsed .module-panel {
     top: 8px;
   }
 
-  .prompt-input-area {
+  #promptBar .prompt-input-area {
     display: contents;
   }
 
-  .prompt-text-field {
+  #promptBar .prompt-text-field {
     grid-column: 1 / -1;
     grid-row: 2;
     width: 100%;
@@ -9467,14 +9467,14 @@ body.module-collapsed .module-panel {
     line-height: 18px;
   }
 
-  .prompt-text-field.has-placeholder::before {
+  #promptBar .prompt-text-field.has-placeholder::before {
     top: 8px;
     left: 9px;
     right: 9px;
     line-height: 18px;
   }
 
-  .btn-frame {
+  #promptBar .btn-frame {
     grid-column: 3;
     grid-row: 1;
     justify-self: end;
@@ -9484,6 +9484,49 @@ body.module-collapsed .module-panel {
     color: #c7c7c7;
     font-size: 15px;
     letter-spacing: 0.06em;
+  }
+
+  #studio-overlay {
+    --studio-prompt-height: 42px;
+  }
+
+  #studio-overlay .prompt-wrap {
+    max-width: 100%;
+  }
+
+  #studio-overlay .studio-prompt-bar .prompt-input-area {
+    display: flex;
+    min-height: 0;
+  }
+
+  #studio-overlay .studio-prompt-bar .prompt-text-field {
+    grid-column: auto;
+    grid-row: auto;
+    width: auto;
+    min-height: 0;
+    border: 0;
+    padding: 0 9px;
+    line-height: var(--studio-prompt-height);
+    white-space: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  #studio-overlay .studio-prompt-bar .prompt-text-field.has-placeholder::before {
+    top: 50%;
+    left: 9px;
+    right: 9px;
+    transform: translateY(-50%);
+    overflow: hidden;
+    line-height: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #studio-overlay .studio-prompt-bar .btn-frame {
+    width: 82px;
+    font-size: 18px;
+    letter-spacing: 0.03em;
   }
 
   #promptBar .btn-frame:active {
