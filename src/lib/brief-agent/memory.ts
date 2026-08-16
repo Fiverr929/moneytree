@@ -11,6 +11,10 @@ import type {
 import { extractMemoryCandidates, normalizeMemoryText, rankMemories } from "./memoryPolicy";
 
 const MAX_MEMORY_ITEMS = 250;
+const CLOUD_SYNC_INTERVAL_MS = 15_000;
+const projectKeyPromises = new Map<number, Promise<string>>();
+const syncPromises = new Map<number, Promise<void>>();
+const lastSyncedAt = new Map<number, number>();
 
 type RememberInput = {
   scope: AgentMemoryScope;
@@ -24,6 +28,108 @@ type RememberInput = {
   pinned?: boolean;
   stableKey?: string;
 };
+
+type CloudMemoryResponse = {
+  memories?: AgentMemoryItem[];
+};
+
+async function getProjectMemoryKey(projectId: number) {
+  const pending = projectKeyPromises.get(projectId);
+  if (pending) return pending;
+  const promise = (async () => {
+    const project = await DB.projects.get(projectId) as { memoryCloudId?: string } | undefined;
+    if (project?.memoryCloudId) return project.memoryCloudId;
+    const memoryCloudId = crypto.randomUUID();
+    await DB.projects.update(projectId, { memoryCloudId });
+    return memoryCloudId;
+  })();
+  projectKeyPromises.set(projectId, promise);
+  try {
+    return await promise;
+  } catch (error) {
+    projectKeyPromises.delete(projectId);
+    throw error;
+  }
+}
+
+function isCloudMemory(value: unknown): value is AgentMemoryItem {
+  if (!value || typeof value !== "object") return false;
+  const memory = value as Partial<AgentMemoryItem>;
+  return typeof memory.id === "string"
+    && (memory.scope === "user" || memory.scope === "project")
+    && typeof memory.kind === "string"
+    && typeof memory.text === "string"
+    && typeof memory.normalizedText === "string"
+    && typeof memory.updatedAt === "string";
+}
+
+async function syncAgentMemoriesNow(projectId: number) {
+  const projectKey = await getProjectMemoryKey(projectId);
+  const all = await DB.agentMemories.getAll() as AgentMemoryItem[];
+  const visible = all.filter((item) => item.scope === "user" || (item.scope === "project" && item.projectId === projectId));
+  const pending = visible.filter((item) => !item.cloudSyncedAt || item.updatedAt > item.cloudSyncedAt);
+  const response = await fetch("/api/agent-memory", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      projectKey,
+      memories: pending.map((memory) => ({
+        id: memory.id,
+        scope: memory.scope,
+        kind: memory.kind,
+        text: memory.text,
+        normalizedText: memory.normalizedText,
+        source: memory.source,
+        sourceId: memory.sourceId,
+        confidence: memory.confidence,
+        pinned: memory.pinned,
+        createdAt: memory.createdAt,
+        updatedAt: memory.updatedAt,
+        lastUsedAt: memory.lastUsedAt,
+        useCount: memory.useCount,
+      })),
+    }),
+  });
+  if (!response.ok) throw new Error("Cloud memory sync failed.");
+  const body = await response.json() as CloudMemoryResponse;
+  if (!Array.isArray(body.memories) || !body.memories.every(isCloudMemory)) {
+    throw new Error("Cloud memory sync returned invalid data.");
+  }
+
+  const syncedAt = new Date().toISOString();
+  const remoteIds = new Set(body.memories.map((memory) => memory.id));
+  const staleIds = visible
+    .filter((memory) => memory.cloudSyncedAt && !remoteIds.has(memory.id) && !pending.some((item) => item.id === memory.id))
+    .map((memory) => memory.id);
+  await Promise.all([
+    ...body.memories.map((memory) => DB.agentMemories.put({
+      ...memory,
+      projectId: memory.scope === "project" ? projectId : null,
+      sessionId: null,
+      cloudSyncedAt: syncedAt,
+    })),
+  ]);
+  if (staleIds.length) await DB.agentMemories.deleteMany(staleIds);
+  lastSyncedAt.set(projectId, Date.now());
+}
+
+async function syncAgentMemories(projectId: number, force = false) {
+  if (!force && Date.now() - (lastSyncedAt.get(projectId) || 0) < CLOUD_SYNC_INTERVAL_MS) return;
+  const active = syncPromises.get(projectId);
+  if (active) return active;
+  const promise = syncAgentMemoriesNow(projectId).finally(() => syncPromises.delete(projectId));
+  syncPromises.set(projectId, promise);
+  return promise;
+}
+
+async function deleteCloudMemories(scope: AgentMemoryScope | "all", projectId: number) {
+  if (scope === "session") return;
+  const projectKey = await getProjectMemoryKey(projectId);
+  const params = new URLSearchParams({ scope, project_key: projectKey });
+  const response = await fetch(`/api/agent-memory?${params}`, { method: "DELETE" });
+  if (!response.ok) throw new Error("Could not clear synced memory.");
+  lastSyncedAt.delete(projectId);
+}
 
 function contextFor(input: RememberInput) {
   return {
@@ -83,6 +189,9 @@ export async function rememberAgentMemory(input: RememberInput) {
   };
   await DB.agentMemories.put(memory);
   await pruneMemories();
+  if (memory.scope !== "session" && input.projectId) {
+    void syncAgentMemories(input.projectId, true).catch(() => undefined);
+  }
   return memory;
 }
 
@@ -173,6 +282,7 @@ export async function rememberGenerationFeedback(input: {
 }
 
 export async function listAgentMemories(projectId: number, sessionId?: string | null) {
+  await syncAgentMemories(projectId).catch(() => undefined);
   const all = await DB.agentMemories.getAll() as AgentMemoryItem[];
   return all.filter((item) => (
     item.scope === "user"
@@ -213,7 +323,13 @@ export async function clearAgentMemories(
   projectId: number,
   sessionId?: string | null,
 ) {
-  const items = await listAgentMemories(projectId, sessionId);
+  const all = await DB.agentMemories.getAll() as AgentMemoryItem[];
+  const items = all.filter((item) => (
+    item.scope === "user"
+    || (item.scope === "project" && item.projectId === projectId)
+    || (item.scope === "session" && item.projectId === projectId && item.sessionId === (sessionId || null))
+  ));
+  await deleteCloudMemories(scope, projectId);
   const ids = items.filter((item) => scope === "all" || item.scope === scope).map((item) => item.id);
   await DB.agentMemories.deleteMany(ids);
   return ids.length;

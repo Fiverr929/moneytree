@@ -32,6 +32,7 @@ interface D1Result {
 interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
   first<T>(): Promise<T | null>;
+  all<T>(): Promise<{ results: T[] }>;
   run(): Promise<D1Result>;
 }
 
@@ -52,6 +53,11 @@ const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 7;
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 let schemaReady: Promise<void> | null = null;
+
+type AuthSession = {
+  username: string;
+  expiresAt: number;
+};
 
 function json(data: unknown, status = 200, headers?: HeadersInit) {
   return new Response(JSON.stringify(data), {
@@ -130,20 +136,26 @@ async function createSession(username: string, secret: string) {
   return `${payload}.${signature}`;
 }
 
-async function verifySession(request: Request, secret: string) {
+async function readSession(request: Request, secret: string): Promise<AuthSession | null> {
   const token = getCookie(request, SESSION_COOKIE);
-  if (!token) return false;
+  if (!token) return null;
   const [payload, encodedSignature, ...extra] = token.split(".");
-  if (!payload || !encodedSignature || extra.length) return false;
+  if (!payload || !encodedSignature || extra.length) return null;
 
   try {
     const expected = await hmac(payload, secret);
-    if (!constantTimeEqual(expected, decodeBase64Url(encodedSignature))) return false;
-    const session = JSON.parse(new TextDecoder().decode(decodeBase64Url(payload))) as { expiresAt?: number };
-    return typeof session.expiresAt === "number" && session.expiresAt > Math.floor(Date.now() / 1000);
+    if (!constantTimeEqual(expected, decodeBase64Url(encodedSignature))) return null;
+    const session = JSON.parse(new TextDecoder().decode(decodeBase64Url(payload))) as Partial<AuthSession>;
+    if (typeof session.username !== "string" || !session.username) return null;
+    if (typeof session.expiresAt !== "number" || session.expiresAt <= Math.floor(Date.now() / 1000)) return null;
+    return session as AuthSession;
   } catch {
-    return false;
+    return null;
   }
+}
+
+async function verifySession(request: Request, secret: string) {
+  return Boolean(await readSession(request, secret));
 }
 
 function ensureSchema(db: D1Database) {
@@ -160,11 +172,187 @@ function ensureSchema(db: D1Database) {
       attempts INTEGER NOT NULL,
       window_started_at INTEGER NOT NULL
     )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS agent_memory (
+      owner_key TEXT NOT NULL,
+      id TEXT NOT NULL,
+      scope TEXT NOT NULL CHECK (scope IN ('user', 'project')),
+      project_key TEXT,
+      kind TEXT NOT NULL,
+      text TEXT NOT NULL,
+      normalized_text TEXT NOT NULL,
+      source TEXT NOT NULL,
+      source_id TEXT,
+      confidence REAL NOT NULL,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_used_at TEXT,
+      use_count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (owner_key, id)
+    )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_agent_memory_owner_scope
+      ON agent_memory (owner_key, scope)`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_agent_memory_owner_project
+      ON agent_memory (owner_key, project_key)`),
   ]).then(() => undefined).catch((error) => {
     schemaReady = null;
     throw error;
   });
   return schemaReady;
+}
+
+type CloudMemory = {
+  id: string;
+  scope: "user" | "project";
+  kind: string;
+  text: string;
+  normalizedText: string;
+  source: string;
+  sourceId?: string | null;
+  confidence: number;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string | null;
+  useCount?: number;
+};
+
+function validCloudMemory(value: unknown): value is CloudMemory {
+  if (!value || typeof value !== "object") return false;
+  const memory = value as Record<string, unknown>;
+  return typeof memory.id === "string" && memory.id.length > 0 && memory.id.length <= 180
+    && (memory.scope === "user" || memory.scope === "project")
+    && typeof memory.kind === "string" && ["preference", "constraint", "decision", "correction", "feedback", "summary"].includes(memory.kind)
+    && typeof memory.text === "string" && memory.text.length > 0 && memory.text.length <= 500
+    && typeof memory.normalizedText === "string" && memory.normalizedText.length <= 500
+    && typeof memory.source === "string" && ["explicit", "conversation", "session", "feedback"].includes(memory.source)
+    && (memory.sourceId === undefined || memory.sourceId === null || (typeof memory.sourceId === "string" && memory.sourceId.length <= 180))
+    && typeof memory.confidence === "number" && Number.isFinite(memory.confidence)
+    && typeof memory.pinned === "boolean"
+    && typeof memory.createdAt === "string" && !Number.isNaN(Date.parse(memory.createdAt))
+    && typeof memory.updatedAt === "string" && !Number.isNaN(Date.parse(memory.updatedAt))
+    && (memory.lastUsedAt === undefined || memory.lastUsedAt === null || (typeof memory.lastUsedAt === "string" && !Number.isNaN(Date.parse(memory.lastUsedAt))))
+    && (memory.useCount === undefined || (typeof memory.useCount === "number" && Number.isFinite(memory.useCount)));
+}
+
+async function readMemoryBody(request: Request) {
+  try {
+    const text = await request.text();
+    if (text.length > 300_000) return null;
+    const body = JSON.parse(text) as { projectKey?: unknown; memories?: unknown };
+    const projectKey = typeof body.projectKey === "string" && body.projectKey.length <= 180 ? body.projectKey : "";
+    if (!Array.isArray(body.memories) || body.memories.length > 250 || !body.memories.every(validCloudMemory)) return null;
+    return { projectKey, memories: body.memories };
+  } catch {
+    return null;
+  }
+}
+
+async function listCloudMemories(db: D1Database, ownerKey: string, projectKey: string) {
+  const query = projectKey
+    ? "SELECT * FROM agent_memory WHERE owner_key = ? AND (scope = 'user' OR (scope = 'project' AND project_key = ?)) ORDER BY updated_at DESC LIMIT 250"
+    : "SELECT * FROM agent_memory WHERE owner_key = ? AND scope = 'user' ORDER BY updated_at DESC LIMIT 250";
+  const statement = projectKey ? db.prepare(query).bind(ownerKey, projectKey) : db.prepare(query).bind(ownerKey);
+  const { results } = await statement.all<Record<string, unknown>>();
+  return results.map((row) => ({
+    id: row.id,
+    scope: row.scope,
+    kind: row.kind,
+    text: row.text,
+    normalizedText: row.normalized_text,
+    projectId: null,
+    sessionId: null,
+    source: row.source,
+    sourceId: row.source_id,
+    confidence: row.confidence,
+    pinned: Boolean(row.pinned),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastUsedAt: row.last_used_at,
+    useCount: row.use_count,
+  }));
+}
+
+async function handleAgentMemory(request: Request, env: Env) {
+  await ensureSchema(env.DB);
+  const secret = env.AUTH_SESSION_SECRET;
+  const session = secret ? await readSession(request, secret) : null;
+  if (!session) return json({ error: "Authentication required." }, 401);
+
+  if (request.method !== "POST" && !isSameOrigin(request)) {
+    return json({ error: "Invalid request origin." }, 403);
+  }
+
+  if (request.method === "POST") {
+    if (!isSameOrigin(request)) return json({ error: "Invalid request origin." }, 403);
+    const body = await readMemoryBody(request);
+    if (!body) return json({ error: "Invalid memory sync payload." }, 400);
+    const statements = body.memories
+      .filter((memory) => memory.scope === "user" || body.projectKey)
+      .map((memory) => env.DB.prepare(`INSERT INTO agent_memory (
+        owner_key, id, scope, project_key, kind, text, normalized_text, source, source_id,
+        confidence, pinned, created_at, updated_at, last_used_at, use_count
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(owner_key, id) DO UPDATE SET
+        scope = excluded.scope,
+        project_key = excluded.project_key,
+        kind = excluded.kind,
+        text = excluded.text,
+        normalized_text = excluded.normalized_text,
+        source = excluded.source,
+        source_id = excluded.source_id,
+        confidence = excluded.confidence,
+        pinned = excluded.pinned,
+        updated_at = excluded.updated_at,
+        last_used_at = excluded.last_used_at,
+        use_count = excluded.use_count
+      WHERE excluded.updated_at >= agent_memory.updated_at`)
+        .bind(
+          session.username,
+          memory.id,
+          memory.scope,
+          memory.scope === "project" ? body.projectKey : null,
+          memory.kind,
+          memory.text,
+          memory.normalizedText,
+          memory.source,
+          memory.sourceId || null,
+          Math.max(0, Math.min(1, memory.confidence)),
+          memory.pinned ? 1 : 0,
+          memory.createdAt,
+          memory.updatedAt,
+          memory.lastUsedAt || null,
+          Math.max(0, Math.floor(memory.useCount || 0)),
+        ));
+    for (let index = 0; index < statements.length; index += 50) {
+      await env.DB.batch(statements.slice(index, index + 50));
+    }
+    return json({ memories: await listCloudMemories(env.DB, session.username, body.projectKey) });
+  }
+
+  if (request.method === "DELETE") {
+    if (!isSameOrigin(request)) return json({ error: "Invalid request origin." }, 403);
+    const url = new URL(request.url);
+    const scope = url.searchParams.get("scope");
+    const projectKey = url.searchParams.get("project_key") || "";
+    if (scope === "user") {
+      await env.DB.prepare("DELETE FROM agent_memory WHERE owner_key = ? AND scope = 'user'").bind(session.username).run();
+    } else if (scope === "project" && projectKey) {
+      await env.DB.prepare("DELETE FROM agent_memory WHERE owner_key = ? AND scope = 'project' AND project_key = ?")
+        .bind(session.username, projectKey).run();
+    } else if (scope === "all") {
+      const statements = [env.DB.prepare("DELETE FROM agent_memory WHERE owner_key = ? AND scope = 'user'").bind(session.username)];
+      if (projectKey) statements.push(env.DB.prepare(
+        "DELETE FROM agent_memory WHERE owner_key = ? AND scope = 'project' AND project_key = ?",
+      ).bind(session.username, projectKey));
+      await env.DB.batch(statements);
+    } else {
+      return json({ error: "Invalid memory scope." }, 400);
+    }
+    return json({ ok: true });
+  }
+
+  return json({ error: "Method not allowed." }, 405);
 }
 
 function isSameOrigin(request: Request) {
@@ -294,6 +482,10 @@ const worker = {
 
     if (url.pathname.startsWith("/api/auth/")) {
       return handleAuth(request, env, url.pathname);
+    }
+
+    if (url.pathname === "/api/agent-memory") {
+      return handleAgentMemory(request, env);
     }
 
     if (!isPublicPath(url.pathname)) {
