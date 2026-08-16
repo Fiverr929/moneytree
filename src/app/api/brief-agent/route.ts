@@ -3,11 +3,17 @@ import { ThinkingLevel } from "@google/genai";
 import { applySkillContract, BRIEF_AGENT_SKILL_CONTRACT } from "@/lib/brief-agent/skillContract";
 import { advanceAgentRun, type AgentRun } from "@/lib/brief-agent/runState";
 import { REFERENCE_INFLUENCE_SKILL } from "@/lib/brief-agent/skills/referenceInfluence";
+import { DELIBERATE_PLANNING_SKILL } from "@/lib/brief-agent/skills/deliberatePlanning";
 import { createVisualUnderstanding } from "@/lib/brief-agent/visualUnderstanding";
 import { getReferenceInfluence } from "@/lib/pipeline/strength";
 import { createGoogleGenAI } from "@/lib/server/googleGenAI";
-import { logModelUsage } from "@/lib/server/modelUsage";
+import { logModelUsage, traceReferenceFingerprint } from "@/lib/server/modelUsage";
 import { parseAgentAppActions } from "@/lib/brief-agent/appActions";
+import {
+  isClearlyNonCreativeMessage,
+  isCreativeBrief,
+  shouldProduceDraft,
+} from "@/lib/brief-agent/intent";
 import type {
   AgentMessage,
   BriefAgentAction,
@@ -29,13 +35,94 @@ const DEFAULT_BRIEF_AGENT_MODEL = "gemini-3.6-flash";
 const MAX_MESSAGE_COUNT = 24;
 const MAX_MODEL_MESSAGE_COUNT = 10;
 const MAX_MESSAGE_CHARS = 2_000;
-const MAX_MODEL_MESSAGE_CHARS = 700;
+const MAX_MODEL_MESSAGE_CHARS = 1_500;
 const MAX_FINAL_PROMPT_CHARS = 4_000;
-const MAX_MODEL_PROMPT_MEMORY_CHARS = 1_000;
+const MAX_MODEL_PROMPT_MEMORY_CHARS = 3_000;
 const MAX_REFERENCE_READ_CHARS = 650;
 const MAX_SESSION_TEXT_CHARS = 900;
 const MAX_VISUAL_FACTS = 5;
 const MAX_GENERATION_EVIDENCE = 6;
+
+const BRIEF_AGENT_RESPONSE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "action",
+    "reply",
+    "clarification",
+    "plan",
+    "session",
+    "finalPrompt",
+    "warnings",
+    "readyToExecute",
+    "appActions",
+  ],
+  properties: {
+    action: { type: "string", enum: ["talk", "inspect", "plan", "ask", "draft"] },
+    reply: { type: "string" },
+    clarification: {
+      type: "object",
+      additionalProperties: false,
+      required: ["needed", "reason", "questions"],
+      properties: {
+        needed: { type: "boolean" },
+        reason: { type: ["string", "null"] },
+        questions: { type: "array", items: { type: "string" } },
+      },
+    },
+    plan: {
+      type: "object",
+      additionalProperties: false,
+      required: ["intent", "subjectPolicy", "scenePolicy", "stylePolicy"],
+      properties: {
+        intent: { type: "string" },
+        subjectPolicy: { type: "string" },
+        scenePolicy: { type: "string" },
+        stylePolicy: { type: "string" },
+      },
+    },
+    session: {
+      type: "object",
+      additionalProperties: false,
+      required: ["projectIntent", "selectedDirection", "directions", "lastDraftPrompt", "unresolvedQuestions", "notes"],
+      properties: {
+        projectIntent: { type: "string" },
+        selectedDirection: { type: "string" },
+        directions: { type: "array", items: { type: "string" } },
+        lastDraftPrompt: { type: "string" },
+        unresolvedQuestions: { type: "array", items: { type: "string" } },
+        notes: { type: "array", items: { type: "string" } },
+      },
+    },
+    finalPrompt: { type: "string" },
+    warnings: { type: "array", items: { type: "string" } },
+    readyToExecute: { type: "boolean" },
+    appActions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          type: { type: "string" },
+          imageId: { type: "string" },
+          name: { type: "string" },
+          role: { type: "string" },
+          strength: { type: "number" },
+          visible: { type: "boolean" },
+          folder: { type: ["string", "null"] },
+        },
+        required: ["type"],
+      },
+    },
+  },
+} as const;
+
+function briefAgentThinkingLevel() {
+  const configured = process.env.BRIEF_AGENT_THINKING_LEVEL?.trim().toUpperCase();
+  if (configured === "MINIMAL") return ThinkingLevel.MINIMAL;
+  if (configured === "LOW") return ThinkingLevel.LOW;
+  if (configured === "MEDIUM") return ThinkingLevel.MEDIUM;
+  return ThinkingLevel.HIGH;
+}
 function validateMessage(value: unknown): AgentMessage {
   if (!value || typeof value !== "object") {
     throw new Error("Invalid brief agent message.");
@@ -213,7 +300,9 @@ function formatAgentReply(draft: BriefDraft) {
   const lines = draft.reply.trim() ? [draft.reply] : [];
   if (draft.action === "ask" || draft.clarification.needed) {
     draft.clarification.questions.forEach((question) => {
-      lines.push(question);
+      const normalizedQuestion = question.trim().toLowerCase();
+      const alreadyIncluded = lines.some((line) => line.trim().toLowerCase().includes(normalizedQuestion));
+      if (!alreadyIncluded) lines.push(question);
     });
   }
   return lines.join("\n") || "Done.";
@@ -224,35 +313,6 @@ function latestUserText(messages: AgentMessage[]) {
     if (messages[i].role === "user") return messages[i].text.trim();
   }
   return "";
-}
-
-function isCreativeBrief(text: string) {
-  const normalized = text.trim().toLowerCase();
-  if (!normalized) return false;
-  if (/^(hi|hello|hey|yo|sup|thanks|thank you|ok|okay|cool|nice|test|hellow)[\s?.!]*$/i.test(normalized)) {
-    return false;
-  }
-  if (/^(what|how|why|when|where|who|can you|could you|do you|are you|is this|does this)\b/i.test(normalized)) {
-    return false;
-  }
-  return /\b(create|make|generate|draft|compose|turn|change|replace|remove|add|use|make it|style|shot|portrait|product|scene|background|lighting|camera|angle|pose|render|image|frame|edit|transform|upscale)\b/i
-    .test(normalized);
-}
-
-function isCreativeFollowUp(text: string, session: BriefSessionState) {
-  const normalized = text.trim().toLowerCase();
-  if (!normalized) return false;
-  const hasTarget = !!session.selectedDirection || !!session.lastDraftPrompt || session.directions.length > 0;
-  if (!hasTarget) return false;
-  return /^(do|use|choose|pick|go with|continue|run|draft|generate)\b.*\b(option\s*\d+|that|this|it|one|direction|draft)\b/i.test(normalized)
-    || /^option\s*\d+$/i.test(normalized)
-    || /^(yes|ok|okay|cool),?\s*(do|use|draft|generate|continue)\b/i.test(normalized)
-    || /^(make|change|adjust|refine|improve|add|remove|keep|try)\b/i.test(normalized)
-    || /^(use|apply)\b.*\b(feedback|review|liked|disliked|preference)\b/i.test(normalized);
-}
-
-function shouldProduceDraft(text: string, session: BriefSessionState) {
-  return isCreativeBrief(text) || isCreativeFollowUp(text, session);
 }
 
 function trimText(value: string, limit = MAX_MESSAGE_CHARS) {
@@ -293,7 +353,9 @@ function compactConversationForModel(messages: AgentMessage[]) {
     role: message.role,
     action: message.action || null,
     text: trimText(message.text.replace(/\s+/g, " "), MAX_MODEL_MESSAGE_CHARS),
-    hasPromptDraft: Boolean(message.promptArtifact),
+    promptDraft: message.promptArtifact?.prompt
+      ? trimText(message.promptArtifact.prompt, MAX_MODEL_PROMPT_MEMORY_CHARS)
+      : null,
     createdAt: message.createdAt,
   }));
 }
@@ -438,14 +500,22 @@ function draftFromModelJson(value: Record<string, unknown>, fallback: BriefDraft
   const shouldDraft = shouldProduceDraft(latestText, fallback.session);
   const clarification = clarificationValue(value.clarification, fallback.clarification);
   const requestedAction = actionValue(value.action, fallbackActionForText(latestText, shouldDraft));
+  const allowModelDraft = requestedAction === "draft" && !isClearlyNonCreativeMessage(latestText);
   const action: BriefAgentAction = clarification.needed
     ? "ask"
-    : requestedAction === "draft" && !shouldDraft
-    ? fallbackActionForText(latestText, false)
-    : requestedAction;
+    : allowModelDraft
+      ? "draft"
+      : requestedAction === "draft"
+        ? fallbackActionForText(latestText, false)
+        : requestedAction;
+  const modelPrompt = typeof value.finalPrompt === "string" ? value.finalPrompt.trim() : "";
+  // A creative request must never disappear because the model selected draft but
+  // omitted the optional-looking JSON field. The user's own brief is a safe,
+  // generation-capable fallback and remains visible for editing.
+  const promptFallback = action === "draft" ? latestText : fallback.finalPrompt;
   const finalPrompt = action !== "draft" || clarification.needed
     ? ""
-    : stringValue(value.finalPrompt, fallback.finalPrompt).slice(0, MAX_FINAL_PROMPT_CHARS);
+    : stringValue(modelPrompt, promptFallback).slice(0, MAX_FINAL_PROMPT_CHARS);
   const status = action === "ask"
     ? "needs_clarification"
     : action === "draft" && finalPrompt
@@ -467,7 +537,12 @@ function draftFromModelJson(value: Record<string, unknown>, fallback: BriefDraft
     plan: planValue(value.plan, fallback.plan),
     session: nextSession,
     finalPrompt,
-    warnings: stringArray(value.warnings, fallback.warnings),
+    warnings: Array.from(new Set([
+      ...stringArray(value.warnings, fallback.warnings),
+      ...(action === "draft" && !modelPrompt && finalPrompt
+        ? ["The planner omitted its composed prompt, so the original creative brief was preserved as the draft."]
+        : []),
+    ])),
     readyToExecute: typeof value.readyToExecute === "boolean" ? value.readyToExecute : false,
   };
 }
@@ -536,10 +611,11 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "When the user corrects you, accept the correction as authoritative, update session notes or selectedDirection as needed, and apply it immediately without defending the earlier interpretation.",
     "Before asking a question, inspect the session, recent conversation, workspace, references, and generation evidence. Ask only when a missing decision would materially change the result.",
     "Never report an operation as complete from intent alone. Distinguish between what you understand, what you drafted, what is generating, what needs approval, and what the client confirms as completed.",
+    "You are integrated with CafeHTML's generation client. Never claim that you cannot run generation or that you only write prompts. A draft is handed to the client automatically. If generation evidence says a run failed or was blocked, acknowledge that exact outcome and offer a useful retry or prompt adjustment.",
     "Maintain session.projectIntent as the user's current creative objective. Maintain session.selectedDirection when a plan option is chosen. Keep session.notes as short durable constraints only.",
     "Do not introduce yourself. Do not say you are ready to help. Do not greet unless the user greets first, and then keep it to one short line.",
     "If the latest user message is casual chat, a greeting, a status question, or a question about the UI/agent, use action talk or inspect. Do not produce finalPrompt.",
-    "Use action draft and produce finalPrompt only when the latest user message asks to create, generate, compose, edit, transform, or otherwise describes the desired image/frame.",
+    "Use action draft and produce finalPrompt when the latest user message asks to create, generate, compose, edit, transform, or simply describes the desired image/frame as a noun phrase.",
     "If action is talk, inspect, plan, or ask, finalPrompt must be an empty string.",
     "App control:",
     "- appActions are proposed commands for CafeHTML itself, separate from the conversational action. The user must approve them before execution.",
@@ -559,6 +635,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "When revising from feedback, preserve items in keep, address items in change and the note, and use visual-review suggestions only when they do not conflict with user feedback.",
     "If the requested generation or evidence is absent, say what is unavailable instead of inventing it.",
     `Skill contract: ${JSON.stringify(BRIEF_AGENT_SKILL_CONTRACT)}`,
+    `Deliberate planning skill:\n${DELIBERATE_PLANNING_SKILL}`,
     `Reference influence skill:\n${REFERENCE_INFLUENCE_SKILL}`,
     "First build a visual understanding from the references, then draft from that understanding. The raw user text is an instruction, not the final prompt.",
     "Treat the latest user instruction as the creative brief. Use reference data to support that brief, not to automatically freeze the image.",
@@ -567,6 +644,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "Do not invent subject features, wardrobe details, stage elements, camera view, lighting, palette, or style details that are not requested by the user or present in the visual scan.",
     "When the visual scan is incomplete, use safe general language or ask only if the missing detail blocks a useful draft.",
     "The finalPrompt should be one clean generation brief. Merge user intent, visual scans, roles, and influence into natural visual language; do not append checklist-like rule blocks.",
+    "Before returning a draft, re-read the exact latest user instruction and verify that every explicit subject, action, setting, composition, style, lighting, color, text, keep, remove, and negative constraint is represented in finalPrompt. Do not silently drop details.",
     "If the user asks for a small edit and the relevant reference influence is LOCKED or CLOSE, keep the rest stable through natural prompt wording.",
     "If the user asks for transformation, exploration, or a campaign concept, let FREE, LOOSE, or BALANCED references participate more flexibly.",
     "Ask concise clarification questions only when the request lacks a necessary target or choosing one would likely betray the user's intent.",
@@ -575,7 +653,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "{\"action\":\"talk|inspect|plan|ask|draft\",\"reply\":\"string\",\"clarification\":{\"needed\":boolean,\"reason\":string|null,\"questions\":[\"string\"]},\"plan\":{\"intent\":\"string\",\"subjectPolicy\":\"string\",\"scenePolicy\":\"string\",\"stylePolicy\":\"string\"},\"session\":{\"projectIntent\":\"string\",\"selectedDirection\":\"string\",\"directions\":[\"string\"],\"lastDraftPrompt\":\"string\",\"unresolvedQuestions\":[\"string\"],\"notes\":[\"string\"]},\"finalPrompt\":\"string\",\"warnings\":[\"string\"],\"readyToExecute\":false,\"appActions\":[{\"type\":\"project.rename|reference.rename|reference.set_role|reference.set_strength|reference.set_visibility|reference.move\",\"imageId\":\"exact id when required\"}]}",
     "",
     `Latest user instruction: ${JSON.stringify(latestInstruction)}`,
-    `Latest message is creative image direction: ${JSON.stringify(shouldDraft)}`,
+    `Creative-direction heuristic (advisory; use the instruction itself as authority): ${JSON.stringify(shouldDraft)}`,
     `Session state: ${JSON.stringify(session)}`,
     `Compact visual understanding: ${JSON.stringify(visualUnderstanding)}`,
     `Compact reference reads: ${JSON.stringify(references)}`,
@@ -591,7 +669,8 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
   ].join("\n");
 }
 
-async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft, localApiKey?: string | null) {
+async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft, requestId: string, localApiKey?: string | null) {
+  const startedAt = Date.now();
   const model = process.env.BRIEF_AGENT_MODEL?.trim() || DEFAULT_BRIEF_AGENT_MODEL;
   const ai = createGoogleGenAI({ apiKey: localApiKey });
   const result = await ai.models.generateContent({
@@ -603,13 +682,17 @@ async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft, 
     config: {
       temperature: 0.25,
       responseMimeType: "application/json",
-      maxOutputTokens: 4_096,
-      thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+      responseJsonSchema: BRIEF_AGENT_RESPONSE_SCHEMA,
+      maxOutputTokens: 6_144,
+      thinkingConfig: { thinkingLevel: briefAgentThinkingLevel() },
     },
   });
   logModelUsage("brief-agent.plan", model, result, {
+    requestId,
+    referenceFingerprint: traceReferenceFingerprint(input.referenceSnapshot.sourceFingerprint),
     referenceCount: input.referenceSnapshot.observations.length,
     messageCount: input.messages.length,
+    durationMs: Date.now() - startedAt,
   });
   const text = extractResponseText(result);
   const json = parseJsonObject(text);
@@ -642,13 +725,14 @@ function describeBriefAgentError(error: unknown) {
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
   try {
     const input = validateRequest(request, await request.json());
     const localApiKey = process.env.NODE_ENV === "production"
       ? null
       : request.headers.get("x-cafehtml-local-gemini-key");
     const baseline = createBaselineDraft(input);
-    const modelResult = await createModelDraft(input, baseline, localApiKey);
+    const modelResult = await createModelDraft(input, baseline, requestId, localApiKey);
     const draft = applySkillContract(modelResult.draft);
     const run = advanceAgentRun(input.run, draft, input.referenceSnapshot);
     const isPromptRevision = input.run?.steps.at(-1)?.action.type === "request_prompt_revision";
@@ -679,9 +763,12 @@ export async function POST(request: Request) {
         : undefined,
     };
     const response: BriefAgentResponse = { draft, message, run, brain: "model", model: modelResult.model, appActions: modelResult.appActions };
-    return NextResponse.json(response);
+    return NextResponse.json(response, { headers: { "X-CafeHTML-Request-Id": requestId } });
   } catch (error) {
     const described = describeBriefAgentError(error);
-    return NextResponse.json({ error: described.message }, { status: described.status });
+    return NextResponse.json(
+      { error: described.message },
+      { status: described.status, headers: { "X-CafeHTML-Request-Id": requestId } },
+    );
   }
 }

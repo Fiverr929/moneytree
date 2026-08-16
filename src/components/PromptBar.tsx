@@ -29,7 +29,7 @@ import {
 
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
 const IMAGE_PROMPT_SETTINGS_KEY = "cafehtml-image-prompt-settings";
-const REFERENCE_SNAPSHOT_CACHE_KEY = "cafehtml-brief-reference-cache-v2";
+const REFERENCE_SNAPSHOT_CACHE_KEY = "cafehtml-brief-reference-cache-v3";
 const REFERENCE_SNAPSHOT_CACHE_LIMIT = 20;
 const AGENT_RUN_CLEARED_KEY = "cafehtml-agent-run-cleared";
 const GENERATION_VISION_CACHE_KEY = "cafehtml-generation-vision-cache-v1";
@@ -50,6 +50,7 @@ const CANVAS_COMMANDS = [
 ];
 const DEFAULT_FRAME_RATIO = "1:1";
 const DEFAULT_FRAME_VARIATIONS = 1;
+const MAX_AGENT_QUEUE_LENGTH = 20;
 
 type ReferenceSnapshotCacheEntry = {
   sourceFingerprint: string;
@@ -231,6 +232,7 @@ export default function PromptBar() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [draftProjectId, setDraftProjectId] = useState<number | null>(null);
   const [agentConsoleOpen, setAgentConsoleOpen] = useState(false);
+  const [agentWorkspaceHydrating, setAgentWorkspaceHydrating] = useState(true);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [agentPending, setAgentPending] = useState(false);
   const [queuedAgentInputs, setQueuedAgentInputs] = useState<string[]>([]);
@@ -262,11 +264,16 @@ export default function PromptBar() {
   const agentRunHydratedProjectRef = useRef<number | null>(null);
   const agentToolPendingRef = useRef(false);
   const agentMessagesRef = useRef<AgentMessage[]>([]);
+  const agentPendingRef = useRef(false);
+  const queuedAgentInputsRef = useRef<string[]>([]);
   const agentAbortRef = useRef<AbortController | null>(null);
   const agentRequestIdRef = useRef(0);
+  const agentReviewRequestIdRef = useRef(0);
   const activeProjectIdRef = useRef(activeProjectId);
   const moduleFilesRef = useRef(moduleContext.files);
   const moduleFoldersRef = useRef(moduleContext.folders);
+  const referenceFingerprint = fingerprintModuleFiles(moduleContext.files);
+  const referenceFingerprintRef = useRef(referenceFingerprint);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
@@ -274,6 +281,7 @@ export default function PromptBar() {
 
   useEffect(() => {
     moduleFilesRef.current = moduleContext.files;
+    referenceFingerprintRef.current = fingerprintModuleFiles(moduleContext.files);
   }, [moduleContext.files]);
 
   useEffect(() => {
@@ -283,6 +291,10 @@ export default function PromptBar() {
   useEffect(() => {
     agentMessagesRef.current = agentMessages;
   }, [agentMessages]);
+
+  useEffect(() => {
+    queuedAgentInputsRef.current = queuedAgentInputs;
+  }, [queuedAgentInputs]);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -401,16 +413,21 @@ export default function PromptBar() {
 
   useEffect(() => {
     let cancelled = false;
+    setAgentWorkspaceHydrating(true);
     agentRunHydratedProjectRef.current = null;
     setDraftProjectId(null);
     setGenerationError("");
     setAgentMessages([]);
+    agentMessagesRef.current = [];
     setAgentPending(false);
+    agentPendingRef.current = false;
     setQueuedAgentInputs([]);
+    queuedAgentInputsRef.current = [];
     setLastFailedAgentInput("");
     agentAbortRef.current?.abort();
     agentAbortRef.current = null;
     agentRequestIdRef.current += 1;
+    agentReviewRequestIdRef.current += 1;
     setAgentToolPending(false);
     agentToolPendingRef.current = false;
     setAgentError("");
@@ -439,6 +456,7 @@ export default function PromptBar() {
       const clearedKey = agentRunClearedStorageKey(activeProjectId);
       if (window.localStorage.getItem(clearedKey)) {
         agentRunHydratedProjectRef.current = activeProjectId;
+        setAgentWorkspaceHydrating(false);
         void DB.agentRuns.clearActive(activeProjectId).catch((error) => console.error("Failed to finish clearing agent run", error));
         return () => {
           cancelled = true;
@@ -463,15 +481,26 @@ export default function PromptBar() {
           setAgentReviewEvaluation(state.reviewEvaluation || null);
           setAgentRevisionRequested(Boolean(state.revisionRequested));
           setRestoredReviewTargetKeys(Array.isArray(state.reviewTargetKeys) ? state.reviewTargetKeys : []);
-          setQueuedAgentInputs(Array.isArray(state.queuedInputs) ? state.queuedInputs.filter((item) => typeof item === "string" && item.trim()).slice(0, 20) : []);
+          const restoredQueue = Array.isArray(state.queuedInputs)
+            ? state.queuedInputs.filter((item) => typeof item === "string" && item.trim()).slice(0, MAX_AGENT_QUEUE_LENGTH)
+            : [];
+          setQueuedAgentInputs((current) => {
+            const next = [...restoredQueue, ...current].slice(0, MAX_AGENT_QUEUE_LENGTH);
+            queuedAgentInputsRef.current = next;
+            return next;
+          });
         }
         agentRunHydratedProjectRef.current = activeProjectId;
+        setAgentWorkspaceHydrating(false);
       }).catch((error) => {
         if (!cancelled) {
           agentRunHydratedProjectRef.current = activeProjectId;
+          setAgentWorkspaceHydrating(false);
           console.error("Failed to restore agent run", error);
         }
       });
+    } else {
+      setAgentWorkspaceHydrating(false);
     }
     return () => {
       cancelled = true;
@@ -559,7 +588,7 @@ export default function PromptBar() {
     const stagedPromptArtifact = approvedArtifact || findPromptArtifactByPrompt(executionPrompt);
     if (
       stagedPromptArtifact?.sourceFingerprint
-      && stagedPromptArtifact.sourceFingerprint !== referenceFingerprint
+      && stagedPromptArtifact.sourceFingerprint !== referenceFingerprintRef.current
     ) {
       setGenerationError("References changed after this prompt was drafted. Ask the agent to update it before generating.");
       return;
@@ -752,11 +781,11 @@ export default function PromptBar() {
     }
   };
 
-  const referenceFingerprint = fingerprintModuleFiles(moduleContext.files);
+  const setModuleFiles = moduleContext.setFiles;
 
   const applyReferenceSnapshotToModules = useCallback((snapshot: BriefReferenceSnapshot) => {
     const observationsById = new Map(snapshot.observations.map((observation) => [observation.imageId, observation]));
-    moduleContext.setFiles((current) => {
+    setModuleFiles((current) => {
       let changed = false;
       const next = current.map((file) => {
         const observation = observationsById.get(file.uuid || String(file.id));
@@ -773,7 +802,7 @@ export default function PromptBar() {
       });
       return changed ? next : current;
     });
-  }, [moduleContext]);
+  }, [setModuleFiles]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1013,6 +1042,8 @@ export default function PromptBar() {
   const handleReviewAgentGeneration = async () => {
     const target = agentReviewTargets[0];
     if (!target?.imgUrl || agentReviewPending || agentReviewComplete) return;
+    const reviewProjectId = activeProjectId;
+    const reviewRequestId = ++agentReviewRequestIdRef.current;
     setAgentReviewPending(true);
     setAgentError("");
     try {
@@ -1028,7 +1059,9 @@ export default function PromptBar() {
           dataUrl: image.imgUrl,
         })),
       });
+      if (reviewRequestId !== agentReviewRequestIdRef.current || activeProjectIdRef.current !== reviewProjectId) return;
       await gallery.saveEvaluation(target.id, evaluation);
+      if (reviewRequestId !== agentReviewRequestIdRef.current || activeProjectIdRef.current !== reviewProjectId) return;
       const review = {
         generationId: target.uuid || String(target.id),
         scores: {
@@ -1060,10 +1093,11 @@ export default function PromptBar() {
       setAgentReviewComplete(true);
       setAgentReviewEvaluation(evaluation);
     } catch (error) {
+      if (reviewRequestId !== agentReviewRequestIdRef.current || activeProjectIdRef.current !== reviewProjectId) return;
       const message = error instanceof Error ? error.message : "Generation review failed.";
       setAgentError(message);
     } finally {
-      setAgentReviewPending(false);
+      if (reviewRequestId === agentReviewRequestIdRef.current) setAgentReviewPending(false);
     }
   };
 
@@ -1083,11 +1117,18 @@ export default function PromptBar() {
       text: "Improve the last prompt using the visual review. Preserve the original intent and change only what the review evidence supports.",
       createdAt: new Date().toISOString(),
     };
-    const nextMessages = [...agentMessages, userMessage];
+    const nextMessages = [...agentMessagesRef.current, userMessage];
+    const revisionProjectId = activeProjectId;
+    const requestId = ++agentRequestIdRef.current;
+    const controller = new AbortController();
+    agentAbortRef.current?.abort();
+    agentAbortRef.current = controller;
     setAgentMessages(nextMessages);
+    agentMessagesRef.current = nextMessages;
     setAgentRun(revisionRun);
-    setAgentDraft(null);
     setAgentRevisionPending(true);
+    agentPendingRef.current = true;
+    setAgentPending(true);
     setAgentError("");
     try {
       const response = await requestBriefAgent({
@@ -1097,13 +1138,17 @@ export default function PromptBar() {
         run: revisionRun,
         generations: currentGenerationEvidence(),
         workspace: await currentWorkspace(),
-      }, settings.geminiApiKey);
+      }, settings.geminiApiKey, controller.signal);
+      if (controller.signal.aborted || requestId !== agentRequestIdRef.current) return;
+      if (activeProjectIdRef.current !== revisionProjectId) {
+        throw new Error("Project changed while the prompt revision was running.");
+      }
       setAgentBrain(response.brain);
       setAgentModel(response.model);
       setAgentDraft(response.draft);
       setAgentRun(response.run);
-      setAgentMessages([
-        ...nextMessages,
+      setAgentMessages((messages) => [
+        ...messages,
         {
           ...response.message,
           context: currentReferenceContext(),
@@ -1111,6 +1156,16 @@ export default function PromptBar() {
       ]);
       setAgentRevisionRequested(true);
     } catch (error) {
+      if (requestId !== agentRequestIdRef.current) return;
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+        setAgentMessages((messages) => [...messages, {
+          id: crypto.randomUUID(),
+          role: "system",
+          text: "PROMPT REVISION STOPPED - The current revision was cancelled.",
+          createdAt: new Date().toISOString(),
+        }]);
+        return;
+      }
       const message = error instanceof Error ? error.message : "Prompt revision failed.";
       setAgentError(message);
       setAgentMessages((messages) => [...messages, {
@@ -1120,7 +1175,12 @@ export default function PromptBar() {
         createdAt: new Date().toISOString(),
       }]);
     } finally {
-      setAgentRevisionPending(false);
+      if (requestId === agentRequestIdRef.current) {
+        agentAbortRef.current = null;
+        setAgentRevisionPending(false);
+        agentPendingRef.current = false;
+        setAgentPending(false);
+      }
     }
   };
 
@@ -1400,6 +1460,7 @@ export default function PromptBar() {
     if (command === "/stop") {
       setPromptText("");
       setQueuedAgentInputs([]);
+      queuedAgentInputsRef.current = [];
       if (agentAbortRef.current) {
         agentAbortRef.current.abort();
       } else {
@@ -1425,7 +1486,7 @@ export default function PromptBar() {
         addLocalAgentMessage("No failed agent turn is available to retry.", "inspect");
         return;
       }
-      void submitAgentMessage(lastFailedAgentInput);
+      void submitAgentMessage(lastFailedAgentInput, { retry: true });
       return;
     }
     if (command === "/undo") {
@@ -1459,12 +1520,16 @@ export default function PromptBar() {
         void DB.agentRuns.clearActive(activeProjectId).catch((error) => console.error("Failed to end agent run", error));
       }
       setAgentMessages([]);
+      agentMessagesRef.current = [];
       setAgentPending(false);
+      agentPendingRef.current = false;
       setQueuedAgentInputs([]);
+      queuedAgentInputsRef.current = [];
       setLastFailedAgentInput("");
       agentAbortRef.current?.abort();
       agentAbortRef.current = null;
       agentRequestIdRef.current += 1;
+      agentReviewRequestIdRef.current += 1;
       setAgentToolPending(false);
       agentToolPendingRef.current = false;
       setAgentDraft(null);
@@ -1498,11 +1563,17 @@ export default function PromptBar() {
     setPromptText("");
   };
 
-  const submitAgentMessage = async (inputOverride?: string) => {
+  const submitAgentMessage = async (inputOverride?: string, options?: { retry?: boolean }) => {
     const trimmed = (inputOverride ?? promptText).trim();
     if (!trimmed) return;
-    if (agentPending) {
-      setQueuedAgentInputs((queue) => [...queue, trimmed]);
+    if (agentWorkspaceHydrating || agentPendingRef.current) {
+      if (queuedAgentInputsRef.current.length >= MAX_AGENT_QUEUE_LENGTH) {
+        setAgentError(`The agent queue is full (${MAX_AGENT_QUEUE_LENGTH} messages). Wait for a turn to finish or use /stop.`);
+        return;
+      }
+      const nextQueue = [...queuedAgentInputsRef.current, trimmed];
+      queuedAgentInputsRef.current = nextQueue;
+      setQueuedAgentInputs(nextQueue);
       setPromptText("");
       setHistoryIndex(-1);
       setAgentConsoleOpen(true);
@@ -1511,15 +1582,27 @@ export default function PromptBar() {
     const createdAt = new Date().toISOString();
     const requestProjectId = activeProjectId;
     const previousSession = agentDraft?.session || null;
-    const userMessage: AgentMessage = {
+    const retryMessage = options?.retry
+      ? [...agentMessagesRef.current].reverse().find((message) => message.role === "user" && message.text.trim() === trimmed)
+      : null;
+    const userMessage: AgentMessage = retryMessage || {
       id: crypto.randomUUID(),
       role: "user",
       text: trimmed,
       createdAt,
     };
-    const nextUserMessages = [...agentMessages, userMessage];
+    const latestMessage = agentMessagesRef.current.at(-1);
+    const messagesWithoutFailedTurn = options?.retry
+      && latestMessage?.role === "system"
+      && latestMessage.text.startsWith("AGENT ERROR:")
+      ? agentMessagesRef.current.slice(0, -1)
+      : agentMessagesRef.current;
+    const nextUserMessages = retryMessage
+      ? messagesWithoutFailedTurn
+      : [...messagesWithoutFailedTurn, userMessage];
     setAgentMessages(nextUserMessages);
-    setAgentDraft(null);
+    agentMessagesRef.current = nextUserMessages;
+    agentPendingRef.current = true;
     setAgentPending(true);
     setAgentError("");
     if (trimmed && promptHistory[0] !== trimmed) {
@@ -1563,8 +1646,8 @@ export default function PromptBar() {
       setAgentModel(response.model);
       setAgentDraft(response.draft);
       setAgentRun(response.run);
-      setAgentMessages([
-        ...nextUserMessages,
+      setAgentMessages((messages) => [
+        ...messages,
         {
           ...response.message,
           context: currentReferenceContext(),
@@ -1589,8 +1672,8 @@ export default function PromptBar() {
       const message = error instanceof Error ? error.message : "Brief agent failed.";
       setLastFailedAgentInput(trimmed);
       setAgentError(message);
-      setAgentMessages([
-        ...nextUserMessages,
+      setAgentMessages((messages) => [
+        ...messages,
         {
           id: crypto.randomUUID(),
           role: "system",
@@ -1601,19 +1684,21 @@ export default function PromptBar() {
     } finally {
       if (requestId === agentRequestIdRef.current) {
         agentAbortRef.current = null;
+        agentPendingRef.current = false;
         setAgentPending(false);
       }
     }
   };
 
   useEffect(() => {
-    if (agentPending || queuedAgentInputs.length === 0) return;
+    if (agentWorkspaceHydrating || agentPendingRef.current || queuedAgentInputs.length === 0) return;
     const [nextInput, ...remaining] = queuedAgentInputs;
+    queuedAgentInputsRef.current = remaining;
     setQueuedAgentInputs(remaining);
     void submitAgentMessage(nextInput);
     // submitAgentMessage intentionally consumes the newest render state after each queued turn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentPending, queuedAgentInputs]);
+  }, [agentPending, agentWorkspaceHydrating, queuedAgentInputs]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (commandMenuOpen && filteredCommands.length > 0) {
@@ -1649,7 +1734,9 @@ export default function PromptBar() {
         void submitAgentMessage();
       }
     } else if (e.key === "Escape") {
-      if (agentPending && agentAbortRef.current) {
+      if (agentPendingRef.current && agentAbortRef.current) {
+        setQueuedAgentInputs([]);
+        queuedAgentInputsRef.current = [];
         agentAbortRef.current.abort();
         return;
       }
@@ -1688,8 +1775,17 @@ export default function PromptBar() {
     : `MODEL ${agentModel || referenceReadModel || "NO MODEL"}`;
   const agentIdle = !newestMessages.length
     && !agentPending
+    && !agentWorkspaceHydrating
+    && queuedAgentInputs.length === 0
     && !agentError
     && !referenceReadError;
+  const agentErrorInTranscript = Boolean(agentError) && agentMessages.some((message) => (
+    message.role === "system" && message.text.includes(agentError)
+  ));
+  const hasGenerateCommand = parseGenerateCommand(promptText) !== null;
+  const submitButtonLabel = hasGenerateCommand
+    ? activeGenerationCount > 0 ? "Image generation running" : "Generate image"
+    : agentPending ? "Queue message" : "Send to agent";
 
   return (
     <div className="prompt-bar" id="promptBar" data-state="FRAME" ref={promptBarRef}>
@@ -1870,9 +1966,9 @@ export default function PromptBar() {
           className={`btn-frame ${activeGenerationCount > 0 ? 'cafe-loading' : ''}`}
           id="generateBtn"
           type="button"
-          disabled={!activeProjectId}
-          aria-label={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
-          title={activeGenerationCount > 0 ? "Image generation running" : "Generate image"}
+          disabled={hasGenerateCommand && !activeProjectId}
+          aria-label={submitButtonLabel}
+          title={submitButtonLabel}
           onClick={() => {
             if (parseGenerateCommand(promptText) !== null) void handleGenerate();
             else void submitAgentMessage();
@@ -1933,7 +2029,13 @@ export default function PromptBar() {
                   <div className="agent-prompt-box">{pinnedPrompt}</div>
                 </div>
               )}
-              <div className="agent-section agent-transcript">
+              <div
+                className="agent-section agent-transcript"
+                role="log"
+                aria-live="polite"
+                aria-relevant="additions text"
+                aria-busy={agentPending || agentWorkspaceHydrating}
+              >
                 {newestMessages.map((message) => (
                   <div className={`agent-turn ${message.role}`} key={message.id}>
                     {message.role !== "user" && (
@@ -1944,6 +2046,19 @@ export default function PromptBar() {
                         {message.role === "user" ? `> ${line}` : line}
                       </div>
                     ))}
+                    {message.id === newestMessages[0]?.id
+                      && message.role === "system"
+                      && message.text.startsWith("AGENT ERROR:")
+                      && lastFailedAgentInput && (
+                        <button
+                          className="agent-retry-turn"
+                          type="button"
+                          disabled={agentPending}
+                          onClick={() => void submitAgentMessage(lastFailedAgentInput, { retry: true })}
+                        >
+                          RETRY
+                        </button>
+                    )}
                     {message.promptArtifact && (
                       <div className="agent-prompt-draft agent-turn-artifact">
                         <div className="agent-artifact-head">
@@ -2031,6 +2146,12 @@ export default function PromptBar() {
                     <div className="agent-line">Thinking...</div>
                   </div>
                 )}
+                {agentWorkspaceHydrating && (
+                  <div className="agent-turn system" aria-live="polite">
+                    <div className="agent-speaker">CAFEHTML</div>
+                    <div className="agent-line">Restoring conversation...</div>
+                  </div>
+                )}
                 {queuedAgentInputs.length > 0 && (
                   <div className="agent-turn system agent-queue" aria-live="polite">
                     <div className="agent-speaker">QUEUE · {queuedAgentInputs.length}</div>
@@ -2039,10 +2160,20 @@ export default function PromptBar() {
                     ))}
                   </div>
                 )}
-                {agentError && (
+                {agentError && !agentErrorInTranscript && (
                   <div className="agent-turn system">
                     <div className="agent-speaker">CAFEHTML</div>
                     <div className="agent-line agent-muted">Error: {agentError}</div>
+                    {lastFailedAgentInput && (
+                      <button
+                        className="agent-retry-turn"
+                        type="button"
+                        disabled={agentPending}
+                        onClick={() => void submitAgentMessage(lastFailedAgentInput, { retry: true })}
+                      >
+                        RETRY
+                      </button>
+                    )}
                   </div>
                 )}
                 {agentReviewTargets.length > 0 && !agentReviewComplete && (

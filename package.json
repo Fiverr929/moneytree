@@ -12,7 +12,8 @@
     "lint": "eslint",
     "eval:brief-agent": "node scripts/run-brief-agent-eval.mjs",
     "test:agent-run": "node --experimental-strip-types scripts/check-agent-run-state.mjs",
-    "test:agent-actions": "node --experimental-strip-types scripts/check-agent-app-actions.mjs"
+    "test:agent-actions": "node --experimental-strip-types scripts/check-agent-app-actions.mjs",
+    "test:agent-skills": "node --experimental-strip-types scripts/check-agent-skills.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",

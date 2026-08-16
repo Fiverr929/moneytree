@@ -81,6 +81,8 @@ function describeError(error: unknown) {
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
   try {
     const input = validateRequest(request, await request.json());
     const localApiKey = process.env.NODE_ENV === "production"
@@ -113,7 +115,11 @@ export async function POST(request: Request) {
       contents: [{ role: "user", parts }],
       config: { temperature: 0.1, responseMimeType: "application/json" },
     });
-    logModelUsage("brief-agent.inspect-generations", model, result, { imageCount: input.images.length });
+    logModelUsage("brief-agent.inspect-generations", model, result, {
+      requestId,
+      imageCount: input.images.length,
+      durationMs: Date.now() - startedAt,
+    });
     const json = parseJson(responseText(result));
     const rawObservations = Array.isArray(json.observations) ? json.observations : [];
     const observations = input.images.map((image) => {
@@ -126,9 +132,12 @@ export async function POST(request: Request) {
       observations,
       comparison: input.images.length > 1 ? cleanText(json.comparison) || null : null,
     };
-    return NextResponse.json(response);
+    return NextResponse.json(response, { headers: { "X-CafeHTML-Request-Id": requestId } });
   } catch (error) {
     const described = describeError(error);
-    return NextResponse.json({ error: described.message }, { status: described.status });
+    return NextResponse.json(
+      { error: described.message },
+      { status: described.status, headers: { "X-CafeHTML-Request-Id": requestId } },
+    );
   }
 }

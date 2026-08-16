@@ -58,6 +58,33 @@ function apiErrorMessage(data: unknown, fallback: string) {
   return fallback;
 }
 
+function validBriefAgentResponse(value: unknown): value is BriefAgentResponse {
+  if (!value || typeof value !== "object") return false;
+  const response = value as Partial<BriefAgentResponse>;
+  const draft = response.draft as Partial<BriefAgentResponse["draft"]> | undefined;
+  const message = response.message as Partial<BriefAgentResponse["message"]> | undefined;
+  const run = response.run as Partial<BriefAgentResponse["run"]> | undefined;
+  return response.brain === "model"
+    && (typeof response.model === "string" || response.model === null)
+    && Array.isArray(response.appActions)
+    && !!draft
+    && typeof draft.id === "string"
+    && typeof draft.reply === "string"
+    && typeof draft.finalPrompt === "string"
+    && !!draft.session
+    && !!message
+    && typeof message.id === "string"
+    && typeof message.text === "string"
+    && typeof message.createdAt === "string"
+    && !!run
+    && run.version === 1
+    && typeof run.id === "string"
+    && typeof run.status === "string"
+    && Array.isArray(run.steps)
+    && Array.isArray(run.generationIds)
+    && !!run.budget;
+}
+
 export async function requestBriefAgent(
   input: BriefAgentRequest,
   apiKey?: string | null,
@@ -74,12 +101,19 @@ export async function requestBriefAgent(
   });
 
   const data = await response.json().catch(() => null);
+  const requestId = response.headers.get("x-cafehtml-request-id");
   if (!response.ok) {
-    const message = typeof data?.error === "string" ? data.error : "Brief agent request failed.";
-    throw new Error(message);
+    const message = apiErrorMessage(data, "Brief agent request failed.");
+    throw new Error(requestId ? `${message} (Request ${requestId})` : message);
   }
 
-  return data as BriefAgentResponse;
+  if (!validBriefAgentResponse(data)) {
+    throw new Error(requestId
+      ? `The brief agent returned an incomplete response. Try again. (Request ${requestId})`
+      : "The brief agent returned an incomplete response. Try again.");
+  }
+
+  return data;
 }
 
 export async function requestReferenceRead(

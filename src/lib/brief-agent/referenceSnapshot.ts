@@ -6,6 +6,7 @@ import type {
   ReferenceObservation,
 } from "./types";
 import { getGenerationModuleImages } from "@/lib/pipeline/module-order";
+import { fingerprintReferenceValues } from "./referenceFingerprint";
 
 function roleOf(file: ModuleFile): BriefReferenceRole {
   const role = String(file.mode || "").toUpperCase();
@@ -17,17 +18,23 @@ function visibleModuleFiles(files: ModuleFile[]) {
   return getGenerationModuleImages(files);
 }
 
+const moduleFingerprintCache = new WeakMap<ModuleFile[], string>();
+
 export function fingerprintModuleFiles(files: ModuleFile[]) {
-  return visibleModuleFiles(files)
-    .map((file) => [
+  const cached = moduleFingerprintCache.get(files);
+  if (cached) return cached;
+  const fingerprint = fingerprintReferenceValues(
+    visibleModuleFiles(files).map((file) => [
       file.uuid || file.id,
       file.url,
       file.mode,
       file.label || file.name,
       normalizeStrength(file.strength),
       file.eye === false ? "hidden" : "visible",
-    ].join(":"))
-    .join("|");
+    ]),
+  );
+  moduleFingerprintCache.set(files, fingerprint);
+  return fingerprint;
 }
 
 function observationForFile(file: ModuleFile): ReferenceObservation {

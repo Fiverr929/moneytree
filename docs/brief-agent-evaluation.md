@@ -42,6 +42,15 @@ observation without spending a generation. It also verifies that a reviewed
 result can authorize one prompt-revision cycle, that the planner records a
 `revise_prompt` action, and that stale prompt approvals remain blocked.
 
+The prompt-skill contract also has a deterministic regression check:
+
+```text
+npm run test:agent-skills
+```
+
+It verifies prompt hygiene, coherent composition, and grounding for close or
+locked references without spending model tokens.
+
 Set `CAFEHTML_EVAL_URL` to test another local or deployed
 same-origin-compatible instance. Each run writes a JSON report under
 `evaluation-exports/brief-agent/runs/`.

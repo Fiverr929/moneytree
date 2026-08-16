@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { BRIEF_AGENT_SKILL_CONTRACT } from "@/lib/brief-agent/skillContract";
 import { createGoogleGenAI } from "@/lib/server/googleGenAI";
-import { logModelUsage } from "@/lib/server/modelUsage";
+import { logCachedModelUsage, logModelUsage, modelUsage, traceReferenceFingerprint, type UsageMetadata } from "@/lib/server/modelUsage";
+import { cacheReferenceRead } from "@/lib/server/referenceReadCache";
 import type {
   BriefReferenceImageInput,
   BriefReferenceReadRequest,
@@ -169,9 +171,33 @@ function describeReaderError(error: unknown) {
   return { message: raw, status: 400, retryAfterSeconds: null };
 }
 
-async function readReferences(input: BriefReferenceReadRequest, localApiKey?: string | null) {
-  const model = process.env.BRIEF_REFERENCE_MODEL?.trim()
-    || DEFAULT_REFERENCE_READER_MODEL;
+type ReferenceReadResult = {
+  model: string;
+  observations: ReferenceObservation[];
+  usage: UsageMetadata;
+};
+
+function referenceReadCacheKey(input: BriefReferenceReadRequest, model: string) {
+  const hash = createHash("sha256");
+  hash.update(model);
+  hash.update("\0");
+  hash.update(input.sourceFingerprint);
+  input.images.forEach((image) => {
+    hash.update("\0");
+    hash.update(image.imageId);
+    hash.update("\0");
+    hash.update(image.role);
+    hash.update("\0");
+    hash.update(image.label);
+    hash.update("\0");
+    hash.update(String(image.strength));
+    hash.update("\0");
+    hash.update(image.dataUrl);
+  });
+  return hash.digest("hex");
+}
+
+async function readReferences(input: BriefReferenceReadRequest, model: string, localApiKey?: string | null): Promise<ReferenceReadResult> {
   const ai = createGoogleGenAI({ apiKey: localApiKey });
   const parts = [
     { text: buildInstruction(input.images) },
@@ -191,7 +217,6 @@ async function readReferences(input: BriefReferenceReadRequest, localApiKey?: st
       responseMimeType: "application/json",
     },
   });
-  logModelUsage("brief-agent.read-references", model, result, { imageCount: input.images.length });
   const json = parseJsonObject(extractResponseText(result));
   const observationsJson = Array.isArray(json.observations) ? json.observations : [];
   const observations = input.images.map((image) => {
@@ -201,27 +226,44 @@ async function readReferences(input: BriefReferenceReadRequest, localApiKey?: st
     return mergeObservation(image, found);
   });
 
-  return { model, observations };
+  return { model, observations, usage: modelUsage(result) };
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
   try {
     const input = validateRequest(request, await request.json());
     const localApiKey = process.env.NODE_ENV === "production"
       ? null
       : request.headers.get("x-cafehtml-local-gemini-key");
-    const { model, observations } = await readReferences(input, localApiKey);
+    const model = process.env.BRIEF_REFERENCE_MODEL?.trim() || DEFAULT_REFERENCE_READER_MODEL;
+    const cacheKey = referenceReadCacheKey(input, model);
+    const { value, cache } = await cacheReferenceRead(cacheKey, () => readReferences(input, model, localApiKey));
+    const trace = {
+      requestId,
+      cache,
+      referenceFingerprint: traceReferenceFingerprint(input.sourceFingerprint),
+      cacheKey: cacheKey.slice(0, 12),
+      imageCount: input.images.length,
+      durationMs: Date.now() - startedAt,
+    };
+    if (cache === "miss") {
+      logModelUsage("brief-agent.read-references", model, { usageMetadata: value.usage }, trace);
+    } else {
+      logCachedModelUsage("brief-agent.read-references", model, trace);
+    }
     const response: BriefReferenceReadResponse = {
       brain: "vision",
-      model,
+      model: value.model,
       snapshot: {
         id: `ref-vision-${new Date().toISOString()}`,
         createdAt: new Date().toISOString(),
         sourceFingerprint: input.sourceFingerprint,
-        observations,
+        observations: value.observations,
       },
     };
-    return NextResponse.json(response);
+    return NextResponse.json(response, { headers: { "X-CafeHTML-Request-Id": requestId } });
   } catch (error) {
     const described = describeReaderError(error);
     return NextResponse.json(
@@ -231,9 +273,10 @@ export async function POST(request: Request) {
       },
       {
         status: described.status,
-        headers: described.retryAfterSeconds
-          ? { "Retry-After": String(described.retryAfterSeconds) }
-          : undefined,
+        headers: {
+          "X-CafeHTML-Request-Id": requestId,
+          ...(described.retryAfterSeconds ? { "Retry-After": String(described.retryAfterSeconds) } : {}),
+        },
       },
     );
   }

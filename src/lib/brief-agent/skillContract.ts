@@ -38,9 +38,25 @@ function roleSet(observations: ReferenceObservation[]) {
   return new Set(observations.map((observation) => observation.role));
 }
 
-function includesAny(text: string, terms: string[]) {
-  const lower = text.toLowerCase();
-  return terms.some((term) => lower.includes(term.toLowerCase()));
+const UI_MECHANICS_PATTERN = /\b(influence|slider|strength|control axis|percentage|\d{1,3}\s*%)\b/i;
+const PROMPT_METADATA_PATTERN = /(?:^|\n)\s*(?:SUBJECT|SCENE|STYLE|UNASSIGNED|Reference Image\s*\d*)\s*:/i;
+const EVIDENCE_STOP_WORDS = new Set([
+  "about", "after", "against", "along", "black", "close", "from", "into", "narrow",
+  "photo", "photograph", "reference", "showing", "single", "soft", "their", "there", "these",
+  "this", "through", "using", "visible", "where", "which", "white", "with",
+]);
+
+function evidenceTerms(observation: ReferenceObservation) {
+  return `${observation.label} ${observation.visualRead}`
+    .toLowerCase()
+    .match(/[a-z][a-z-]{3,}/g)
+    ?.filter((term) => !EVIDENCE_STOP_WORDS.has(term))
+    .slice(0, 24) || [];
+}
+
+function carriesEvidence(prompt: string, observation: ReferenceObservation) {
+  const lower = prompt.toLowerCase();
+  return evidenceTerms(observation).some((term) => lower.includes(term));
 }
 
 export function runSkillChecks(draft: BriefDraft): BriefSkillCheck[] {
@@ -50,44 +66,47 @@ export function runSkillChecks(draft: BriefDraft): BriefSkillCheck[] {
   const prompt = draft.finalPrompt;
   const roles = roleSet(draft.observations);
 
-  if (roles.has("SUBJECT")) {
+  checks.push({
+    id: "prompt-hygiene",
+    status: UI_MECHANICS_PATTERN.test(prompt) ? "warning" : "pass",
+    message: "Final prompt excludes reference-control UI mechanics.",
+  });
+
+  checks.push({
+    id: "prompt-coherence",
+    status: PROMPT_METADATA_PATTERN.test(prompt) ? "warning" : "pass",
+    message: "Final prompt reads as one visual brief rather than module metadata.",
+  });
+
+  const highCommitmentReferences = draft.observations.filter((observation) => {
+    // strength.ts maps 0..35 to LOCKED/CLOSE. Keep this check dependency-free
+    // so the deterministic skill test can run directly in Node.
+    return observation.strength <= 35;
+  });
+  if (highCommitmentReferences.length) {
     checks.push({
-      id: "subject-preserve",
-      status: includesAny(prompt, ["identity", "identity/type", "distinctive", "wardrobe", "shape"]) ? "pass" : "warning",
-      message: "Subject identity/type preservation is stated.",
+      id: "reference-grounding",
+      status: highCommitmentReferences.every((observation) => carriesEvidence(prompt, observation)) ? "pass" : "warning",
+      message: "Close and locked references contribute visible evidence to the prompt.",
     });
   }
 
-  if (draft.observations.length) {
+  if (roles.has("SUBJECT") && roles.has("SCENE")) {
+    const ownedReferences = draft.observations.filter(
+      (observation) => observation.role === "SUBJECT" || observation.role === "SCENE",
+    );
     checks.push({
-      id: "reference-directives",
-      status: includesAny(prompt, ["Preserve", "Match", "Use this only", "Reference Image", "For "]) ? "pass" : "warning",
-      message: "Reference handling is expressed as concrete visual instructions.",
+      id: "subject-scene-coverage",
+      status: ownedReferences.every((observation) => carriesEvidence(prompt, observation)) ? "pass" : "warning",
+      message: "The prompt grounds both subject and scene without swapping their roles.",
     });
   }
 
-  if (roles.has("SCENE")) {
+  if (prompt.length > 2_800) {
     checks.push({
-      id: "scene-boundary",
-      status: includesAny(prompt, ["environment", "background", "camera", "layout", "framing", "scene"]) ? "pass" : "warning",
-      message: "Scene is constrained to environment/camera/layout responsibilities.",
-    });
-  }
-
-  if (roles.has("STYLE")) {
-    const hasStyleBoundary = includesAny(prompt, ["do not copy", "do not import", "objects", "people", "background", "composition"]);
-    checks.push({
-      id: "style-boundary",
-      status: hasStyleBoundary ? "pass" : "warning",
-      message: "Style is constrained to rendering treatment, not content/background/composition.",
-    });
-  }
-
-  if (roles.has("STYLE") && /\b(style|palette|texture|finish)\b[\s\S]{0,80}\b(background|object|person|composition)\b/i.test(prompt)) {
-    checks.push({
-      id: "style-bleed-risk",
+      id: "prompt-focus",
       status: "warning",
-      message: "Review style wording for content bleed risk.",
+      message: "The generation brief may be too long to keep a clear visual hierarchy.",
     });
   }
 
