@@ -8,6 +8,7 @@ import { requestGenerationEvaluation } from "@/lib/evaluationReview";
 import { rememberGenerationFeedback } from "@/lib/brief-agent/memory";
 import type { ModuleFile } from "@/context/ModuleContext";
 import type { StrengthBand } from "@/lib/pipeline/strength";
+import { syncCloudProject } from "@/lib/cloudWorkspace";
 export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string; strength?: number; strengthBand?: StrengthBand };
 export type EvaluationScore = 1 | 2 | 3 | 4 | 5;
 export type GenerationReaction = "like" | "mixed" | "dislike";
@@ -208,7 +209,10 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
 
     if (activeProjectId) {
       setIsGalleryLoading(true);
-      DB.gallery.getByProject(activeProjectId).then(async data => {
+      void syncCloudProject(activeProjectId)
+        .catch((error) => console.warn("Cloud generation sync deferred", error))
+        .then(() => DB.gallery.getByProject(activeProjectId))
+        .then(async data => {
         const storedCells = data as GalleryCell[];
         const visibleCells = storedCells
           .map((cell) => normalizeCell({ ...cell, imgUrl: undefined }))

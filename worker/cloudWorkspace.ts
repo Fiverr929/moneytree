@@ -43,6 +43,13 @@ type ReferenceInput = {
   visualReadSource?: string;
   updatedAt: string;
 };
+type GenerationInput = {
+  id: string;
+  projectId: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 let schemaReady: Promise<void> | null = null;
@@ -96,25 +103,44 @@ function validReference(value: unknown): value is ReferenceInput {
     && validDate(item.updatedAt);
 }
 
+function validGeneration(value: unknown): value is GenerationInput {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  if (!validId(item.id) || !validId(item.projectId) || !validDate(item.createdAt) || !validDate(item.updatedAt)) return false;
+  if (!item.metadata || typeof item.metadata !== "object" || Array.isArray(item.metadata)) return false;
+  try {
+    return JSON.stringify(item.metadata).length <= 100_000;
+  } catch {
+    return false;
+  }
+}
+
 async function readSyncBody(request: Request) {
   try {
     const raw = await request.text();
-    if (raw.length > 1_500_000) return null;
+    if (raw.length > 5_000_000) return null;
     const body = JSON.parse(raw) as Record<string, unknown>;
     const projects = Array.isArray(body.projects) ? body.projects : [];
     const states = Array.isArray(body.states) ? body.states : [];
     const references = Array.isArray(body.references) ? body.references : [];
+    const generations = Array.isArray(body.generations) ? body.generations : [];
     const referenceProjectId = body.referenceProjectId === null || body.referenceProjectId === undefined
       ? null
       : body.referenceProjectId;
-    if (projects.length > 100 || states.length > 100 || references.length > 500) return null;
-    if (!projects.every(validProject) || !states.every(validState) || !references.every(validReference)) return null;
+    const generationProjectId = body.generationProjectId === null || body.generationProjectId === undefined
+      ? null
+      : body.generationProjectId;
+    if (projects.length > 100 || states.length > 100 || references.length > 500 || generations.length > 500) return null;
+    if (!projects.every(validProject) || !states.every(validState) || !references.every(validReference) || !generations.every(validGeneration)) return null;
     if (referenceProjectId !== null && !validId(referenceProjectId)) return null;
-    return { projects, states, references, referenceProjectId } as {
+    if (generationProjectId !== null && !validId(generationProjectId)) return null;
+    return { projects, states, references, generations, referenceProjectId, generationProjectId } as {
       projects: ProjectInput[];
       states: StateInput[];
       references: ReferenceInput[];
+      generations: GenerationInput[];
       referenceProjectId: string | null;
+      generationProjectId: string | null;
     };
   } catch {
     return null;
@@ -142,6 +168,12 @@ function ensureSchema(db: D1Database) {
     )`),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_cloud_reference_owner_project ON cloud_reference (owner_key, project_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_cloud_reference_owner_updated ON cloud_reference (owner_key, updated_at)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS cloud_generation (
+      owner_key TEXT NOT NULL, id TEXT NOT NULL, project_id TEXT NOT NULL, metadata_json TEXT NOT NULL,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+      PRIMARY KEY (owner_key, id)
+    )`),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_cloud_generation_owner_project_updated ON cloud_generation (owner_key, project_id, updated_at)"),
     db.prepare("PRAGMA optimize"),
   ]).then(() => undefined).catch((error) => {
     schemaReady = null;
@@ -158,6 +190,10 @@ async function runBatches(db: D1Database, statements: D1Statement[]) {
 
 function objectKey(ownerKey: string, projectId: string, referenceId: string) {
   return `${encodeURIComponent(ownerKey)}/${encodeURIComponent(projectId)}/${encodeURIComponent(referenceId)}`;
+}
+
+function generationObjectKey(ownerKey: string, projectId: string, generationId: string) {
+  return `${encodeURIComponent(ownerKey)}/${encodeURIComponent(projectId)}/generations/${encodeURIComponent(generationId)}`;
 }
 
 async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey: string) {
@@ -197,6 +233,18 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
       Math.max(0, Math.min(100, reference.strength)), reference.mode, reference.visualRead || null,
       reference.visualReadSource || null, reference.updatedAt,
     )));
+  body.generations.forEach((generation) => statements.push(env.DB.prepare(`INSERT INTO cloud_generation
+    (owner_key, id, project_id, metadata_json, created_at, updated_at, deleted_at)
+    VALUES (?, ?, ?, ?, ?, ?, NULL)
+    ON CONFLICT(owner_key, id) DO UPDATE SET
+      project_id = excluded.project_id, metadata_json = excluded.metadata_json,
+      updated_at = excluded.updated_at, deleted_at = NULL
+    WHERE (cloud_generation.deleted_at IS NULL AND excluded.updated_at >= cloud_generation.updated_at)
+      OR (cloud_generation.deleted_at IS NOT NULL AND excluded.updated_at > cloud_generation.deleted_at)`)
+    .bind(
+      ownerKey, generation.id, generation.projectId, JSON.stringify(generation.metadata),
+      generation.createdAt, generation.updatedAt,
+    )));
   await runBatches(env.DB, statements);
 
   const [projectRows, stateRows, deletedProjectRows] = await Promise.all([
@@ -222,6 +270,18 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
     references = activeRows.results;
     deletedReferences = deletedRows.results;
   }
+  let generations: Record<string, unknown>[] = [];
+  let deletedGenerations: Record<string, unknown>[] = [];
+  if (body.generationProjectId) {
+    const [activeRows, deletedRows] = await Promise.all([
+      env.DB.prepare("SELECT * FROM cloud_generation WHERE owner_key = ? AND project_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 500")
+        .bind(ownerKey, body.generationProjectId).all<Record<string, unknown>>(),
+      env.DB.prepare("SELECT id, project_id, deleted_at FROM cloud_generation WHERE owner_key = ? AND project_id = ? AND deleted_at IS NOT NULL LIMIT 500")
+        .bind(ownerKey, body.generationProjectId).all<Record<string, unknown>>(),
+    ]);
+    generations = activeRows.results;
+    deletedGenerations = deletedRows.results;
+  }
 
   return json({
     projects: projectRows.results.map((row) => ({
@@ -240,7 +300,28 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
       visualReadSource: row.visual_read_source, updatedAt: row.updated_at,
     })),
     deletedReferences: deletedReferences.map((row) => ({ id: row.id, projectId: row.project_id, deletedAt: row.deleted_at })),
+    generations: generations.map((row) => ({
+      id: row.id,
+      projectId: row.project_id,
+      metadata: (() => { try { return JSON.parse(String(row.metadata_json)); } catch { return {}; } })(),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+    deletedGenerations: deletedGenerations.map((row) => ({ id: row.id, projectId: row.project_id, deletedAt: row.deleted_at })),
   });
+}
+
+async function deleteGeneration(request: Request, env: CloudWorkspaceEnv, ownerKey: string) {
+  const url = new URL(request.url);
+  const projectId = url.searchParams.get("project_id");
+  const generationId = url.searchParams.get("generation_id");
+  const deletedAt = url.searchParams.get("deleted_at");
+  if (!validId(projectId) || !validId(generationId) || !validDate(deletedAt)) return json({ error: "Invalid generation deletion." }, 400);
+  await env.DB.prepare(`UPDATE cloud_generation SET deleted_at = ?, updated_at = ?
+    WHERE owner_key = ? AND id = ? AND (deleted_at IS NULL OR deleted_at < ?)`)
+    .bind(deletedAt, deletedAt, ownerKey, generationId, deletedAt).run();
+  await env.MEDIA.delete(generationObjectKey(ownerKey, projectId, generationId));
+  return json({ ok: true });
 }
 
 async function deleteReference(request: Request, env: CloudWorkspaceEnv, ownerKey: string) {
@@ -263,11 +344,19 @@ async function deleteProject(request: Request, env: CloudWorkspaceEnv, ownerKey:
   if (!validId(projectId) || !validDate(deletedAt)) return json({ error: "Invalid project deletion." }, 400);
   const rows = await env.DB.prepare("SELECT id FROM cloud_reference WHERE owner_key = ? AND project_id = ? AND deleted_at IS NULL")
     .bind(ownerKey, projectId).all<{ id: string }>();
+  const generationRows = await env.DB.prepare("SELECT id FROM cloud_generation WHERE owner_key = ? AND project_id = ? AND deleted_at IS NULL")
+    .bind(ownerKey, projectId).all<{ id: string }>();
   if (rows.results.length) {
     await env.MEDIA.delete(rows.results.map((row) => objectKey(ownerKey, projectId, row.id)));
   }
+  if (generationRows.results.length) {
+    await env.MEDIA.delete(generationRows.results.map((row) => generationObjectKey(ownerKey, projectId, row.id)));
+  }
   await env.DB.batch([
     env.DB.prepare(`UPDATE cloud_reference SET deleted_at = ?, updated_at = ?
+      WHERE owner_key = ? AND project_id = ? AND (deleted_at IS NULL OR deleted_at < ?)`)
+      .bind(deletedAt, deletedAt, ownerKey, projectId, deletedAt),
+    env.DB.prepare(`UPDATE cloud_generation SET deleted_at = ?, updated_at = ?
       WHERE owner_key = ? AND project_id = ? AND (deleted_at IS NULL OR deleted_at < ?)`)
       .bind(deletedAt, deletedAt, ownerKey, projectId, deletedAt),
     env.DB.prepare(`UPDATE cloud_project SET deleted_at = ?, updated_at = ?
@@ -275,6 +364,34 @@ async function deleteProject(request: Request, env: CloudWorkspaceEnv, ownerKey:
       .bind(deletedAt, deletedAt, ownerKey, projectId, deletedAt),
   ]);
   return json({ ok: true });
+}
+
+async function generationImageRequest(request: Request, env: CloudWorkspaceEnv, ownerKey: string) {
+  const url = new URL(request.url);
+  const projectId = url.searchParams.get("project_id");
+  const generationId = url.searchParams.get("generation_id");
+  if (!validId(projectId) || !validId(generationId)) return json({ error: "Invalid generation image key." }, 400);
+  const key = generationObjectKey(ownerKey, projectId, generationId);
+  if (request.method === "GET") {
+    const object = await env.MEDIA.get(key);
+    if (!object) return json({ error: "Image not found." }, 404);
+    return new Response(object.body, {
+      headers: {
+        "content-type": object.httpMetadata?.contentType || "application/octet-stream",
+        "cache-control": "private, max-age=300",
+        ...(object.etag ? { etag: object.etag } : {}),
+      },
+    });
+  }
+  if (request.method === "PUT") {
+    const contentType = request.headers.get("content-type") || "";
+    if (!contentType.startsWith("image/")) return json({ error: "Only image uploads are allowed." }, 415);
+    const bytes = await request.arrayBuffer();
+    if (!bytes.byteLength || bytes.byteLength > MAX_IMAGE_BYTES) return json({ error: "Image is too large." }, 413);
+    await env.MEDIA.put(key, bytes, { httpMetadata: { contentType } });
+    return json({ ok: true });
+  }
+  return json({ error: "Method not allowed." }, 405);
 }
 
 async function imageRequest(request: Request, env: CloudWorkspaceEnv, ownerKey: string) {
@@ -316,7 +433,9 @@ export async function handleCloudWorkspace(
   if (request.method !== "GET" && !sameOrigin) return json({ error: "Invalid request origin." }, 403);
   if (pathname === "/api/cloud-workspace/sync" && request.method === "POST") return syncWorkspace(request, env, ownerKey);
   if (pathname === "/api/cloud-workspace/reference" && request.method === "DELETE") return deleteReference(request, env, ownerKey);
+  if (pathname === "/api/cloud-workspace/generation" && request.method === "DELETE") return deleteGeneration(request, env, ownerKey);
   if (pathname === "/api/cloud-workspace/project" && request.method === "DELETE") return deleteProject(request, env, ownerKey);
   if (pathname === "/api/cloud-workspace/image") return imageRequest(request, env, ownerKey);
+  if (pathname === "/api/cloud-workspace/generation-image") return generationImageRequest(request, env, ownerKey);
   return json({ error: "Not found." }, 404);
 }
