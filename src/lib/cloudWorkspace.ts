@@ -53,6 +53,23 @@ type CloudReference = {
   visualReadSource?: "local" | "vision" | null;
   updatedAt: string;
 };
+type LocalGeneration = Record<string, unknown> & {
+  id: number;
+  uuid: string;
+  project_id: number;
+  createdAt?: string;
+  date?: string;
+  updatedAt?: string;
+  cloudUpdatedAt?: string;
+  cloudSyncedAt?: string | null;
+};
+type CloudGeneration = {
+  id: string;
+  projectId: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
 
 type SyncResponse = {
   projects: CloudProject[];
@@ -60,13 +77,16 @@ type SyncResponse = {
   deletedProjects: Array<{ id: string; deletedAt: string }>;
   references: CloudReference[];
   deletedReferences: Array<{ id: string; projectId: string; deletedAt: string }>;
+  generations: CloudGeneration[];
+  deletedGenerations: Array<{ id: string; projectId: string; deletedAt: string }>;
 };
 
 type SyncTombstone = {
   id: string;
-  kind: "project" | "reference";
+  kind: "project" | "reference" | "generation";
   projectCloudId: string;
   referenceCloudId?: string;
+  generationCloudId?: string;
   deletedAt: string;
 };
 
@@ -83,7 +103,9 @@ function validSyncResponse(value: unknown): value is SyncResponse {
     && Array.isArray(body.states)
     && Array.isArray(body.deletedProjects)
     && Array.isArray(body.references)
-    && Array.isArray(body.deletedReferences);
+    && Array.isArray(body.deletedReferences)
+    && Array.isArray(body.generations)
+    && Array.isArray(body.deletedGenerations);
 }
 
 async function postSync(payload: Record<string, unknown>) {
@@ -117,6 +139,9 @@ async function processTombstones() {
     if (tombstone.kind === "reference" && tombstone.referenceCloudId) {
       path = "/api/cloud-workspace/reference";
       params.set("reference_id", tombstone.referenceCloudId);
+    } else if (tombstone.kind === "generation" && tombstone.generationCloudId) {
+      path = "/api/cloud-workspace/generation";
+      params.set("generation_id", tombstone.generationCloudId);
     }
     const response = await fetch(`${path}?${params}`, { method: "DELETE" });
     if (!response.ok) throw new Error("Could not sync a workspace deletion.");
@@ -216,6 +241,8 @@ async function syncWorkspaceProjectsNow() {
     })),
     references: [],
     referenceProjectId: null,
+    generations: [],
+    generationProjectId: null,
   });
   await applyWorkspaceResponse(body, projects);
   console.info("[cloud-sync]", {
@@ -274,20 +301,101 @@ async function downloadReferenceImage(projectCloudId: string, referenceId: strin
   });
 }
 
+function generationMetadataForCloud(generation: LocalGeneration) {
+  const metadata = { ...generation };
+  [
+    "id", "uuid", "project_id", "imgUrl", "loadingId", "retryFn", "blocked", "error", "phClass",
+    "_imgUuid", "_dbId", "cloudUpdatedAt", "cloudSyncedAt",
+  ].forEach((key) => delete metadata[key]);
+  if (Array.isArray(metadata.usedImages)) {
+    metadata.usedImages = metadata.usedImages.map((image) => {
+      if (!image || typeof image !== "object") return image;
+      const compact = { ...(image as Record<string, unknown>) };
+      delete compact.imgUrl;
+      return compact;
+    });
+  }
+  const moduleSnapshot = metadata.moduleSnapshot;
+  if (moduleSnapshot && typeof moduleSnapshot === "object" && Array.isArray((moduleSnapshot as { files?: unknown[] }).files)) {
+    metadata.moduleSnapshot = {
+      ...(moduleSnapshot as Record<string, unknown>),
+      files: (moduleSnapshot as { files: unknown[] }).files.map((file) => {
+        if (!file || typeof file !== "object") return file;
+        return { ...(file as Record<string, unknown>), url: "" };
+      }),
+    };
+  }
+  return metadata;
+}
+
+function hydrateGenerationMetadata(metadata: Record<string, unknown>) {
+  const hydrated = { ...metadata };
+  if (Array.isArray(hydrated.usedImages)) {
+    hydrated.usedImages = hydrated.usedImages.map((image) => (
+      image && typeof image === "object" ? { ...(image as Record<string, unknown>), imgUrl: "" } : image
+    ));
+  }
+  return hydrated;
+}
+
+async function uploadGenerationImage(
+  projectCloudId: string,
+  generationId: string,
+  dataUrl: string,
+  storedFingerprint?: string | null,
+) {
+  const fingerprint = imageFingerprint(dataUrl);
+  const cacheKey = `generation:${generationId}`;
+  if (storedFingerprint === fingerprint || uploadedImageFingerprints.get(cacheKey) === fingerprint) return false;
+  const blob = await fetch(dataUrl).then((response) => response.blob());
+  const params = new URLSearchParams({ project_id: projectCloudId, generation_id: generationId });
+  const response = await fetch(`/api/cloud-workspace/generation-image?${params}`, {
+    method: "PUT",
+    headers: { "content-type": blob.type || "image/png" },
+    body: blob,
+  });
+  if (!response.ok) throw new Error("Generated image upload failed.");
+  uploadedImageFingerprints.set(cacheKey, fingerprint);
+  await DB.images.markGenerationCloudSynced(generationId, fingerprint);
+  return true;
+}
+
+async function downloadGenerationImage(projectCloudId: string, generationId: string) {
+  const params = new URLSearchParams({ project_id: projectCloudId, generation_id: generationId });
+  const response = await fetch(`/api/cloud-workspace/generation-image?${params}`);
+  if (!response.ok) return null;
+  const blob = await response.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read synced generation image."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function syncCloudProjectNow(projectId: number) {
   await syncWorkspaceProjects();
   const project = await DB.projects.get(projectId) as LocalProject | undefined;
   if (!project) return;
   const identified = await ensureProjectIdentity(project);
   const references = await DB.references.getByProject(projectId) as LocalReference[];
-  const images = await DB.images.getMany(references.map((reference) => reference.uuid)) as Array<{
+  const generations = (await DB.gallery.getByProject(projectId) as LocalGeneration[])
+    .filter((generation) => Boolean(generation.uuid));
+  const images = await DB.images.getMany([
+    ...references.map((reference) => reference.uuid),
+    ...generations.map((generation) => generation.uuid),
+  ]) as Array<{
     uuid: string;
     dataUrl: string;
     cloudFingerprint?: string | null;
+    generationCloudFingerprint?: string | null;
   }>;
   const imageByUuid = new Map(images.filter(Boolean).map((image) => [image.uuid, image]));
   const pendingReferences = references.filter((reference) => (
     !reference.cloudSyncedAt || (reference.cloudUpdatedAt || "") > reference.cloudSyncedAt
+  ));
+  const pendingGenerations = generations.filter((generation) => (
+    !generation.cloudSyncedAt || (generation.cloudUpdatedAt || generation.updatedAt || "") > generation.cloudSyncedAt
   ));
 
   const body = await postSync({
@@ -311,12 +419,30 @@ async function syncCloudProjectNow(projectId: number) {
       updatedAt: reference.cloudUpdatedAt || new Date().toISOString(),
     })),
     referenceProjectId: identified.cloudId,
+    generations: pendingGenerations.map((generation) => {
+      const createdAt = generation.createdAt
+        || (typeof generation.date === "string" && !Number.isNaN(Date.parse(generation.date)) ? generation.date : new Date().toISOString());
+      return {
+        id: generation.uuid,
+        projectId: identified.cloudId,
+        metadata: generationMetadataForCloud(generation),
+        createdAt,
+        updatedAt: generation.cloudUpdatedAt || generation.updatedAt || createdAt,
+      };
+    }),
+    generationProjectId: identified.cloudId,
   });
 
   for (const deletion of body.deletedReferences) {
     const local = references.find((reference) => reference.uuid === deletion.id);
     if (!local) continue;
     await DB.references.delete(local.id, true);
+    await DB.images.delete(local.uuid);
+  }
+  for (const deletion of body.deletedGenerations) {
+    const local = generations.find((generation) => generation.uuid === deletion.id);
+    if (!local) continue;
+    await DB.gallery.delete(local.id, true);
     await DB.images.delete(local.uuid);
   }
 
@@ -332,6 +458,22 @@ async function syncCloudProjectNow(projectId: number) {
     }));
     imagesUp += uploaded.filter(Boolean).length;
   }
+  const activeRemoteGenerationIds = new Set(body.generations.map((generation) => generation.id));
+  const uploadableGenerations = generations.filter((generation) => activeRemoteGenerationIds.has(generation.uuid));
+  const generationImagesQueued = uploadableGenerations.filter((generation) => {
+    const image = imageByUuid.get(generation.uuid);
+    return Boolean(image?.dataUrl && image.generationCloudFingerprint !== imageFingerprint(image.dataUrl));
+  }).length;
+  void (async () => {
+    for (let index = 0; index < uploadableGenerations.length; index += 3) {
+      await Promise.all(uploadableGenerations.slice(index, index + 3).map(async (generation) => {
+        const image = imageByUuid.get(generation.uuid);
+        if (image?.dataUrl) {
+          await uploadGenerationImage(identified.cloudId!, generation.uuid, image.dataUrl, image.generationCloudFingerprint);
+        }
+      }));
+    }
+  })().catch((error) => console.warn("Generated image upload deferred", error));
 
   const syncedAt = new Date().toISOString();
   let imagesDown = 0;
@@ -375,12 +517,47 @@ async function syncCloudProjectNow(projectId: number) {
     }, true);
   }
 
+  let generationImagesDown = 0;
+  for (const remote of body.generations) {
+    const existing = generations.find((generation) => generation.uuid === remote.id);
+    let localId = existing?.id || numericReferenceId(remote.id);
+    if (!existing) {
+      const collision = generations.find((generation) => generation.id === localId && generation.uuid !== remote.id);
+      if (collision) localId = Date.now() + Math.floor(Math.random() * 10_000);
+    }
+    const existingImage = await DB.images.get(remote.id) as { dataUrl?: string } | undefined;
+    if (!existingImage?.dataUrl) {
+      const dataUrl = await downloadGenerationImage(identified.cloudId!, remote.id);
+      if (dataUrl) {
+        await DB.images.put(remote.id, dataUrl, projectId, true);
+        const fingerprint = imageFingerprint(dataUrl);
+        uploadedImageFingerprints.set(`generation:${remote.id}`, fingerprint);
+        await DB.images.markGenerationCloudSynced(remote.id, fingerprint);
+        generationImagesDown += 1;
+      }
+    }
+    await DB.gallery.put({
+      ...hydrateGenerationMetadata(remote.metadata),
+      id: localId,
+      uuid: remote.id,
+      project_id: projectId,
+      createdAt: remote.createdAt,
+      updatedAt: remote.updatedAt,
+      cloudUpdatedAt: remote.updatedAt,
+      cloudSyncedAt: syncedAt,
+    }, true);
+  }
+
   console.info("[cloud-sync]", {
     project: identified.cloudId,
     referencesUp: pendingReferences.length,
     referencesDown: body.references.length,
     imagesUp,
     imagesDown,
+    generationsUp: pendingGenerations.length,
+    generationsDown: body.generations.length,
+    generationImagesQueued,
+    generationImagesDown,
   });
 }
 

@@ -339,6 +339,15 @@ const images = {
       cloudSyncedAt: new Date().toISOString(),
     }));
   }),
+  markGenerationCloudSynced: (uuid: string, fingerprint: string) => ready.then(async () => {
+    const existing = await wrap(tx(S.IMAGES).objectStore(S.IMAGES).get(uuid));
+    if (!existing) return;
+    await wrap(tx(S.IMAGES, 'readwrite').objectStore(S.IMAGES).put({
+      ...existing,
+      generationCloudFingerprint: fingerprint,
+      generationCloudSyncedAt: new Date().toISOString(),
+    }));
+  }),
   delete: (uuid: string) => ready.then(() => wrap(tx(S.IMAGES, 'readwrite').objectStore(S.IMAGES).delete(uuid)))
 };
 
@@ -373,8 +382,51 @@ const gallery = {
     const idx = tx(S.GALLERY).objectStore(S.GALLERY).index('by_project');
     return wrap(idx.getAll(projectId));
   }),
-  put: (data: any) => ready.then(() => wrap(tx(S.GALLERY, 'readwrite').objectStore(S.GALLERY).put(data))),
-  delete: (id: number) => ready.then(() => wrap(tx(S.GALLERY, 'readwrite').objectStore(S.GALLERY).delete(id)))
+  put: (data: any, syncSilent = false) => ready.then(async () => {
+    const existing = data.id === undefined
+      ? undefined
+      : await wrap(tx(S.GALLERY).objectStore(S.GALLERY).get(data.id));
+    const now = new Date().toISOString();
+    if (!syncSilent && existing?.uuid && existing.uuid !== data.uuid) {
+      const project = await projects.get(data.project_id);
+      const projectCloudId = project?.cloudId || project?.memoryCloudId;
+      if (projectCloudId) {
+        await wrap(tx(S.SYNC_TOMBSTONES, 'readwrite').objectStore(S.SYNC_TOMBSTONES).put({
+          id: `generation:${projectCloudId}:${existing.uuid}`,
+          kind: "generation",
+          projectCloudId,
+          generationCloudId: existing.uuid,
+          deletedAt: now,
+        }));
+      }
+    }
+    const record = syncSilent
+      ? { ...existing, ...data }
+      : { ...existing, ...data, cloudUpdatedAt: now, cloudSyncedAt: null };
+    const result = await wrap(tx(S.GALLERY, 'readwrite').objectStore(S.GALLERY).put(record));
+    if (!syncSilent && data.project_id && data.uuid) emitCloudChange(data.project_id, "generation");
+    return result;
+  }),
+  delete: (id: number, syncSilent = false) => ready.then(async () => {
+    const existing = await wrap(tx(S.GALLERY).objectStore(S.GALLERY).get(id));
+    if (!syncSilent && existing?.uuid && existing?.project_id) {
+      const project = await projects.get(existing.project_id);
+      const projectCloudId = project?.cloudId || project?.memoryCloudId;
+      if (projectCloudId) {
+        const deletedAt = new Date().toISOString();
+        await wrap(tx(S.SYNC_TOMBSTONES, 'readwrite').objectStore(S.SYNC_TOMBSTONES).put({
+          id: `generation:${projectCloudId}:${existing.uuid}`,
+          kind: "generation",
+          projectCloudId,
+          generationCloudId: existing.uuid,
+          deletedAt,
+        }));
+      }
+    }
+    const result = await wrap(tx(S.GALLERY, 'readwrite').objectStore(S.GALLERY).delete(id));
+    if (!syncSilent) emitCloudChange(existing?.project_id, "generation-delete");
+    return result;
+  })
 };
 
 const references = {
