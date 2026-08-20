@@ -10635,6 +10635,125 @@ button.video-media-empty:focus-visible {
   .video-sequence-clip { transition: none; }
 }
 
+/* Tablet video workspace: retain the efficient two-column editor while
+   replacing desktop-dense controls with comfortable touch targets. */
+@media (min-width: 681px) and (max-width: 1100px) {
+  .video-preview {
+    grid-template-rows: minmax(0, 1fr) 44px;
+  }
+
+  .video-player-footer {
+    height: 44px;
+    flex-basis: 44px;
+    padding-inline: 7px;
+    gap: 5px;
+  }
+
+  .video-control-button {
+    min-width: 40px;
+    height: 40px;
+    line-height: 40px;
+  }
+
+  .video-player-progress {
+    height: 28px;
+  }
+
+  .video-player-progress::-webkit-slider-thumb {
+    width: 12px;
+    height: 12px;
+    margin-top: -5px;
+  }
+
+  .video-player-progress::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+  }
+
+  .video-media-header {
+    height: 42px;
+    flex-basis: 42px;
+  }
+
+  .video-media-header .video-media-add {
+    width: 36px;
+    height: 36px;
+  }
+
+  .video-media-tabs {
+    height: 44px;
+    flex-basis: 44px;
+  }
+
+  .video-media-tabs button {
+    min-height: 44px;
+    justify-content: center;
+    gap: 4px;
+    font-size: 8px;
+  }
+
+  .video-media-item button {
+    width: 26px;
+    height: 26px;
+    line-height: 24px;
+  }
+
+  .video-sequence-header {
+    height: 34px;
+  }
+
+  .video-sequence-header button {
+    min-height: 34px;
+  }
+
+  .video-sequence-clip > button {
+    width: 26px;
+    height: 26px;
+    line-height: 24px;
+    opacity: 0.88;
+  }
+
+  .video-prompt-clear {
+    width: 44px;
+    height: 44px;
+  }
+
+  .cmp-menu.video-settings-dropdown {
+    width: 280px;
+    max-height: min(720px, calc(100dvh - 128px));
+    overscroll-behavior: contain;
+  }
+
+  .video-settings-dropdown .cmp-menu-title {
+    height: 24px;
+  }
+
+  .video-settings-dropdown > button,
+  .video-settings-options button {
+    min-height: 42px;
+  }
+
+  .video-settings-select,
+  .video-seed-input {
+    height: 42px;
+  }
+
+  .video-settings-stepper {
+    height: 42px;
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
+  }
+
+  .video-settings-stepper button {
+    width: 42px;
+    height: 42px;
+  }
+
+  .video-negative-prompt {
+    min-height: 84px;
+    font-size: 12px;
+  }
+}
+
 /* Mobile video workspace: keep the shot canvas prominent and every primary
    control reachable without disturbing the desktop editing layout. */
 @media (max-width: 680px) {

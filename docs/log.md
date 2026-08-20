@@ -30,6 +30,8 @@ Track component work, decisions, and session continuations here.
 - Rebalanced the mobile Video workspace so the preview expands into available phone height while the sequence and media rails remain directly below it.
 - Kept the advanced settings panel fully inside 320px-wide screens, with internal scrolling above the persistent mode bar.
 - Increased mobile playback, media, tab, and settings controls to touch-friendly sizes without changing the desktop layout.
+- Preserved the tablet two-column Video editor in portrait and landscape while upgrading playback, media, sequence, and settings controls for touch.
+- Expanded the tablet settings panel to 280px with 42px controls and viewport-aware internal scrolling that stays above the persistent mode bar.
 
 **Verification:**
 - Focused lint passes for the Video page, API client, server route, and shared Google client.
