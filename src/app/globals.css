@@ -5834,7 +5834,7 @@ body.module-collapsed .module-panel {
   display: grid;
   grid-template-rows: minmax(0, 1fr) 24px;
   background: #999997;
-  border: 1px solid #5271ff;
+  border: 1px solid #999997;
   overflow: hidden;
 }
 
@@ -5847,7 +5847,7 @@ body.module-collapsed .module-panel {
   width: 100%;
   min-height: 0;
   height: 100%;
-  padding: 10px;
+  padding: 2px;
   box-sizing: border-box;
   overflow: hidden;
   background: #999997;
@@ -5858,7 +5858,7 @@ body.module-collapsed .module-panel {
   width: 100%;
   height: 100%;
   min-height: 0;
-  border: 1px solid rgba(232, 230, 230, 0.58);
+  border: 0;
   box-sizing: border-box;
   overflow: hidden;
   background: #999997;
@@ -5878,12 +5878,12 @@ body.module-collapsed .module-panel {
   z-index: 4;
   height: 24px;
   flex: 0 0 24px;
-  padding: 0 7px;
+  padding: 0 6px;
   display: flex;
   align-items: center;
   gap: 6px;
-  border-top: 1px solid rgba(82, 113, 255, 0.72);
-  background: #999997;
+  border-top: 1px solid rgba(82, 113, 255, 0.5);
+  background: #8f8f8d;
 }
 
 .video-control-button {
@@ -5989,7 +5989,14 @@ body.module-collapsed .module-panel {
 }
 
 .video-volume-toggle.muted {
-  color: #5271ff;
+  color: #ea5823;
+}
+
+.video-fullscreen-toggle {
+  min-width: 28px;
+  color: #c7c7c7;
+  font-size: 7px;
+  letter-spacing: 0.05em;
 }
 
 .video-preview:fullscreen {
@@ -6127,12 +6134,12 @@ body.module-collapsed .module-panel {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: start;
-  gap: 4px;
-  padding: 4px;
+  gap: 2px;
+  padding: 2px;
 }
 
 .video-media-grid.thumbnails {
-  grid-auto-rows: 116px;
+  grid-auto-rows: auto;
 }
 
 .video-media-grid::-webkit-scrollbar {
@@ -6142,9 +6149,10 @@ body.module-collapsed .module-panel {
 .video-media-item {
   position: relative;
   width: 100%;
-  height: 116px;
+  height: auto;
+  aspect-ratio: 1;
   min-width: 0;
-  border: 0.756px solid #c7c7c7;
+  border: 0;
   background: #999997;
   overflow: hidden;
 }
@@ -6169,12 +6177,16 @@ body.module-collapsed .module-panel {
 }
 
 .video-media-item.assigned {
-  border: 2px solid #5271ff;
+  box-shadow: inset 0 0 0 2px #5271ff;
+}
+
+.video-media-item.assigned.frame {
+  box-shadow: inset 0 0 0 2px #ea5823;
 }
 
 .video-media-item:hover,
 .video-media-item:focus-within {
-  border-color: #5271ff;
+  box-shadow: inset 0 0 0 1px #e8e6e6;
 }
 
 .video-media-empty {
@@ -6544,6 +6556,15 @@ button.video-media-empty:focus-visible {
   line-height: 1;
   letter-spacing: 0.08em;
   pointer-events: none;
+}
+
+.video-media-item.frame .video-media-role {
+  background: #ea5823;
+}
+
+.video-media-item .video-media-role + .video-media-role {
+  left: auto;
+  right: 3px;
 }
 
 .video-prompt-slot-plus::before,
