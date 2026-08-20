@@ -394,36 +394,41 @@ Enhancer model: `gemini-2.5-flash` (text + vision, not an image model)
 
 The Next.js Video tab lives at `src/app/video/page.tsx`. Its API client is `src/lib/video/api.ts`.
 
-Verified Gemini API Veo model IDs:
+Google AI Studio / Gemini Developer API video models:
 
 | Label | Model ID | Stage | Resolutions | Reference assets |
 |---|---|---|---|---|
-| VEO 3.1 | `veo-3.1-generate-001` | GA | 720p, 1080p | Up to 3 |
-| VEO 3.1 FAST | `veo-3.1-fast-generate-001` | GA | 720p, 1080p | Up to 3 |
-| VEO 3.1 LITE | `veo-3.1-lite-generate-001` | Preview | 720p, 1080p | Not supported |
+| VEO 3.1 | `veo-3.1-generate-preview` | Preview | 720p, 1080p, 4K | Up to 3 |
+| VEO 3.1 FAST | `veo-3.1-fast-generate-preview` | Preview | 720p, 1080p, 4K | Up to 3 |
+| VEO 3.1 LITE | `veo-3.1-lite-generate-preview` | Preview | 720p, 1080p | Not supported |
+| GEMINI OMNI FLASH | `gemini-omni-flash-preview` | Preview | 720p | Up to 6 |
 
-The old `veo-3.1-generate-preview` and `veo-3.1-fast-generate-preview` endpoints were discontinued on April 2, 2026. Google directs those workflows to the corresponding `-001` models.
+The `-preview` Veo IDs are the AI Studio endpoints and generate synchronized audio. Gemini Omni Flash uses the Interactions API, supports conversational-style multimodal generation, and does not support end-frame interpolation.
 
 Current request flow:
 
 1. The browser posts the video request to `POST /api/video/generate`.
-2. The Node.js route creates an Enterprise `GoogleGenAI` client using the server-only `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` environment variables.
-3. The route starts generation through `ai.models.generateVideos(...)`, passing `prompt` and optional `image` at the top level.
-4. Poll through `ai.operations.getVideosOperation({ operation })`.
+2. The Node.js route creates a Gemini Developer API client using the server-only `GEMINI_API_KEY`. On localhost only, the key saved in Settings may be passed through the same restricted local-development header used by image generation.
+3. Veo requests use `ai.models.generateVideos(...)`; Gemini Omni Flash requests use `ai.interactions.create(...)`.
+4. Veo operations are polled through `ai.operations.getVideosOperation({ operation })`; Omni returns an inline MP4 response.
 5. Stream the MP4 response to the browser and add the clip to the Video `SEQUENCE` rail.
 
-Video generation uses Vertex Enterprise mode and does not use the browser-held image API key. The Next.js server requires Application Default Credentials or `GOOGLE_APPLICATION_CREDENTIALS`; project and location alone do not authenticate the request.
+Production video generation requires `GEMINI_API_KEY` in the hosting platform's server secrets. Browser-held keys are accepted only on localhost and are never accepted from production requests.
 
-Local Vertex configuration belongs in `.env.local`, which is ignored by Git. `.env.example` contains only placeholder variable names for setup guidance. Deployed environments must configure the same variables through their hosting platform's secret/environment settings.
+Local server configuration belongs in `.env.local`, which is ignored by Git. `.env.example` contains only placeholder variable names for setup guidance.
 
 Supported UI modes:
 
-- `FRAMES`: start frame plus optional end frame.
-- `REFERENCES`: up to the selected model's reference-asset limit; currently 3 for VEO 3.1 and FAST.
-- Reference-image generation requires 8 seconds.
+- `FRAMES`: start frame plus optional end frame. Omni supports only the start frame.
+- `REFERENCES`: up to the selected model's reference-asset limit; 3 for VEO 3.1 and FAST, and 6 for Omni.
+- Veo reference-image generation requires 8 seconds; Omni references support the regular duration choices.
 - Supported durations are 4, 6, and 8 seconds.
 - Supported aspect ratios are 16:9 and 9:16.
 - Maximum output videos per prompt is 4.
+- Gemini Omni Flash is the default for new settings because it is optimized for coherent image-to-video generation; Veo remains available for end-frame interpolation and 1080p/4K output.
+- The advanced director controls add motion energy, camera movement, continuity-focused prompt direction, and editable negative guidance without altering the user's stored prompt.
+- 1080p and 4K output are locked to 8 seconds. 4K is available on Veo 3.1 and Veo 3.1 Fast, but not Lite or Omni.
+- Director prompting can be switched to `LITERAL`; this keeps the selected motion and camera instructions but disables the automatic continuity/quality layer.
 
 Generated video persistence:
 
@@ -435,7 +440,7 @@ Generated video persistence:
 - Project deletion cascades through the `videos` store.
 - Runtime playback uses temporary blob URLs, which are revoked when clips are removed, projects change, or the page closes.
 
-Official source: `https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/veo/3-1-generate`
+Official sources: `https://ai.google.dev/gemini-api/docs/video` and `https://ai.google.dev/gemini-api/docs/omni`
 
 ---
 

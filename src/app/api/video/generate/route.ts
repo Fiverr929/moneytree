@@ -20,11 +20,37 @@ const MAX_REQUEST_BYTES = 40 * 1024 * 1024;
 const MAX_VERCEL_REQUEST_BYTES = 4 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_PROMPT_LENGTH = 4_000;
+const MAX_NEGATIVE_PROMPT_LENGTH = 1_000;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const VIDEO_MODELS = {
-  "veo-3.1-generate-001": { supportsReferences: true },
-  "veo-3.1-fast-generate-001": { supportsReferences: true },
-  "veo-3.1-lite-generate-001": { supportsReferences: false },
+  "veo-3.1-generate-preview": {
+    api: "veo",
+    supportsReferences: true,
+    supportsEndFrame: true,
+    referencesRequireEightSeconds: true,
+    resolutions: ["720p", "1080p", "4k"],
+  },
+  "veo-3.1-fast-generate-preview": {
+    api: "veo",
+    supportsReferences: true,
+    supportsEndFrame: true,
+    referencesRequireEightSeconds: true,
+    resolutions: ["720p", "1080p", "4k"],
+  },
+  "veo-3.1-lite-generate-preview": {
+    api: "veo",
+    supportsReferences: false,
+    supportsEndFrame: true,
+    referencesRequireEightSeconds: false,
+    resolutions: ["720p", "1080p"],
+  },
+  "gemini-omni-flash-preview": {
+    api: "omni",
+    supportsReferences: true,
+    supportsEndFrame: false,
+    referencesRequireEightSeconds: false,
+    resolutions: ["720p"],
+  },
 } as const;
 
 function isVercelDownloadProxyDisabled() {
@@ -82,7 +108,7 @@ function validateRequest(request: Request, value: unknown): VeoGenerationRequest
   if (typeof input.durationSeconds !== "number" || ![4, 6, 8].includes(input.durationSeconds)) {
     throw new Error("Unsupported video duration.");
   }
-  if (typeof input.resolution !== "string" || !["720p", "1080p"].includes(input.resolution)) {
+  if (typeof input.resolution !== "string" || !["720p", "1080p", "4k"].includes(input.resolution)) {
     throw new Error("Unsupported resolution.");
   }
   if (input.seed !== undefined && (!Number.isSafeInteger(input.seed) || input.seed < 0)) {
@@ -91,17 +117,43 @@ function validateRequest(request: Request, value: unknown): VeoGenerationRequest
   if (input.endFrame && !input.startFrame) {
     throw new Error("A start frame is required when an end frame is provided.");
   }
+  const model = VIDEO_MODELS[input.modelId as keyof typeof VIDEO_MODELS];
+  if (!(model.resolutions as readonly string[]).includes(input.resolution)) {
+    throw new Error("The selected video model does not support this resolution.");
+  }
+  if (input.negativePrompt !== undefined && (typeof input.negativePrompt !== "string" || input.negativePrompt.length > MAX_NEGATIVE_PROMPT_LENGTH)) {
+    throw new Error(`Negative prompts must be ${MAX_NEGATIVE_PROMPT_LENGTH} characters or fewer.`);
+  }
+  if (input.motionProfile !== undefined && !["subtle", "natural", "dynamic"].includes(input.motionProfile)) {
+    throw new Error("Unsupported motion profile.");
+  }
+  if (input.cameraMotion !== undefined && !["auto", "locked", "push-in", "pull-out", "pan-left", "pan-right", "orbit", "tracking"].includes(input.cameraMotion)) {
+    throw new Error("Unsupported camera motion.");
+  }
+  if (input.enhancePrompt !== undefined && typeof input.enhancePrompt !== "boolean") {
+    throw new Error("Invalid prompt enhancement setting.");
+  }
+  if (input.endFrame && !model.supportsEndFrame) {
+    throw new Error("The selected video model does not support an end frame.");
+  }
   if (input.referenceImages?.length) {
-    const model = VIDEO_MODELS[input.modelId as keyof typeof VIDEO_MODELS];
     if (!model.supportsReferences) throw new Error("The selected Veo model does not support references.");
-    if (input.referenceImages.length > 3) throw new Error("Veo supports up to three reference images.");
+    const maxReferences = model.api === "omni" ? 6 : 3;
+    if (input.referenceImages.length > maxReferences) {
+      throw new Error(`The selected video model supports up to ${maxReferences} reference images.`);
+    }
     if (input.startFrame || input.endFrame) {
       throw new Error("Reference images cannot be combined with start or end frames.");
     }
-    if (input.durationSeconds !== 8) throw new Error("Reference-image generation requires 8 seconds.");
+    if (model.referencesRequireEightSeconds && input.durationSeconds !== 8) {
+      throw new Error("Reference-image generation requires 8 seconds with the selected Veo model.");
+    }
   }
-  if (input.resolution === "1080p" && input.durationSeconds !== 8) {
-    throw new Error("1080p generation requires an 8-second duration.");
+  if (model.api === "omni" && input.seed !== undefined) {
+    throw new Error("Gemini Omni Flash does not support the seed setting.");
+  }
+  if (["1080p", "4k"].includes(input.resolution) && input.durationSeconds !== 8) {
+    throw new Error("1080p and 4K generation require an 8-second duration.");
   }
   return input as VeoGenerationRequest;
 }
@@ -113,7 +165,7 @@ function describeError(error: unknown) {
       || error.message.includes("Could not load the default credentials")
       || error.message.includes("UNAUTHENTICATED")
     ) {
-      return "Google AI authentication is not configured. Set GEMINI_API_KEY as a server secret, or configure Vertex AI server credentials.";
+      return "Google AI Studio authentication is not configured. Set GEMINI_API_KEY as a server secret.";
     }
     return error.message;
   }
@@ -161,6 +213,90 @@ async function downloadGeneratedVideo(ai: ReturnType<typeof createGoogleGenAI>, 
   }
 }
 
+function toOmniImage(dataUrl: string) {
+  const image = toVeoImage(dataUrl);
+  return {
+    type: "image" as const,
+    data: image.imageBytes,
+    mime_type: image.mimeType as "image/jpeg" | "image/png" | "image/webp",
+  };
+}
+
+const MOTION_DIRECTIONS = {
+  subtle: "Use restrained, fine-grained subject motion with a stable silhouette and minimal deformation.",
+  natural: "Use physically plausible, fluid subject motion with coherent timing and stable scene geometry.",
+  dynamic: "Use energetic, clearly readable subject motion with strong depth cues while preserving identity and structure.",
+} as const;
+
+const CAMERA_DIRECTIONS = {
+  auto: "Choose one coherent camera move that best supports the action; avoid unnecessary camera changes.",
+  locked: "Use a locked-off tripod shot with no camera translation, zoom, roll, or shake.",
+  "push-in": "Use a slow, smooth cinematic dolly push toward the subject.",
+  "pull-out": "Use a slow, smooth cinematic dolly pull away from the subject.",
+  "pan-left": "Use one smooth, controlled pan to the left.",
+  "pan-right": "Use one smooth, controlled pan to the right.",
+  orbit: "Use a smooth, controlled partial orbit around the primary subject with believable parallax.",
+  tracking: "Track the primary subject smoothly while maintaining consistent framing.",
+} as const;
+
+function buildDirectedPrompt(input: VeoGenerationRequest, hasSourceImages: boolean) {
+  const directions = [input.prompt.trim()];
+  if (input.motionProfile) directions.push(MOTION_DIRECTIONS[input.motionProfile]);
+  if (input.cameraMotion) directions.push(CAMERA_DIRECTIONS[input.cameraMotion]);
+  if (hasSourceImages && input.enhancePrompt !== false) {
+    directions.push("Preserve the source subject's identity, proportions, materials, lighting, and scene continuity across every frame.");
+  }
+  if (input.enhancePrompt !== false) {
+    directions.push("Stage this as one continuous, temporally coherent shot with natural acceleration, clean details, and audio synchronized to visible events.");
+  }
+  return directions.join(" ");
+}
+
+async function generateOmniVideo(
+  ai: ReturnType<typeof createGoogleGenAI>,
+  input: VeoGenerationRequest,
+) {
+  const sourceImages = input.referenceImages?.length
+    ? input.referenceImages
+    : input.startFrame
+      ? [input.startFrame]
+      : [];
+  const rolePrompt = input.referenceImages?.length
+    ? `${sourceImages.map((_, index) => `<IMAGE_REF_${index}>`).join(" ")} Use the supplied images as references.`
+    : input.startFrame
+      ? "<FIRST_FRAME> Use the supplied image as the starting frame."
+      : "";
+  const directedPrompt = buildDirectedPrompt(input, sourceImages.length > 0);
+  const negativeDirection = input.negativePrompt?.trim()
+    ? ` Avoid these visual outcomes: ${input.negativePrompt.trim()}.`
+    : "";
+  const prompt = `${rolePrompt} ${directedPrompt}${negativeDirection} Create a ${input.durationSeconds}-second video with synchronized audio.`.trim();
+  const interaction = await ai.interactions.create({
+    model: input.modelId,
+    input: sourceImages.length
+      ? [
+        ...sourceImages.map(toOmniImage),
+        { type: "text" as const, text: prompt },
+      ]
+      : prompt,
+    response_format: {
+      type: "video",
+      aspect_ratio: input.aspectRatio,
+    },
+    background: false,
+    store: false,
+    stream: false,
+  });
+
+  const video = interaction.output_video;
+  if (!video?.data) {
+    throw new Error("Gemini Omni Flash completed without returning inline video data.");
+  }
+  const buffer = Buffer.from(video.data, "base64");
+  if (!buffer.byteLength) throw new Error("Gemini Omni Flash returned an empty video.");
+  return { buffer, mimeType: video.mime_type || "video/mp4" };
+}
+
 export async function POST(request: Request) {
   try {
     if (isVercelDownloadProxyDisabled()) {
@@ -178,7 +314,28 @@ export async function POST(request: Request) {
     }
     const input = validateRequest(request, await request.json());
 
-    const ai = createGoogleGenAI({ enterprise: true });
+    const model = VIDEO_MODELS[input.modelId as keyof typeof VIDEO_MODELS];
+    const localApiKey = process.env.NODE_ENV === "production"
+      ? null
+      : request.headers.get("x-cafehtml-local-gemini-key")?.trim();
+    const apiKey = localApiKey
+      || process.env.GEMINI_API_KEY?.trim()
+      || process.env.GOOGLE_API_KEY?.trim();
+    if (!apiKey) {
+      throw new Error("Google AI Studio is not configured. Set GEMINI_API_KEY as a server secret.");
+    }
+    const ai = createGoogleGenAI({ apiKey });
+
+    if (model.api === "omni") {
+      const result = await generateOmniVideo(ai, input);
+      return new Response(result.buffer, {
+        headers: {
+          "Content-Type": result.mimeType,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
     const config: GenerateVideosConfig = {
       numberOfVideos: 1,
       aspectRatio: input.aspectRatio,
@@ -186,6 +343,9 @@ export async function POST(request: Request) {
       resolution: input.resolution,
       generateAudio: true,
     };
+
+    if (input.negativePrompt?.trim()) config.negativePrompt = input.negativePrompt.trim();
+    config.personGeneration = input.startFrame || input.referenceImages?.length ? "allow_adult" : "allow_all";
 
     if (input.seed !== undefined) config.seed = input.seed;
     if (input.endFrame) config.lastFrame = toVeoImage(input.endFrame);
@@ -198,7 +358,7 @@ export async function POST(request: Request) {
 
     let operation = await ai.models.generateVideos({
       model: input.modelId,
-      prompt: input.prompt,
+      prompt: buildDirectedPrompt(input, !!input.startFrame || !!input.referenceImages?.length),
       image: input.startFrame ? toVeoImage(input.startFrame) : undefined,
       config,
     });
@@ -216,7 +376,7 @@ export async function POST(request: Request) {
       throw new Error(
         typeof operation.error.message === "string"
           ? operation.error.message
-          : "Vertex video generation failed.",
+          : "Veo video generation failed.",
       );
     }
 
@@ -228,8 +388,8 @@ export async function POST(request: Request) {
     }
 
     if (!videoBuffer?.byteLength) {
-      console.error("[Veo Vertex] Completed without video payload:", summarizeVideoOperation(operation));
-      throw new Error("Vertex completed without returning a downloadable video.");
+      console.error("[Google AI Studio Veo] Completed without video payload:", summarizeVideoOperation(operation));
+      throw new Error("Veo completed without returning a downloadable video.");
     }
 
     return new Response(videoBuffer, {
@@ -239,8 +399,11 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Veo Vertex] Generation failed:", error);
+    console.error("[Google video] Generation failed:", error);
     const message = describeError(error);
+    const isAuthError = message.includes("not configured")
+      || message.includes("authentication")
+      || message.includes("UNAUTHENTICATED");
     const isClientError = error instanceof SyntaxError
       || message.includes("required")
       || message.includes("requires")
@@ -251,6 +414,6 @@ export async function POST(request: Request) {
       || message.includes("does not support")
       || message.includes("too large")
       || message.includes("not allowed");
-    return NextResponse.json({ error: message }, { status: isClientError ? 400 : 500 });
+    return NextResponse.json({ error: message }, { status: isAuthError ? 401 : isClientError ? 400 : 500 });
   }
 }
