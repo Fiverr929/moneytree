@@ -10757,21 +10757,35 @@ button.video-media-empty:focus-visible {
 /* Mobile video workspace: keep the shot canvas prominent and every primary
    control reachable without disturbing the desktop editing layout. */
 @media (max-width: 680px) {
+  .video-page {
+    overflow: hidden;
+  }
+
   .video-stage {
+    width: 100%;
+    height: 100%;
     min-height: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 90px minmax(0, 1fr) 94px 154px;
     gap: 8px;
     padding: 8px 8px 14px;
   }
 
   .video-prompt-bar {
+    grid-column: 1;
+    grid-row: 1;
     height: 90px;
     grid-template-columns: minmax(0, 1fr) 46px;
     grid-template-rows: 44px 46px;
   }
 
   .video-preview {
-    min-height: 240px;
-    flex: 1 0 240px;
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 0;
+    height: 100%;
+    flex: none;
     grid-template-rows: minmax(0, 1fr) 44px;
   }
 
@@ -10804,8 +10818,11 @@ button.video-media-empty:focus-visible {
   }
 
   .video-sequence-panel {
-    height: 102px;
-    flex: 0 0 102px;
+    grid-column: 1;
+    grid-row: 3;
+    height: 100%;
+    min-height: 0;
+    flex: none;
   }
 
   .video-sequence-header {
@@ -10817,8 +10834,11 @@ button.video-media-empty:focus-visible {
   }
 
   .video-media-panel {
-    height: 166px;
-    flex: 0 0 166px;
+    grid-column: 1;
+    grid-row: 4;
+    height: 100%;
+    min-height: 0;
+    flex: none;
   }
 
   .video-media-header {
@@ -10848,8 +10868,8 @@ button.video-media-empty:focus-visible {
   }
 
   .video-media-item {
-    width: 70px;
-    height: 70px;
+    width: 60px;
+    height: 60px;
   }
 
   .video-prompt-clear {

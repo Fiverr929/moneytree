@@ -32,6 +32,7 @@ Track component work, decisions, and session continuations here.
 - Increased mobile playback, media, tab, and settings controls to touch-friendly sizes without changing the desktop layout.
 - Preserved the tablet two-column Video editor in portrait and landscape while upgrading playback, media, sequence, and settings controls for touch.
 - Expanded the tablet settings panel to 280px with 42px controls and viewport-aware internal scrolling that stays above the persistent mode bar.
+- Removed mobile page scrolling by converting the phone workspace to a four-row viewport grid; only the media rail and settings sheet keep intentional internal scrolling.
 
 **Verification:**
 - Focused lint passes for the Video page, API client, server route, and shared Google client.
