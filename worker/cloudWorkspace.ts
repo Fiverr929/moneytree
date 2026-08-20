@@ -41,6 +41,8 @@ type ReferenceInput = {
   mode: string;
   visualRead?: string;
   visualReadSource?: string;
+  visualReadFingerprint?: string;
+  visualReadVersion?: string;
   updatedAt: string;
 };
 type GenerationInput = {
@@ -100,6 +102,8 @@ function validReference(value: unknown): value is ReferenceInput {
     && typeof item.mode === "string" && item.mode.length <= 40
     && (item.visualRead === undefined || (typeof item.visualRead === "string" && item.visualRead.length <= 4_000))
     && (item.visualReadSource === undefined || ["local", "vision"].includes(String(item.visualReadSource)))
+    && (item.visualReadFingerprint === undefined || (typeof item.visualReadFingerprint === "string" && item.visualReadFingerprint.length <= 180))
+    && (item.visualReadVersion === undefined || (typeof item.visualReadVersion === "string" && item.visualReadVersion.length <= 120))
     && validDate(item.updatedAt);
 }
 
@@ -163,7 +167,8 @@ function ensureSchema(db: D1Database) {
       owner_key TEXT NOT NULL, id TEXT NOT NULL, project_id TEXT NOT NULL, name TEXT NOT NULL,
       label TEXT NOT NULL, folder TEXT, kind TEXT NOT NULL, size TEXT NOT NULL, dims TEXT NOT NULL,
       modified TEXT NOT NULL, eye INTEGER NOT NULL, strength REAL NOT NULL, mode TEXT NOT NULL,
-      visual_read TEXT, visual_read_source TEXT, updated_at TEXT NOT NULL, deleted_at TEXT,
+      visual_read TEXT, visual_read_source TEXT, visual_read_fingerprint TEXT, visual_read_version TEXT,
+      updated_at TEXT NOT NULL, deleted_at TEXT,
       PRIMARY KEY (owner_key, id)
     )`),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_cloud_reference_owner_project ON cloud_reference (owner_key, project_id)"),
@@ -217,13 +222,14 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
     .bind(ownerKey, state.projectId, JSON.stringify(state.folders), state.updatedAt)));
   body.references.forEach((reference) => statements.push(env.DB.prepare(`INSERT INTO cloud_reference
     (owner_key, id, project_id, name, label, folder, kind, size, dims, modified, eye, strength,
-      mode, visual_read, visual_read_source, updated_at, deleted_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      mode, visual_read, visual_read_source, visual_read_fingerprint, visual_read_version, updated_at, deleted_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
     ON CONFLICT(owner_key, id) DO UPDATE SET
       project_id = excluded.project_id, name = excluded.name, label = excluded.label,
       folder = excluded.folder, kind = excluded.kind, size = excluded.size, dims = excluded.dims,
       modified = excluded.modified, eye = excluded.eye, strength = excluded.strength, mode = excluded.mode,
       visual_read = excluded.visual_read, visual_read_source = excluded.visual_read_source,
+      visual_read_fingerprint = excluded.visual_read_fingerprint, visual_read_version = excluded.visual_read_version,
       updated_at = excluded.updated_at, deleted_at = NULL
     WHERE (cloud_reference.deleted_at IS NULL AND excluded.updated_at >= cloud_reference.updated_at)
       OR (cloud_reference.deleted_at IS NOT NULL AND excluded.updated_at > cloud_reference.deleted_at)`)
@@ -231,7 +237,8 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
       ownerKey, reference.id, reference.projectId, reference.name, reference.label, reference.folder,
       reference.kind, reference.size, reference.dims, reference.modified, reference.eye ? 1 : 0,
       Math.max(0, Math.min(100, reference.strength)), reference.mode, reference.visualRead || null,
-      reference.visualReadSource || null, reference.updatedAt,
+      reference.visualReadSource || null, reference.visualReadFingerprint || null,
+      reference.visualReadVersion || null, reference.updatedAt,
     )));
   body.generations.forEach((generation) => statements.push(env.DB.prepare(`INSERT INTO cloud_generation
     (owner_key, id, project_id, metadata_json, created_at, updated_at, deleted_at)
@@ -297,7 +304,8 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
       id: row.id, projectId: row.project_id, name: row.name, label: row.label, folder: row.folder,
       kind: row.kind, size: row.size, dims: row.dims, modified: row.modified, eye: Boolean(row.eye),
       strength: row.strength, mode: row.mode, visualRead: row.visual_read,
-      visualReadSource: row.visual_read_source, updatedAt: row.updated_at,
+      visualReadSource: row.visual_read_source, visualReadFingerprint: row.visual_read_fingerprint,
+      visualReadVersion: row.visual_read_version, updatedAt: row.updated_at,
     })),
     deletedReferences: deletedReferences.map((row) => ({ id: row.id, projectId: row.project_id, deletedAt: row.deleted_at })),
     generations: generations.map((row) => ({
@@ -378,7 +386,7 @@ async function generationImageRequest(request: Request, env: CloudWorkspaceEnv, 
     return new Response(object.body, {
       headers: {
         "content-type": object.httpMetadata?.contentType || "application/octet-stream",
-        "cache-control": "private, max-age=300",
+        "cache-control": "private, no-cache",
         ...(object.etag ? { etag: object.etag } : {}),
       },
     });
@@ -406,7 +414,7 @@ async function imageRequest(request: Request, env: CloudWorkspaceEnv, ownerKey: 
     return new Response(object.body, {
       headers: {
         "content-type": object.httpMetadata?.contentType || "application/octet-stream",
-        "cache-control": "private, max-age=300",
+        "cache-control": "private, no-cache",
         ...(object.etag ? { etag: object.etag } : {}),
       },
     });

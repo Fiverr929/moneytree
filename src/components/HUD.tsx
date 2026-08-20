@@ -412,9 +412,22 @@ export default function HUD() {
     }
   };
 
-  const handleLoadSetup = () => {
+  const handleLoadSetup = async () => {
     if (activeCell.moduleSnapshot?.files) {
-      setFiles(activeCell.moduleSnapshot.files);
+      const files = await Promise.all(activeCell.moduleSnapshot.files.map(async (file) => {
+        const storedAsset = file.uuid
+          ? await DB.images.get(file.uuid) as { dataUrl?: string } | undefined
+          : undefined;
+        return {
+          ...file,
+          url: storedAsset?.dataUrl || file.url || "",
+          visualRead: "",
+          visualReadSource: "local" as const,
+          visualReadFingerprint: undefined,
+          visualReadVersion: undefined,
+        };
+      }));
+      setFiles(files);
     }
     const promptToLoad = promptCommandForCell(activeCell);
     if (promptToLoad) {

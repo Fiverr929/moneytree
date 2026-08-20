@@ -3,6 +3,10 @@
 import DB from "@/lib/db";
 
 type StoredUuid = { uuid?: string };
+type StoredGeneration = StoredUuid & {
+  usedImages?: StoredUuid[];
+  moduleSnapshot?: { files?: StoredUuid[] };
+};
 type StudioStateImage = { uuid?: string };
 type StudioStateGroup = { images?: StudioStateImage[] };
 type StudioStateEntry = { layers?: { groups?: StudioStateGroup[] } };
@@ -22,8 +26,14 @@ export async function pruneProjectImages(projectId: number) {
     if (file.uuid) keep.add(file.uuid);
   });
 
-  (gallery as StoredUuid[]).forEach((cell) => {
+  (gallery as StoredGeneration[]).forEach((cell) => {
     if (cell.uuid) keep.add(cell.uuid);
+    cell.usedImages?.forEach((image) => {
+      if (image.uuid) keep.add(image.uuid);
+    });
+    cell.moduleSnapshot?.files?.forEach((file) => {
+      if (file.uuid) keep.add(file.uuid);
+    });
   });
 
   const histories = (studioState as StudioStateRecord | undefined)?.histories || {};

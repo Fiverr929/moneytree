@@ -64,5 +64,6 @@ mingit.zip
 
 # local Codex scratch research
 /.codex-study/
+/.codex-release-prompt/
 /.npm-cache/
 /.wrangler/

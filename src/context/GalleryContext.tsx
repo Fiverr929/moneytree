@@ -225,7 +225,11 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
 
         const originalsById = new Map(storedCells.map((cell) => [cell.id, cell]));
         const images = await DB.images.getMany(
-          visibleCells.map((cell) => cell.uuid).filter((uuid): uuid is string => Boolean(uuid)),
+          visibleCells.flatMap((cell) => [
+            cell.uuid,
+            ...(cell.usedImages || []).map((image) => image.uuid),
+            ...(cell.moduleSnapshot?.files || []).map((file) => file.uuid),
+          ]).filter((uuid): uuid is string => Boolean(uuid)),
         );
         const imageUrlsByUuid = new Map(
           images
@@ -234,7 +238,20 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
         );
         const hydratedCells = visibleCells.map((cell) => {
           const imgUrl = (cell.uuid && imageUrlsByUuid.get(cell.uuid)) || originalsById.get(cell.id)?.imgUrl;
-          return imgUrl ? normalizeCell({ ...cell, imgUrl }) : cell;
+          return normalizeCell({
+            ...cell,
+            ...(imgUrl ? { imgUrl } : {}),
+            usedImages: (cell.usedImages || []).map((image) => ({
+              ...image,
+              imgUrl: (image.uuid && imageUrlsByUuid.get(image.uuid)) || image.imgUrl,
+            })),
+            moduleSnapshot: cell.moduleSnapshot ? {
+              files: cell.moduleSnapshot.files.map((file) => ({
+                ...file,
+                url: (file.uuid && imageUrlsByUuid.get(file.uuid)) || file.url,
+              })),
+            } : undefined,
+          });
         });
 
         for (let index = 0; index < hydratedCells.length && !cancelled; index += GALLERY_HYDRATION_BATCH_SIZE) {

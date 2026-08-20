@@ -7,6 +7,7 @@ import type {
 } from "./types";
 import { getGenerationModuleImages } from "@/lib/pipeline/module-order";
 import { fingerprintReferenceValues } from "./referenceFingerprint";
+import { hasCurrentReferenceRead } from "./referenceFreshness";
 
 function roleOf(file: ModuleFile): BriefReferenceRole {
   const role = String(file.mode || "").toUpperCase();
@@ -18,12 +19,8 @@ function visibleModuleFiles(files: ModuleFile[]) {
   return getGenerationModuleImages(files);
 }
 
-const moduleFingerprintCache = new WeakMap<ModuleFile[], string>();
-
 export function fingerprintModuleFiles(files: ModuleFile[]) {
-  const cached = moduleFingerprintCache.get(files);
-  if (cached) return cached;
-  const fingerprint = fingerprintReferenceValues(
+  return fingerprintReferenceValues(
     visibleModuleFiles(files).map((file) => [
       file.uuid || file.id,
       file.url,
@@ -33,8 +30,6 @@ export function fingerprintModuleFiles(files: ModuleFile[]) {
       file.eye === false ? "hidden" : "visible",
     ]),
   );
-  moduleFingerprintCache.set(files, fingerprint);
-  return fingerprint;
 }
 
 function observationForFile(file: ModuleFile): ReferenceObservation {
@@ -42,13 +37,15 @@ function observationForFile(file: ModuleFile): ReferenceObservation {
   const label = file.label || file.name || "UNLABELED";
   const strength = normalizeStrength(file.strength);
 
+  const visualReadIsCurrent = hasCurrentReferenceRead(file);
+
   return {
     imageId: file.uuid || String(file.id),
     role,
     label,
     strength,
-    visualRead: file.visualRead || "",
-    readSource: file.visualReadSource || "local",
+    visualRead: visualReadIsCurrent ? file.visualRead || "" : "",
+    readSource: visualReadIsCurrent ? file.visualReadSource || "local" : "local",
   };
 }
 

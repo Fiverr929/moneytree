@@ -93,11 +93,12 @@ export default function StudioModule() {
       } else if (pendingUpload.type === 'replace') {
         const next = [...groups];
         const current = next[pendingUpload.index]?.images[pendingUpload.imageIndex];
-        if (current && activeProjectId) {
-          await DB.images.put(current.uuid, url, activeProjectId);
-        }
         if (current) {
-          next[pendingUpload.index].images[pendingUpload.imageIndex] = { ...current, url };
+          const replacementUuid = crypto.randomUUID();
+          if (activeProjectId) {
+            await DB.images.put(replacementUuid, url, activeProjectId);
+          }
+          next[pendingUpload.index].images[pendingUpload.imageIndex] = { ...current, uuid: replacementUuid, url };
           setGroups(next);
         }
       }
