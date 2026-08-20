@@ -801,27 +801,41 @@ export default function VideoPage() {
                       </div>
                     ))
                 ) : (
-                  visibleMedia.map((item) => (
-                    <div
-                      className="video-media-item"
-                      key={item.id}
-                      onClick={() => handleMediaAssignment(item.id)}
-                    >
-                      <img src={item.url} alt={item.name} loading="lazy" decoding="async" />
-                      {item.source === "upload" && (
-                        <button
-                          type="button"
-                          title="Remove image"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            removeMedia(item.id);
-                          }}
-                        >
-                          &times;
-                        </button>
-                      )}
-                    </div>
-                  ))
+                  visibleMedia.map((item) => {
+                    const roleLabels = videoSettings.inputMode === "frames"
+                      ? [
+                          startFrameId === item.id ? "START" : "",
+                          endFrameId === item.id ? "END" : "",
+                        ].filter(Boolean)
+                      : referenceIds.flatMap((id, index) => id === item.id ? [`REF ${index + 1}`] : []);
+                    const assignmentType = videoSettings.inputMode === "frames" ? "frame" : "reference";
+
+                    return (
+                      <div
+                        className={`video-media-item ${roleLabels.length ? `assigned ${assignmentType}` : ""}`}
+                        key={item.id}
+                        title={roleLabels.length ? `${item.name} · ${roleLabels.join(", ")}` : item.name}
+                        onClick={() => handleMediaAssignment(item.id)}
+                      >
+                        <img src={item.url} alt={item.name} loading="lazy" decoding="async" />
+                        {roleLabels.map((label) => (
+                          <span className="video-media-role" key={label}>{label}</span>
+                        ))}
+                        {item.source === "upload" && (
+                          <button
+                            type="button"
+                            title="Remove image"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              removeMedia(item.id);
+                            }}
+                          >
+                            &times;
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
                 {mediaFolder === "video" && !generatedClips.some((clip) => clip.status === "ready" && !!clip.url) && (
                   <div className="video-media-empty">
@@ -930,6 +944,16 @@ export default function VideoPage() {
                 >
                   {isMuted ? "MUTE" : "VOL"}
                 </button>
+                <button
+                  className="video-control-button video-fullscreen-toggle"
+                  type="button"
+                  title="Enter fullscreen"
+                  aria-label="Enter fullscreen"
+                  disabled={!hasSelectedVideo}
+                  onClick={() => void toggleFullscreen()}
+                >
+                  FULL
+                </button>
               </div>
             </div>
           </div>
@@ -942,7 +966,7 @@ export default function VideoPage() {
                   {generationError}
                 </button>
               ) : (
-                <span>{sequenceClips.length} CLIP{sequenceClips.length === 1 ? "" : "S"}</span>
+                <span className="video-sequence-count">{sequenceClips.length} CLIP{sequenceClips.length === 1 ? "" : "S"}</span>
               )}
             </div>
             <div
@@ -1015,7 +1039,7 @@ export default function VideoPage() {
                   return (
                     <div
                       key={slot.key}
-                      className={`video-prompt-slot ${activeInputSlot === slot.key ? "active" : ""} ${item ? "filled" : ""}`}
+                      className={`video-prompt-slot frame ${activeInputSlot === slot.key ? "active" : ""} ${item ? "filled" : ""}`}
                     >
                       <button
                         className="video-prompt-slot-select"
@@ -1052,7 +1076,7 @@ export default function VideoPage() {
                   return (
                     <div
                       key={slotKey}
-                      className={`video-prompt-slot ${activeInputSlot === slotKey ? "active" : ""} ${item ? "filled" : ""}`}
+                      className={`video-prompt-slot reference ${activeInputSlot === slotKey ? "active" : ""} ${item ? "filled" : ""}`}
                     >
                       <button
                         className="video-prompt-slot-select"
