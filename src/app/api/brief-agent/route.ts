@@ -668,6 +668,8 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "Use compact visual understanding as visual evidence. The visual scan tells you what is visible; the influence value tells you how much that evidence should shape the composed finalPrompt.",
     "Use influence only for private prompt composition. Never include influence labels, strength, control axis, slider, percentage, or other UI mechanics in finalPrompt.",
     "Do not invent subject features, wardrobe details, stage elements, camera view, lighting, palette, or style details that are not requested by the user or present in the visual scan.",
+    "For a person, SUBJECT exclusively determines the main character's identity and visible gender presentation when the Subject scan is clear. People depicted in SCENE may contribute action, pose, staging, and spatial relationships but never replace the Subject's identity, gender presentation, or wardrobe. People depicted in STYLE contribute none of those traits.",
+    "Example conflict: if SUBJECT shows a woman and SCENE shows a man tying his shoes, compose the woman performing the shoe-tying action; do not turn her into the Scene man.",
     "When the visual scan is incomplete, use safe general language or ask only if the missing detail blocks a useful draft.",
     "The finalPrompt should be one clean generation brief. Merge user intent, visual scans, roles, and influence into natural visual language; do not append checklist-like rule blocks.",
     "Before returning a draft, re-read the exact latest user instruction and verify that every explicit subject, action, setting, composition, style, lighting, color, text, keep, remove, and negative constraint is represented in finalPrompt. Do not silently drop details.",

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { runSkillChecks } from "../src/lib/brief-agent/skillContract.ts";
+import { applySkillContract, runSkillChecks } from "../src/lib/brief-agent/skillContract.ts";
 
 function draft(finalPrompt, observations = []) {
   return { finalPrompt, observations };
@@ -36,5 +36,89 @@ assert.equal(leaked.find((check) => check.id === "prompt-coherence")?.status, "w
 const ungrounded = runSkillChecks(draft("A generic luxury product on a neutral surface.", [watch]));
 assert.equal(ungrounded.find((check) => check.id === "reference-grounding")?.status, "warning");
 assert.deepEqual(runSkillChecks(draft("", [watch])), []);
+
+const womanSubject = {
+  imageId: "paoul",
+  role: "SUBJECT",
+  label: "PAOUL",
+  strength: 50,
+  visualRead: "A woman standing against a plain dark background, wearing a graphic top.",
+};
+const manScene = {
+  imageId: "shoe-scene",
+  role: "SCENE",
+  label: "COURTYARD",
+  strength: 50,
+  visualRead: "A man sits on a stone table and leans forward to tie his shoes in a house courtyard.",
+};
+
+const preservedSubject = runSkillChecks(draft(
+  "The woman from the subject image sits on a stone table and leans forward to tie her shoes in a house courtyard.",
+  [womanSubject, manScene],
+));
+assert.equal(
+  preservedSubject.find((check) => check.id === "subject-identity-consistency")?.status,
+  "pass",
+  "Scene action may transfer without replacing the female Subject",
+);
+
+const swappedSubjectDraft = {
+  ...draft(
+    "A fair-skinned man sits on a stone table and leans forward to tie his shoes in a house courtyard.",
+    [womanSubject, manScene],
+  ),
+  status: "draft",
+  action: "draft",
+  reply: "Starting generation.",
+  warnings: [],
+  skillChecks: [],
+  readyToExecute: false,
+  session: {
+    projectIntent: "Compose the references.",
+    selectedDirection: "",
+    directions: [],
+    lastDraftPrompt: "A fair-skinned man ties his shoes.",
+    unresolvedQuestions: [],
+    notes: [],
+  },
+};
+const blockedSwap = applySkillContract(swappedSubjectDraft);
+assert.equal(
+  blockedSwap.skillChecks.find((check) => check.id === "subject-identity-consistency")?.status,
+  "warning",
+  "opposite-gender Scene identity leakage should be detected",
+);
+assert.equal(blockedSwap.action, "inspect", "identity conflicts should not auto-generate");
+assert.equal(blockedSwap.finalPrompt, "", "the conflicting prompt should be removed");
+
+const neutralSubject = runSkillChecks(draft(
+  "PAOUL sits on a stone table and leans forward to tie their shoes in a house courtyard.",
+  [womanSubject, manScene],
+));
+assert.equal(
+  neutralSubject.find((check) => check.id === "subject-identity-consistency")?.status,
+  "pass",
+  "neutral prompt wording should remain valid",
+);
+
+const manSubject = {
+  ...womanSubject,
+  imageId: "male-subject",
+  visualRead: "A man standing against a plain dark background, wearing a graphic top.",
+};
+const womanScene = {
+  ...manScene,
+  imageId: "female-scene",
+  visualRead: "A woman sits on a stone table and leans forward to tie her shoes in a house courtyard.",
+};
+const inverseSwap = runSkillChecks(draft(
+  "A woman sits on a stone table and leans forward to tie her shoes in a house courtyard.",
+  [manSubject, womanScene],
+));
+assert.equal(
+  inverseSwap.find((check) => check.id === "subject-identity-consistency")?.status,
+  "warning",
+  "the safeguard should work in both identity directions",
+);
 
 console.log("Agent skill checks passed");
