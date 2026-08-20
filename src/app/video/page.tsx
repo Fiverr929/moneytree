@@ -6,17 +6,20 @@ import ProjectsModal from "@/components/ProjectsModal";
 import SettingsModal from "@/components/SettingsModal";
 import { useApp } from "@/context/AppContext";
 import { useGallery } from "@/context/GalleryContext";
+import { useSettings } from "@/context/SettingsContext";
 import DB from "@/lib/db";
 import { generateVeoVideo } from "@/lib/video/api";
 
 const VIDEO_SETTINGS_KEY = "cafehtml-video-settings";
 const VIDEO_PROMPT_DRAFT_KEY = "cafehtml-video-prompt";
 
-type VideoModelKey = "veo-3.1" | "veo-3.1-fast" | "veo-3.1-lite";
+type VideoModelKey = "veo-3.1" | "veo-3.1-fast" | "veo-3.1-lite" | "gemini-omni-flash";
 type VideoRatio = "16:9" | "9:16";
 type VideoDuration = 4 | 6 | 8;
-type VideoResolution = "720p" | "1080p";
+type VideoResolution = "720p" | "1080p" | "4k";
 type VideoInputMode = "frames" | "references";
+type VideoMotionProfile = "subtle" | "natural" | "dynamic";
+type VideoCameraMotion = "auto" | "locked" | "push-in" | "pull-out" | "pan-left" | "pan-right" | "orbit" | "tracking";
 
 type VideoSettings = {
   model: VideoModelKey;
@@ -26,6 +29,10 @@ type VideoSettings = {
   resolution: VideoResolution;
   variations: number;
   seed: string;
+  motionProfile: VideoMotionProfile;
+  cameraMotion: VideoCameraMotion;
+  negativePrompt: string;
+  enhancePrompt: boolean;
 };
 
 type VideoMedia = {
@@ -105,39 +112,65 @@ const VIDEO_MODELS: Record<VideoModelKey, {
   label: string;
   resolutions: VideoResolution[];
   supportsReferences: boolean;
+  supportsEndFrame: boolean;
+  supportsSeed: boolean;
+  referencesRequireEightSeconds: boolean;
   maxReferences: number;
 }> = {
   "veo-3.1": {
-    id: "veo-3.1-generate-001",
+    id: "veo-3.1-generate-preview",
     label: "VEO 3.1",
-    resolutions: ["720p", "1080p"],
+    resolutions: ["720p", "1080p", "4k"],
     supportsReferences: true,
+    supportsEndFrame: true,
+    supportsSeed: true,
+    referencesRequireEightSeconds: true,
     maxReferences: 3,
   },
   "veo-3.1-fast": {
-    id: "veo-3.1-fast-generate-001",
+    id: "veo-3.1-fast-generate-preview",
     label: "VEO 3.1 FAST",
-    resolutions: ["720p", "1080p"],
+    resolutions: ["720p", "1080p", "4k"],
     supportsReferences: true,
+    supportsEndFrame: true,
+    supportsSeed: true,
+    referencesRequireEightSeconds: true,
     maxReferences: 3,
   },
   "veo-3.1-lite": {
-    id: "veo-3.1-lite-generate-001",
+    id: "veo-3.1-lite-generate-preview",
     label: "VEO 3.1 LITE",
     resolutions: ["720p", "1080p"],
     supportsReferences: false,
+    supportsEndFrame: true,
+    supportsSeed: true,
+    referencesRequireEightSeconds: false,
     maxReferences: 0,
+  },
+  "gemini-omni-flash": {
+    id: "gemini-omni-flash-preview",
+    label: "GEMINI OMNI FLASH",
+    resolutions: ["720p"],
+    supportsReferences: true,
+    supportsEndFrame: false,
+    supportsSeed: false,
+    referencesRequireEightSeconds: false,
+    maxReferences: 6,
   },
 };
 
 const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
-  model: "veo-3.1-fast",
+  model: "gemini-omni-flash",
   inputMode: "frames",
   ratio: "16:9",
   duration: 8,
   resolution: "720p",
   variations: 1,
   seed: "",
+  motionProfile: "natural",
+  cameraMotion: "auto",
+  negativePrompt: "flicker, jitter, warped anatomy, duplicated features, identity drift, unstable background, text, watermark",
+  enhancePrompt: true,
 };
 
 function normalizeVideoSettings(settings: VideoSettings): VideoSettings {
@@ -148,7 +181,10 @@ function normalizeVideoSettings(settings: VideoSettings): VideoSettings {
   const resolution = model.resolutions.includes(settings.resolution)
     ? settings.resolution
     : model.resolutions[0];
-  const duration = resolution === "720p" && inputMode !== "references" ? settings.duration : 8;
+  const duration = resolution === "720p"
+    && (inputMode !== "references" || !model.referencesRequireEightSeconds)
+    ? settings.duration
+    : 8;
 
   return {
     ...settings,
@@ -159,12 +195,23 @@ function normalizeVideoSettings(settings: VideoSettings): VideoSettings {
     resolution,
     variations: Math.min(4, Math.max(1, settings.variations || 1)),
     seed: settings.seed.replace(/\D/g, "").slice(0, 10),
+    motionProfile: ["subtle", "natural", "dynamic"].includes(settings.motionProfile)
+      ? settings.motionProfile
+      : DEFAULT_VIDEO_SETTINGS.motionProfile,
+    cameraMotion: ["auto", "locked", "push-in", "pull-out", "pan-left", "pan-right", "orbit", "tracking"].includes(settings.cameraMotion)
+      ? settings.cameraMotion
+      : DEFAULT_VIDEO_SETTINGS.cameraMotion,
+    negativePrompt: typeof settings.negativePrompt === "string"
+      ? settings.negativePrompt.slice(0, 1_000)
+      : DEFAULT_VIDEO_SETTINGS.negativePrompt,
+    enhancePrompt: settings.enhancePrompt !== false,
   };
 }
 
 export default function VideoPage() {
   const { activeProjectId } = useApp();
   const { cells: galleryCells } = useGallery();
+  const { geminiApiKey } = useSettings();
   const [prompt, setPrompt] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [videoSettings, setVideoSettings] = useState<VideoSettings>(DEFAULT_VIDEO_SETTINGS);
@@ -194,7 +241,8 @@ export default function VideoPage() {
   const discardedClipIdsRef = useRef(new Set<string>());
 
   const modelConfig = VIDEO_MODELS[videoSettings.model];
-  const durationLocked = videoSettings.resolution !== "720p" || videoSettings.inputMode === "references";
+  const durationLocked = videoSettings.resolution !== "720p"
+    || (videoSettings.inputMode === "references" && modelConfig.referencesRequireEightSeconds);
   const sequenceClips = generatedClips.filter((clip) => (clip.sequenceOrder ?? -1) >= 0);
   const selectedClip = generatedClips.find((clip) => clip.id === selectedClipId);
   const hasSelectedVideo = !!selectedClip?.url;
@@ -217,12 +265,17 @@ export default function VideoPage() {
 
   useEffect(() => {
     if (videoSettings.inputMode === "frames") {
+      if (!modelConfig.supportsEndFrame) {
+        setEndFrameId(null);
+        setActiveInputSlot("start");
+        return;
+      }
       setActiveInputSlot((current) => current === "end" ? "end" : "start");
       return;
     }
     setReferenceIds((current) => current.slice(0, modelConfig.maxReferences));
     setActiveInputSlot((current) => current.startsWith("ref-") ? current : "ref-0");
-  }, [modelConfig.maxReferences, videoSettings.inputMode]);
+  }, [modelConfig.maxReferences, modelConfig.supportsEndFrame, videoSettings.inputMode]);
 
   useEffect(() => {
     try {
@@ -636,7 +689,7 @@ export default function VideoPage() {
     setGenerationError("");
 
     loadingClips.forEach((loadingClip, variationIndex) => {
-      const seed = videoSettings.seed
+      const seed = modelConfig.supportsSeed && videoSettings.seed
         ? Number(videoSettings.seed) + variationIndex
         : undefined;
       const createdAt = new Date().toISOString();
@@ -666,7 +719,11 @@ export default function VideoPage() {
           startFrame: videoSettings.inputMode === "frames" ? startFrame : undefined,
           endFrame: videoSettings.inputMode === "frames" ? endFrame : undefined,
           referenceImages: videoSettings.inputMode === "references" ? references : undefined,
-        });
+          motionProfile: videoSettings.motionProfile,
+          cameraMotion: videoSettings.cameraMotion,
+          negativePrompt: videoSettings.negativePrompt.trim() || undefined,
+          enhancePrompt: videoSettings.enhancePrompt,
+        }, geminiApiKey);
       };
 
       runVideoRequest()
@@ -778,6 +835,9 @@ export default function VideoPage() {
                       <div
                         className={`video-media-item video ${selectedClipId === clip.id ? "assigned" : ""}`}
                         key={clip.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label="Open generated video"
                         draggable={activeGenerationCount === 0}
                         onDragStart={(event) => {
                           event.dataTransfer.effectAllowed = "move";
@@ -786,6 +846,12 @@ export default function VideoPage() {
                         }}
                         onDragEnd={() => setDraggedClipId(null)}
                         onClick={() => setSelectedClipId(clip.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedClipId(clip.id);
+                          }
+                        }}
                       >
                         <video src={clip.url} muted preload="metadata" />
                         <button
@@ -815,7 +881,16 @@ export default function VideoPage() {
                         className={`video-media-item ${roleLabels.length ? `assigned ${assignmentType}` : ""}`}
                         key={item.id}
                         title={roleLabels.length ? `${item.name} · ${roleLabels.join(", ")}` : item.name}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${roleLabels.length ? "Reassign" : "Use"} ${item.name}`}
                         onClick={() => handleMediaAssignment(item.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleMediaAssignment(item.id);
+                          }
+                        }}
                       >
                         <img src={item.url} alt={item.name} loading="lazy" decoding="async" />
                         {roleLabels.map((label) => (
@@ -868,6 +943,10 @@ export default function VideoPage() {
               ref={previewRef}
               className={`video-preview ${hasSelectedVideo ? "has-video" : "empty"}`}
             >
+              <div className="video-preview-status" aria-live="polite">
+                <span>{activeGenerationCount > 0 ? `GENERATING ${activeGenerationCount}` : "PREVIEW"}</span>
+                <b>{selectedClip ? `${selectedClip.duration}S · ${selectedClip.aspectRatio || videoSettings.ratio}` : `${videoSettings.ratio} · ${videoSettings.resolution}`}</b>
+              </div>
               <div className="video-player-surface">
                 <div className="video-monitor-frame">
                   {selectedClip?.url ? (
@@ -902,8 +981,8 @@ export default function VideoPage() {
                   ) : (
                     <div className="video-empty-preview">
                       <span className="video-playhead" aria-hidden="true"><i></i></span>
-                      <b>READY FOR A NEW SHOT</b>
-                      <small>GENERATE A CLIP TO PREVIEW IT HERE</small>
+                      <b>BUILD YOUR FIRST SHOT</b>
+                      <small>ADD A FRAME, DESCRIBE THE MOTION, THEN GENERATE</small>
                     </div>
                   )}
                 </div>
@@ -985,6 +1064,9 @@ export default function VideoPage() {
                   key={clip.id}
                   className={`video-sequence-clip ${selectedClipId === clip.id ? "active" : ""} ${clip.status}`}
                   title={clip.error || `Clip ${index + 1}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Select clip ${index + 1}, ${clip.duration} seconds`}
                   draggable={clip.status === "ready" && activeGenerationCount === 0}
                   onDragStart={(event) => {
                     event.dataTransfer.effectAllowed = "move";
@@ -999,6 +1081,12 @@ export default function VideoPage() {
                     placeDraggedClipInSequence(clip.id);
                   }}
                   onClick={() => setSelectedClipId(clip.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedClipId(clip.id);
+                    }
+                  }}
                 >
                   {clip.poster ? (
                     <img src={clip.poster} alt={`Generated clip ${index + 1}`} />
@@ -1033,7 +1121,9 @@ export default function VideoPage() {
               {videoSettings.inputMode === "frames" ? (
                 [
                   { key: "start", label: "START", mediaId: startFrameId },
-                  { key: "end", label: "END", mediaId: endFrameId },
+                  ...(modelConfig.supportsEndFrame
+                    ? [{ key: "end", label: "END", mediaId: endFrameId }]
+                    : []),
                 ].map((slot) => {
                   const item = slot.mediaId ? mediaById.get(slot.mediaId) : undefined;
                   return (
@@ -1113,12 +1203,15 @@ export default function VideoPage() {
                 className={`video-settings-btn ${settingsOpen ? "open" : ""}`}
                 type="button"
                 title="Video settings"
+                aria-label="Video settings"
+                aria-expanded={settingsOpen}
+                aria-controls="video-settings-menu"
                 onClick={() => setSettingsOpen((open) => !open)}
               >
                 <img src="/assets/icon-settings.svg" alt="settings" />
               </button>
 
-              <div className="cmp-menu video-settings-dropdown" hidden={!settingsOpen}>
+              <div id="video-settings-menu" className="cmp-menu video-settings-dropdown" hidden={!settingsOpen}>
                 <div className="cmp-menu-title">MODEL</div>
                 {(Object.keys(VIDEO_MODELS) as VideoModelKey[]).map((modelKey) => (
                   <button
@@ -1192,6 +1285,66 @@ export default function VideoPage() {
                   ))}
                 </div>
 
+                <div className="cmp-menu-title">MOTION ENERGY</div>
+                <div className="video-settings-options">
+                  {(["subtle", "natural", "dynamic"] as VideoMotionProfile[]).map((motionProfile) => (
+                    <button
+                      key={motionProfile}
+                      className={videoSettings.motionProfile === motionProfile ? "primary" : ""}
+                      type="button"
+                      onClick={() => updateVideoSettings({ motionProfile })}
+                    >
+                      {motionProfile.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="cmp-menu-title">CAMERA</div>
+                <select
+                  className="video-settings-select"
+                  value={videoSettings.cameraMotion}
+                  onChange={(event) => updateVideoSettings({ cameraMotion: event.target.value as VideoCameraMotion })}
+                  aria-label="Camera motion"
+                >
+                  <option value="auto">AUTO DIRECT</option>
+                  <option value="locked">LOCKED OFF</option>
+                  <option value="push-in">SLOW PUSH IN</option>
+                  <option value="pull-out">SLOW PULL OUT</option>
+                  <option value="pan-left">PAN LEFT</option>
+                  <option value="pan-right">PAN RIGHT</option>
+                  <option value="orbit">ORBIT SUBJECT</option>
+                  <option value="tracking">TRACK SUBJECT</option>
+                </select>
+
+                <div className="cmp-menu-title">DIRECTOR PROMPT</div>
+                <div className="video-settings-options video-mode-options">
+                  <button
+                    className={videoSettings.enhancePrompt ? "primary" : ""}
+                    type="button"
+                    onClick={() => updateVideoSettings({ enhancePrompt: true })}
+                  >
+                    ENHANCED
+                  </button>
+                  <button
+                    className={!videoSettings.enhancePrompt ? "primary" : ""}
+                    type="button"
+                    onClick={() => updateVideoSettings({ enhancePrompt: false })}
+                  >
+                    LITERAL
+                  </button>
+                </div>
+
+                <div className="cmp-menu-title">AVOID IN OUTPUT</div>
+                <textarea
+                  className="video-negative-prompt"
+                  value={videoSettings.negativePrompt}
+                  maxLength={1_000}
+                  rows={3}
+                  onChange={(event) => updateVideoSettings({ negativePrompt: event.target.value })}
+                  placeholder="flicker, jitter, identity drift…"
+                  aria-label="Negative video prompt"
+                />
+
                 <div className="cmp-menu-title">VARIATIONS</div>
                 <div className="video-settings-stepper">
                   <button
@@ -1218,8 +1371,9 @@ export default function VideoPage() {
                   className="video-seed-input"
                   inputMode="numeric"
                   value={videoSettings.seed}
+                  disabled={!modelConfig.supportsSeed}
                   onChange={(event) => updateVideoSettings({ seed: event.target.value })}
-                  placeholder="RANDOM"
+                  placeholder={modelConfig.supportsSeed ? "RANDOM" : "UNSUPPORTED"}
                   aria-label="Video seed"
                 />
               </div>
@@ -1230,8 +1384,20 @@ export default function VideoPage() {
                 className="video-prompt-text-field"
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                placeholder="What are we making today?"
+                placeholder="Describe the shot, camera movement, and action…"
+                aria-label="Video prompt"
               />
+              {prompt && (
+                <button
+                  className="video-prompt-clear"
+                  type="button"
+                  title="Clear prompt"
+                  aria-label="Clear video prompt"
+                  onClick={() => setPrompt("")}
+                >
+                  &times;
+                </button>
+              )}
               <button
                 className={`video-frame-btn ${activeGenerationCount > 0 ? "cafe-loading" : ""}`}
                 type="button"
@@ -1239,7 +1405,8 @@ export default function VideoPage() {
                 onClick={handleGenerate}
                 title={`${modelConfig.label} | ${videoSettings.ratio} | ${videoSettings.duration}s | ${videoSettings.resolution}`}
               >
-                VIDEO
+                <strong>{activeGenerationCount > 0 ? "WORKING" : "GENERATE"}</strong>
+                <small>{videoSettings.duration}S · {videoSettings.resolution}</small>
               </button>
             </div>
           </div>

@@ -13,6 +13,27 @@ Track component work, decisions, and session continuations here.
 ---
 
 ## Sessions
+### 2026-08-20 - Google AI Studio Video Migration
+
+**Status:** COMPLETED
+
+**What Was Done:**
+- Migrated video generation from Gemini Enterprise `-001` endpoints to the Google AI Studio / Gemini Developer API Veo 3.1 preview endpoints.
+- Restored synchronized audio generation for Standard, Fast, and Lite.
+- Added Gemini Omni Flash with 720p generation, up to six image references, synchronized audio, and capability-aware controls.
+- Preserved Veo first/last-frame interpolation while hiding unsupported end-frame and seed controls for Omni.
+- Added localhost Settings-key forwarding and retained server-secret-only authentication in production.
+- Made Omni the default for new video settings, following Google's current recommendation for coherent multimodal image-to-video generation.
+- Added an advanced director layer with motion energy, eight camera behaviors, continuity-aware prompt direction, and editable negative guidance.
+- Added 4K generation for Veo 3.1 and Fast with enforced 8-second duration and model-aware validation.
+- Kept stored prompts unchanged while applying directing instructions only to outgoing model requests.
+
+**Verification:**
+- Focused lint passes for the Video page, API client, server route, and shared Google client.
+- Production `next build` passes.
+- API validation rejects unsupported Omni end-frame requests before model invocation.
+- TypeScript and the production Next.js build pass with the advanced generation request fields and 4K resolution path.
+
 ### 2026-06-28 - Backend Hardening, Recovery, and Performance Polish
 
 **Status:** COMPLETED
