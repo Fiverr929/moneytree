@@ -27,6 +27,9 @@ Track component work, decisions, and session continuations here.
 - Added an advanced director layer with motion energy, eight camera behaviors, continuity-aware prompt direction, and editable negative guidance.
 - Added 4K generation for Veo 3.1 and Fast with enforced 8-second duration and model-aware validation.
 - Kept stored prompts unchanged while applying directing instructions only to outgoing model requests.
+- Rebalanced the mobile Video workspace so the preview expands into available phone height while the sequence and media rails remain directly below it.
+- Kept the advanced settings panel fully inside 320px-wide screens, with internal scrolling above the persistent mode bar.
+- Increased mobile playback, media, tab, and settings controls to touch-friendly sizes without changing the desktop layout.
 
 **Verification:**
 - Focused lint passes for the Video page, API client, server route, and shared Google client.
