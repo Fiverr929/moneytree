@@ -32,7 +32,7 @@ import type {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const DEFAULT_BRIEF_AGENT_MODEL = "gemini-3.6-flash";
+const DEFAULT_BRIEF_AGENT_MODEL = "gemini-3.7-flash";
 const MAX_MESSAGE_COUNT = 24;
 const MAX_MODEL_MESSAGE_COUNT = 10;
 const MAX_MESSAGE_CHARS = 2_000;
@@ -709,7 +709,6 @@ async function createModelDraft(input: BriefAgentRequest, baseline: BriefDraft, 
       parts: [{ text: buildModelInstruction(input, baseline) }],
     }],
     config: {
-      temperature: 0.25,
       responseMimeType: "application/json",
       responseJsonSchema: BRIEF_AGENT_RESPONSE_SCHEMA,
       maxOutputTokens: 6_144,

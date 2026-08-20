@@ -16,7 +16,7 @@ import type {
 export const runtime = "nodejs";
 export const maxDuration = 90;
 
-const DEFAULT_REFERENCE_READER_MODEL = "gemini-3.1-flash-lite";
+const DEFAULT_REFERENCE_READER_MODEL = "gemini-3.5-flash-lite";
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -216,7 +216,6 @@ async function readReferences(input: BriefReferenceReadRequest, model: string, l
     model,
     contents: [{ role: "user", parts }],
     config: {
-      temperature: 0.15,
       responseMimeType: "application/json",
     },
   });
