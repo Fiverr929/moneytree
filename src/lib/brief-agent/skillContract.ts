@@ -3,14 +3,14 @@ import type { BriefDraft, BriefSkillCheck, ReferenceObservation } from "./types"
 export const BRIEF_AGENT_SKILL_CONTRACT = {
   roles: {
     SUBJECT: {
-      owns: ["main subject identity/type", "shape", "wardrobe/materials", "distinctive details"],
+      owns: ["main subject identity/type", "visible gender presentation when clear", "shape", "wardrobe/materials", "distinctive details"],
       mayChange: ["pose", "expression", "action", "orientation"],
       mustNotProvide: ["environment", "background", "rendering style"],
     },
     SCENE: {
       owns: ["environment", "background", "camera", "layout", "perspective", "framing", "lighting direction"],
       mayChange: ["crop", "framing", "lens feel", "layout emphasis"],
-      mustNotProvide: ["main subject identity", "wardrobe", "rendering style"],
+      mustNotProvide: ["main subject identity", "main subject gender presentation", "wardrobe", "rendering style"],
     },
     STYLE: {
       owns: ["medium", "palette", "texture", "lighting mood", "finish"],
@@ -30,6 +30,7 @@ export const BRIEF_AGENT_SKILL_CONTRACT = {
     "Subject identity/type changes when only pose/action should change.",
     "Subject background becomes the scene.",
     "Scene reference imports or invents a main subject.",
+    "A person depicted in Scene or Style replaces the Subject's identity or gender presentation.",
     "Influence changes unrelated roles.",
   ],
 } as const;
@@ -40,6 +41,8 @@ function roleSet(observations: ReferenceObservation[]) {
 
 const UI_MECHANICS_PATTERN = /\b(influence|slider|strength|control axis|percentage|\d{1,3}\s*%)\b/i;
 const PROMPT_METADATA_PATTERN = /(?:^|\n)\s*(?:SUBJECT|SCENE|STYLE|UNASSIGNED|Reference Image\s*\d*)\s*:/i;
+const FEMALE_IDENTITY_TERMS = new Set(["female", "girl", "girls", "her", "hers", "lady", "she", "woman", "women"]);
+const MALE_IDENTITY_TERMS = new Set(["boy", "boys", "gentleman", "he", "him", "his", "man", "male", "men"]);
 const EVIDENCE_STOP_WORDS = new Set([
   "about", "after", "against", "along", "black", "close", "from", "into", "narrow",
   "photo", "photograph", "reference", "showing", "single", "soft", "their", "there", "these",
@@ -57,6 +60,32 @@ function evidenceTerms(observation: ReferenceObservation) {
 function carriesEvidence(prompt: string, observation: ReferenceObservation) {
   const lower = prompt.toLowerCase();
   return evidenceTerms(observation).some((term) => lower.includes(term));
+}
+
+type GenderCue = "female" | "male";
+
+function genderCues(text: string) {
+  const tokens = text.toLowerCase().match(/[a-z]+/g) || [];
+  const cues = new Set<GenderCue>();
+  if (tokens.some((token) => FEMALE_IDENTITY_TERMS.has(token))) cues.add("female");
+  if (tokens.some((token) => MALE_IDENTITY_TERMS.has(token))) cues.add("male");
+  return cues;
+}
+
+function unambiguousSubjectGender(observations: ReferenceObservation[]): GenderCue | null {
+  const cues = new Set<GenderCue>();
+  observations
+    .filter((observation) => observation.role === "SUBJECT")
+    .forEach((observation) => genderCues(observation.visualRead).forEach((cue) => cues.add(cue)));
+  return cues.size === 1 ? Array.from(cues)[0] : null;
+}
+
+function hasSubjectGenderConflict(prompt: string, observations: ReferenceObservation[]) {
+  const subjectGender = unambiguousSubjectGender(observations);
+  if (!subjectGender) return false;
+  const promptGenders = genderCues(prompt);
+  const oppositeGender: GenderCue = subjectGender === "female" ? "male" : "female";
+  return promptGenders.has(oppositeGender) && !promptGenders.has(subjectGender);
 }
 
 export function runSkillChecks(draft: BriefDraft): BriefSkillCheck[] {
@@ -102,6 +131,14 @@ export function runSkillChecks(draft: BriefDraft): BriefSkillCheck[] {
     });
   }
 
+  if (roles.has("SUBJECT")) {
+    checks.push({
+      id: "subject-identity-consistency",
+      status: hasSubjectGenderConflict(prompt, draft.observations) ? "warning" : "pass",
+      message: "The composed protagonist does not replace an unambiguous Subject gender cue with another role's person.",
+    });
+  }
+
   if (prompt.length > 2_800) {
     checks.push({
       id: "prompt-focus",
@@ -115,13 +152,31 @@ export function runSkillChecks(draft: BriefDraft): BriefSkillCheck[] {
 
 export function applySkillContract(draft: BriefDraft): BriefDraft {
   const skillChecks = runSkillChecks(draft);
+  const hasBlockingIdentityConflict = skillChecks.some(
+    (check) => check.id === "subject-identity-consistency" && check.status === "warning",
+  );
   const repairWarnings = skillChecks
     .filter((check) => check.status === "warning")
     .map((check) => `Skill check warning: ${check.message}`);
 
-  return {
+  const checkedDraft = {
     ...draft,
     warnings: Array.from(new Set([...draft.warnings, ...repairWarnings])),
     skillChecks,
+  };
+
+  if (!hasBlockingIdentityConflict) return checkedDraft;
+
+  return {
+    ...checkedDraft,
+    status: "empty",
+    action: "inspect",
+    reply: "I stopped this draft because its main subject conflicts with the active SUBJECT reference. Retry so I can rebuild it from the current reference scan.",
+    finalPrompt: "",
+    readyToExecute: false,
+    session: {
+      ...checkedDraft.session,
+      lastDraftPrompt: "",
+    },
   };
 }

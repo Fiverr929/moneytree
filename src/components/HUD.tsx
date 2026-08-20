@@ -488,7 +488,7 @@ export default function HUD() {
         </button>
         <button className={`hud-icon-btn ${infoPanelOpen ? "active" : ""}`} id="hud-info" title="Image Info" onClick={() => setInfoPanelOpen(!infoPanelOpen)}>i</button>
 
-        <div id="hud-threedot-wrap" style={{position:'relative'}} ref={threeDotRef}>
+        <div id="hud-threedot-wrap" ref={threeDotRef}>
           <button className={`hud-icon-btn ${threeDotOpen ? "active open" : ""}`} id="hud-threedot" title="More" onClick={() => setThreeDotOpen(!threeDotOpen)}>&#8943;</button>
           <div className="cmp-menu hud-image-menu" id="hud-threedot-dropdown" hidden={!threeDotOpen}>
             <div className="cmp-menu-title">IMAGE</div>
@@ -507,7 +507,7 @@ export default function HUD() {
         onPointerUp={(event) => finishDrag(event)}
         onPointerCancel={(event) => finishDrag(event, true)}
       >
-        <div id="hud-slide-track" style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+        <div id="hud-slide-track">
           {renderedSlides.map(({ cell, i }) => (
             <div 
               key={cell.id} 

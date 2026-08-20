@@ -35,7 +35,7 @@ type VideoMedia = {
   source: "gallery" | "upload";
 };
 
-type MediaFolder = "root" | "image" | "video" | "uploads";
+type MediaFolder = "image" | "video" | "uploads";
 
 type GeneratedVideoClip = {
   id: string;
@@ -170,7 +170,7 @@ export default function VideoPage() {
   const [videoSettings, setVideoSettings] = useState<VideoSettings>(DEFAULT_VIDEO_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [media, setMedia] = useState<VideoMedia[]>([]);
-  const [mediaFolder, setMediaFolder] = useState<MediaFolder>("root");
+  const [mediaFolder, setMediaFolder] = useState<MediaFolder>("image");
   const [startFrameId, setStartFrameId] = useState<string | null>(null);
   const [endFrameId, setEndFrameId] = useState<string | null>(null);
   const [referenceIds, setReferenceIds] = useState<string[]>([]);
@@ -306,7 +306,7 @@ export default function VideoPage() {
     let cancelled = false;
 
     setMedia([]);
-    setMediaFolder("root");
+    setMediaFolder("image");
     setStartFrameId(null);
     setEndFrameId(null);
     setReferenceIds([]);
@@ -740,50 +740,38 @@ export default function VideoPage() {
           <div className="video-workspace">
             <aside className="video-media-panel">
               <div className="video-media-header">
-                {mediaFolder === "root" ? (
-                  <span className="video-media-root-title">MEDIA</span>
-                ) : (
-                  <>
-                    <button
-                      className="video-media-back"
-                      type="button"
-                      title="Back to media folders"
-                      aria-label="Back to media folders"
-                      onClick={() => setMediaFolder("root")}
-                    >
-                      &lsaquo;
-                    </button>
-                    <span className="video-media-breadcrumb">
-                      <span>ROOT</span>
-                      <span aria-hidden="true">&rsaquo;</span>
-                      <b>{mediaFolder === "image" ? "IMAGE" : mediaFolder === "video" ? "VIDEO" : "UPLOADS"}</b>
-                    </span>
-                  </>
-                )}
-                {mediaFolder !== "video" && (
-                  <button className="video-media-add" type="button" title="Add images" onClick={() => mediaInputRef.current?.click()}>+</button>
-                )}
+                <span className="video-media-title">MEDIA</span>
+                <button
+                  className="video-media-add"
+                  type="button"
+                  title="Upload images"
+                  aria-label="Upload images"
+                  onClick={() => mediaInputRef.current?.click()}
+                >
+                  +
+                </button>
               </div>
-              <div className={`video-media-grid ${mediaFolder === "root" ? "folders" : "thumbnails"}`}>
-                {mediaFolder === "root" ? (
-                  <>
-                    <button className="video-media-folder" type="button" onClick={() => setMediaFolder("image")}>
-                      <span className="video-media-folder-icon"></span>
-                      <span className="video-media-folder-name">IMAGE</span>
-                      <span className="video-media-folder-count">{galleryMedia.length}</span>
-                    </button>
-                    <button className="video-media-folder" type="button" onClick={() => setMediaFolder("video")}>
-                      <span className="video-media-folder-icon"></span>
-                      <span className="video-media-folder-name">VIDEO</span>
-                      <span className="video-media-folder-count">{generatedClips.filter((clip) => clip.status === "ready").length}</span>
-                    </button>
-                    <button className="video-media-folder" type="button" onClick={() => setMediaFolder("uploads")}>
-                      <span className="video-media-folder-icon"></span>
-                      <span className="video-media-folder-name">UPLOADS</span>
-                      <span className="video-media-folder-count">{media.length}</span>
-                    </button>
-                  </>
-                ) : mediaFolder === "video" ? (
+              <div className="video-media-tabs" role="tablist" aria-label="Media sources">
+                {([
+                  { key: "image", label: "IMAGE", count: galleryMedia.length },
+                  { key: "video", label: "VIDEO", count: generatedClips.filter((clip) => clip.status === "ready").length },
+                  { key: "uploads", label: "UPLOADS", count: media.length },
+                ] as const).map((tab) => (
+                  <button
+                    key={tab.key}
+                    className={mediaFolder === tab.key ? "active" : ""}
+                    type="button"
+                    role="tab"
+                    aria-selected={mediaFolder === tab.key}
+                    onClick={() => setMediaFolder(tab.key)}
+                  >
+                    <span>{tab.label}</span>
+                    <b>{tab.count}</b>
+                  </button>
+                ))}
+              </div>
+              <div className="video-media-grid thumbnails">
+                {mediaFolder === "video" ? (
                   generatedClips
                     .filter((clip) => clip.status === "ready" && !!clip.url)
                     .map((clip) => (
@@ -835,6 +823,22 @@ export default function VideoPage() {
                     </div>
                   ))
                 )}
+                {mediaFolder === "video" && !generatedClips.some((clip) => clip.status === "ready" && !!clip.url) && (
+                  <div className="video-media-empty">
+                    <span>NO VIDEOS YET</span>
+                    <small>GENERATED CLIPS WILL APPEAR HERE</small>
+                  </div>
+                )}
+                {mediaFolder !== "video" && visibleMedia.length === 0 && (
+                  <button
+                    className="video-media-empty"
+                    type="button"
+                    onClick={() => mediaInputRef.current?.click()}
+                  >
+                    <span>{mediaFolder === "image" ? "NO GALLERY IMAGES" : "NO UPLOADS YET"}</span>
+                    <small>+ ADD AN IMAGE</small>
+                  </button>
+                )}
               </div>
               <input
                 ref={mediaInputRef}
@@ -882,15 +886,11 @@ export default function VideoPage() {
                         onEnded={() => setIsPlaying(false)}
                       />
                   ) : (
-                    <>
-                    <div className="video-frame-grid">
-                      <div className="video-frame-line vertical"></div>
-                      <div className="video-frame-line horizontal"></div>
+                    <div className="video-empty-preview">
+                      <span className="video-playhead" aria-hidden="true"><i></i></span>
+                      <b>READY FOR A NEW SHOT</b>
+                      <small>GENERATE A CLIP TO PREVIEW IT HERE</small>
                     </div>
-                    <div className="video-playhead">
-                      <span></span>
-                    </div>
-                    </>
                   )}
                 </div>
               </div>
@@ -998,6 +998,9 @@ export default function VideoPage() {
                   </button>
                 </div>
               ))}
+              {sequenceClips.length === 0 && (
+                <div className="video-sequence-empty">GENERATED CLIPS APPEAR HERE</div>
+              )}
             </div>
           </section>
 
@@ -1024,6 +1027,7 @@ export default function VideoPage() {
                         }}
                       >
                         {item ? <img src={item.url} alt={slot.label} /> : <span className="video-prompt-slot-plus"></span>}
+                        <span className="video-prompt-slot-label">{slot.label}</span>
                       </button>
                       {item && (
                         <button
@@ -1060,6 +1064,7 @@ export default function VideoPage() {
                         }}
                       >
                         {item ? <img src={item.url} alt={`Reference ${index + 1}`} /> : <span className="video-prompt-slot-plus"></span>}
+                        <span className="video-prompt-slot-label">REF {index + 1}</span>
                       </button>
                       {item && (
                         <button
