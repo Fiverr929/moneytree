@@ -6,7 +6,7 @@ import { logModelUsage } from "@/lib/server/modelUsage";
 export const runtime = "nodejs";
 export const maxDuration = 90;
 
-const DEFAULT_MODEL = "gemini-3.1-flash-lite";
+const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 const MAX_IMAGES = 2;
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -113,7 +113,7 @@ export async function POST(request: Request) {
     const result = await ai.models.generateContent({
       model,
       contents: [{ role: "user", parts }],
-      config: { temperature: 0.1, responseMimeType: "application/json" },
+      config: { responseMimeType: "application/json" },
     });
     logModelUsage("brief-agent.inspect-generations", model, result, {
       requestId,
