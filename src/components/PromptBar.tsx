@@ -622,7 +622,10 @@ export default function PromptBar() {
       return;
     }
     const executionPrompt = commandPrompt;
-    const stagedPromptArtifact = approvedArtifact || findPromptArtifactByPrompt(executionPrompt);
+    // Only a direct agent approval should enter the run-approval lifecycle.
+    // Text staged through EDIT belongs to the prompt bar and must remain a
+    // normal manual generation, even when it still matches an old artifact.
+    const stagedPromptArtifact = approvedArtifact || null;
     if (
       stagedPromptArtifact?.sourceFingerprint
       && stagedPromptArtifact.sourceFingerprint !== referenceFingerprintRef.current
@@ -1080,14 +1083,6 @@ export default function PromptBar() {
       } : item;
     });
   };
-
-  function findPromptArtifactByPrompt(prompt: string) {
-    const normalized = flattenPromptArtifact(prompt);
-    return [...agentMessages].reverse().find((message) => (
-      message.promptArtifact
-      && flattenPromptArtifact(message.promptArtifact.prompt) === normalized
-    ))?.promptArtifact || null;
-  }
 
   function canApprovePromptArtifact(artifact: NonNullable<AgentMessage["promptArtifact"]>) {
     if (!agentRun || agentRun.status !== "awaiting_approval") return false;
