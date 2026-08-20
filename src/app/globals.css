@@ -477,6 +477,53 @@
       cursor: pointer;
     }
 
+    .agent-console-header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 2;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 50px 0 18px;
+      border-bottom: 1px solid rgba(242, 242, 237, 0.16);
+      background: rgba(143, 143, 139, 0.96);
+      font-family: "Courier New", monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      color: #f2f2ed;
+    }
+
+    .agent-console-header span:last-child {
+      position: relative;
+      padding-left: 11px;
+      color: rgba(242, 242, 237, 0.7);
+    }
+
+    .agent-console-header span:last-child::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #b8b8b2;
+      transform: translateY(-50%);
+    }
+
+    .agent-console-header span.busy::before {
+      background: #ea5823;
+      animation: agent-status-pulse 1.35s ease-in-out infinite;
+    }
+
+    .agent-console-header span.ready::before {
+      background: #5271ff;
+    }
+
     .agent-console-collapse::before {
       content: '';
       width: 0;
@@ -488,7 +535,7 @@
 
     .agent-console-scroll {
       height: 100%;
-      padding: 36px 18px 13px;
+      padding: 48px 18px 16px;
       overflow-y: auto;
       scrollbar-width: thin;
       scrollbar-color: #5271ff rgba(199, 199, 199, 0.18);
@@ -518,7 +565,7 @@
       display: flex;
       flex-direction: column;
       justify-content: flex-start;
-      padding-top: 4px;
+      padding-top: 16px;
       color: #c7c7c7;
       font-family: "Times New Roman", serif;
     }
@@ -535,29 +582,152 @@
       color: #f2f2ed;
     }
 
-    .agent-brand-lockup {
-      margin-top: 18px;
+    .agent-empty-copy {
+      width: min(520px, 100%);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-family: "Courier New", monospace;
+      color: #f2f2ed;
+    }
+
+    .agent-empty-copy strong {
       font-family: "Times New Roman", serif;
-      color: #c7c7c7;
+      font-size: clamp(22px, 2.3vw, 32px);
+      font-weight: 400;
+      letter-spacing: -0.02em;
     }
 
-    .agent-brand-model {
-      font-family: "Courier New", monospace;
-      font-size: 12px;
-      line-height: 1;
-      letter-spacing: 0.12em;
+    .agent-empty-copy span {
+      max-width: 460px;
+      color: rgba(242, 242, 237, 0.8);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .agent-empty-copy small {
+      margin-top: 4px;
+      color: rgba(242, 242, 237, 0.52);
+      font-size: 10px;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: rgba(199, 199, 199, 0.72);
     }
 
-    .agent-brand-name {
-      margin-top: 10px;
-      font-family: "Courier New", monospace;
-      font-size: 24px;
-      line-height: 1;
-      letter-spacing: 0;
+    .agent-activity-list {
+      display: grid;
+      gap: 6px;
+      margin: 0 0 12px;
+    }
+
+    .agent-activity {
+      min-height: 54px;
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 1px solid rgba(82, 113, 255, 0.72);
+      background: rgba(82, 113, 255, 0.1);
+      color: #f2f2ed;
+    }
+
+    .agent-activity.generating {
+      border-color: rgba(234, 88, 35, 0.9);
+      background: rgba(234, 88, 35, 0.09);
+    }
+
+    .agent-activity-indicator {
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      background: #5271ff;
+    }
+
+    .agent-activity.generating .agent-activity-indicator {
+      background: #ea5823;
+    }
+
+    .agent-activity-indicator i {
+      width: 3px;
+      height: 3px;
+      display: block;
+      border-radius: 50%;
+      background: #f2f2ed;
+      animation: agent-dot-wave 1.05s ease-in-out infinite;
+    }
+
+    .agent-activity-indicator i:nth-child(2) { animation-delay: 0.14s; }
+    .agent-activity-indicator i:nth-child(3) { animation-delay: 0.28s; }
+
+    .agent-activity-copy {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .agent-activity-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .agent-activity-copy strong {
+      overflow: hidden;
+      font-size: 12px;
+      letter-spacing: 0.03em;
+      text-overflow: ellipsis;
       white-space: nowrap;
-      color: #c7c7c7;
+    }
+
+    .agent-activity-copy small {
+      overflow: hidden;
+      color: rgba(242, 242, 237, 0.65);
+      font-size: 10px;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .agent-activity-copy time {
+      flex-shrink: 0;
+      color: rgba(242, 242, 237, 0.5);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .agent-activity-stop {
+      min-width: 48px;
+      height: 24px;
+      border: 1px solid rgba(242, 242, 237, 0.45);
+      background: transparent;
+      color: #f2f2ed;
+      font-family: "Courier New", monospace;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      cursor: pointer;
+    }
+
+    .agent-activity-stop:hover,
+    .agent-activity-stop:focus-visible {
+      border-color: #f2f2ed;
+      background: rgba(242, 242, 237, 0.1);
+      outline: none;
+    }
+
+    @keyframes agent-dot-wave {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+      30% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    @keyframes agent-status-pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
     }
 
     .agent-line {

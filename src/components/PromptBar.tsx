@@ -53,19 +53,12 @@ const GENERATION_VISION_CACHE_LIMIT = 30;
 const GENERATE_COMMAND = "/Generate";
 const CANVAS_COMMANDS = [
   { value: GENERATE_COMMAND, label: "/generate", description: "Generate a frame" },
-  { value: "/help", label: "/help", description: "Show canvas commands" },
-  { value: "/clear", label: "/clear", description: "Clear agent console" },
-  { value: "/undo", label: "/undo", description: "Undo the last agent app action" },
-  { value: "/actions", label: "/actions", description: "Show recent agent app actions" },
-  { value: "/approve", label: "/approve", description: "Approve the latest proposed app actions" },
-  { value: "/reject", label: "/reject", description: "Reject the latest proposed app actions" },
-  { value: "/pending", label: "/pending", description: "Show actions waiting for approval" },
-  { value: "/status", label: "/status", description: "Show agent and generation state" },
-  { value: "/memory", label: "/memory", description: "Show relevant saved memory" },
-  { value: "/remember", label: "/remember", description: "Save a user, project, or session fact" },
-  { value: "/forget", label: "/forget", description: "Clear a selected memory scope" },
-  { value: "/retry", label: "/retry", description: "Retry the last failed turn" },
-  { value: "/stop", label: "/stop", description: "Stop agent thinking and clear its queue" },
+  { value: "/undo", label: "/undo", description: "Undo the last change" },
+  { value: "/status", label: "/status", description: "Show what is running" },
+  { value: "/retry", label: "/retry", description: "Retry the failed message" },
+  { value: "/stop", label: "/stop", description: "Stop the current task" },
+  { value: "/clear", label: "/clear", description: "Start a fresh chat" },
+  { value: "/help", label: "/help", description: "Show available commands" },
 ];
 const DEFAULT_FRAME_RATIO = "1:1";
 const DEFAULT_FRAME_VARIATIONS = 1;
@@ -102,6 +95,19 @@ type PersistedAgentWorkspace = {
 };
 
 type CanvasLocalCommand = "/help" | "/clear" | "/undo" | "/actions" | "/approve" | "/reject" | "/pending" | "/status" | "/memory" | "/remember" | "/forget" | "/retry" | "/stop";
+
+type AgentActivity = {
+  kind: "thinking" | "reading" | "working" | "reviewing";
+  label: string;
+  detail: string;
+  startedAt: number;
+};
+
+type GenerationActivity = {
+  completed: number;
+  total: number;
+  stage: string;
+};
 
 type PersistedAgentRunRecord = {
   id: string;
@@ -272,6 +278,8 @@ export default function PromptBar() {
   const [agentWorkspaceHydrating, setAgentWorkspaceHydrating] = useState(true);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [agentPending, setAgentPending] = useState(false);
+  const [agentActivity, setAgentActivity] = useState<AgentActivity | null>(null);
+  const [activityElapsedSeconds, setActivityElapsedSeconds] = useState(0);
   const [queuedAgentInputs, setQueuedAgentInputs] = useState<string[]>([]);
   const [lastFailedAgentInput, setLastFailedAgentInput] = useState("");
   const [agentToolPending, setAgentToolPending] = useState(false);
@@ -290,6 +298,8 @@ export default function PromptBar() {
   const [referenceReadError, setReferenceReadError] = useState("");
   const [referenceReadRetryTick, setReferenceReadRetryTick] = useState(0);
   const [referenceReadModel, setReferenceReadModel] = useState<string | null>(null);
+  const [referenceReadPending, setReferenceReadPending] = useState(false);
+  const [generationActivity, setGenerationActivity] = useState<GenerationActivity | null>(null);
   const [referenceSnapshot, setReferenceSnapshot] = useState(() => createReferenceSnapshot([]));
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
@@ -333,6 +343,40 @@ export default function PromptBar() {
     queuedAgentInputsRef.current = queuedAgentInputs;
   }, [queuedAgentInputs]);
 
+  useEffect(() => {
+    if (!agentActivity) {
+      setActivityElapsedSeconds(0);
+      return;
+    }
+    const updateElapsed = () => {
+      setActivityElapsedSeconds(Math.max(0, Math.floor((Date.now() - agentActivity.startedAt) / 1000)));
+    };
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [agentActivity]);
+
+  const beginAgentActivity = useCallback((
+    kind: AgentActivity["kind"],
+    label: string,
+    detail: string,
+  ) => {
+    setAgentActivity({ kind, label, detail, startedAt: Date.now() });
+  }, []);
+
+  const updateAgentActivity = useCallback((
+    kind: AgentActivity["kind"],
+    label: string,
+    detail: string,
+  ) => {
+    setAgentActivity((current) => ({
+      kind,
+      label,
+      detail,
+      startedAt: current?.startedAt || Date.now(),
+    }));
+  }, []);
+
   // Close dropdown on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -357,7 +401,7 @@ export default function PromptBar() {
     requestAnimationFrame(() => {
       agentConsoleScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     });
-  }, [agentConsoleOpen, agentMessages, agentPending]);
+  }, [agentActivity, agentConsoleOpen, agentMessages, agentPending, generationActivity]);
 
   useEffect(() => {
     try {
@@ -458,6 +502,7 @@ export default function PromptBar() {
     agentMessagesRef.current = [];
     setAgentPending(false);
     agentPendingRef.current = false;
+    setAgentActivity(null);
     setQueuedAgentInputs([]);
     queuedAgentInputsRef.current = [];
     setLastFailedAgentInput("");
@@ -481,6 +526,8 @@ export default function PromptBar() {
     setAgentRevisionRequested(false);
     setReferenceReadError("");
     setReferenceReadModel(null);
+    setReferenceReadPending(false);
+    setGenerationActivity(null);
     try {
       const savedDraft = window.localStorage.getItem(`${PROMPT_DRAFT_STORAGE_KEY}:${activeProjectId || "none"}`);
       setPromptText(savedDraft || "");
@@ -719,7 +766,9 @@ export default function PromptBar() {
     const readyCells = new Map<string, GalleryCell>();
     const blockedIds = new Set<string>();
     const failedIds = new Set<string>();
+    const requestedVariationCount = Math.max(1, Number(fullSettings.variation) || 1);
     setActiveGenerationCount((count) => count + 1);
+    setGenerationActivity({ completed: 0, total: requestedVariationCount, stage: "Preparing prompt" });
     if (stagedPromptArtifact) {
       setAgentReviewTargets([]);
       setAgentReviewComplete(false);
@@ -729,8 +778,11 @@ export default function PromptBar() {
     }
     try {
       await generate(payload, fullSettings, {
-        onStart: () => {},
+        onStart: () => {
+          setGenerationActivity((current) => current ? { ...current, stage: "Sending to image model" } : current);
+        },
         onLoadingIds: (ids) => {
+          setGenerationActivity({ completed: 0, total: Math.max(ids.length, requestedVariationCount), stage: "Generating images" });
           ids.forEach(id => {
             loadingIds.add(id);
             gallery.addLoading(
@@ -743,16 +795,31 @@ export default function PromptBar() {
         },
         onVariationReady: (dataUrl, lid, cellData) => {
           readyIds.add(lid);
+          setGenerationActivity((current) => current ? {
+            ...current,
+            completed: Math.min(current.total, readyIds.size + blockedIds.size + failedIds.size),
+            stage: "Rendering results",
+          } : current);
           const resolvedCell = { ...cellData, project_id: activeProjectId || undefined } as GalleryCell;
           readyCells.set(lid, resolvedCell);
           gallery.resolveLoading(lid, resolvedCell);
         },
         onVariationBlocked: (lid, statusLabel) => {
           blockedIds.add(lid);
+          setGenerationActivity((current) => current ? {
+            ...current,
+            completed: Math.min(current.total, readyIds.size + blockedIds.size + failedIds.size),
+            stage: "Finishing results",
+          } : current);
           gallery.blockLoading(lid, statusLabel);
         },
         onVariationFailed: (lid, retryFn, statusLabel) => {
           failedIds.add(lid);
+          setGenerationActivity((current) => current ? {
+            ...current,
+            completed: Math.min(current.total, readyIds.size + blockedIds.size + failedIds.size),
+            stage: "Finishing results",
+          } : current);
           gallery.failLoading(lid, retryFn, statusLabel);
         },
         onGenerationError: (ids, statusLabel) => {
@@ -818,6 +885,7 @@ export default function PromptBar() {
       console.error("Generation Error:", error);
     } finally {
       setActiveGenerationCount((count) => Math.max(0, count - 1));
+      setGenerationActivity(null);
     }
   };
 
@@ -923,6 +991,7 @@ export default function PromptBar() {
     const debounceTimer = setTimeout(() => {
       if (cancelled || referenceReadInFlightRef.current.has(referenceFingerprint)) return;
       referenceReadInFlightRef.current.add(referenceFingerprint);
+      setReferenceReadPending(true);
       const attempt = (referenceReadAttemptsRef.current.get(referenceFingerprint) || 0) + 1;
 
       requestReferenceRead({
@@ -969,6 +1038,7 @@ export default function PromptBar() {
         setReferenceReadError(message);
       }).finally(() => {
         referenceReadInFlightRef.current.delete(referenceFingerprint);
+        if (referenceFingerprintRef.current === referenceFingerprint) setReferenceReadPending(false);
         if (cancelled && referenceFingerprintRef.current === referenceFingerprint) {
           setReferenceReadRetryTick((tick) => tick + 1);
         }
@@ -1109,6 +1179,7 @@ export default function PromptBar() {
     const reviewProjectId = activeProjectId;
     const reviewRequestId = ++agentReviewRequestIdRef.current;
     setAgentReviewPending(true);
+    beginAgentActivity("reviewing", "Reviewing generated image", "Checking prompt match, composition, and visual quality");
     setAgentError("");
     try {
       const evaluation = await requestGenerationEvaluation({
@@ -1161,7 +1232,10 @@ export default function PromptBar() {
       const message = error instanceof Error ? error.message : "Generation review failed.";
       setAgentError(message);
     } finally {
-      if (reviewRequestId === agentReviewRequestIdRef.current) setAgentReviewPending(false);
+      if (reviewRequestId === agentReviewRequestIdRef.current) {
+        setAgentReviewPending(false);
+        setAgentActivity(null);
+      }
     }
   };
 
@@ -1193,6 +1267,7 @@ export default function PromptBar() {
     setAgentRevisionPending(true);
     agentPendingRef.current = true;
     setAgentPending(true);
+    beginAgentActivity("thinking", "Improving the prompt", "Turning review findings into a stronger direction");
     setAgentError("");
     try {
       const memories = revisionProjectId
@@ -1256,6 +1331,7 @@ export default function PromptBar() {
         setAgentRevisionPending(false);
         agentPendingRef.current = false;
         setAgentPending(false);
+        setAgentActivity(null);
       }
     }
   };
@@ -1429,6 +1505,7 @@ export default function PromptBar() {
 
     agentToolPendingRef.current = true;
     setAgentToolPending(true);
+    beginAgentActivity("working", "Applying approved changes", `Updating ${proposal.actions.length} workspace item${proposal.actions.length === 1 ? "" : "s"}`);
     setActionProposalStatus(proposalMessage.id, "executing");
     try {
       const events = await executeAppActions(proposal.actions, proposal.runId);
@@ -1458,6 +1535,7 @@ export default function PromptBar() {
     } finally {
       agentToolPendingRef.current = false;
       setAgentToolPending(false);
+      setAgentActivity(null);
     }
   };
 
@@ -1668,6 +1746,7 @@ export default function PromptBar() {
       agentMessagesRef.current = [];
       setAgentPending(false);
       agentPendingRef.current = false;
+      setAgentActivity(null);
       setQueuedAgentInputs([]);
       queuedAgentInputsRef.current = [];
       setLastFailedAgentInput("");
@@ -1693,20 +1772,12 @@ export default function PromptBar() {
       return;
     }
     addLocalAgentMessage([
-      "/generate <prompt> starts a frame.",
-      "/clear resets this console.",
-      "/undo reverses the latest completed agent app action.",
-      "/actions shows the recent app action log.",
-      "/approve executes the latest proposed app actions.",
-      "/reject rejects the latest proposed app actions.",
-      "/pending shows actions waiting for approval.",
-      "/status shows the live agent, generation, queue, reference, and approval state.",
-      "/memory shows user, project, and current-session memory.",
-      "/remember [scope] <fact> saves an explicit memory; scope defaults to project.",
-      "/forget <scope> clears user, project, session, or all visible memory.",
-      "/retry retries the latest failed agent turn.",
-      "/stop cancels agent thinking and clears queued turns; active image generation continues.",
-      "/help shows commands.",
+      "/generate <prompt> creates an image.",
+      "/undo reverses the last workspace change.",
+      "/status shows what is currently running.",
+      "/retry repeats the latest failed message.",
+      "/stop cancels the current agent task.",
+      "/clear starts a fresh chat.",
     ].join("\n"), "inspect");
     setPromptText("");
   };
@@ -1773,6 +1844,7 @@ export default function PromptBar() {
     agentMessagesRef.current = nextUserMessages;
     agentPendingRef.current = true;
     setAgentPending(true);
+    beginAgentActivity("thinking", "Understanding your request", "Reviewing the conversation and deciding what to do next");
     setAgentError("");
     if (trimmed && promptHistory[0] !== trimmed) {
       setPromptHistory([trimmed, ...promptHistory]);
@@ -1784,9 +1856,12 @@ export default function PromptBar() {
     agentAbortRef.current?.abort();
     agentAbortRef.current = controller;
     try {
+      updateAgentActivity("reading", "Checking recent images", "Looking for visual context that can improve the response");
       const generations = await inspectGenerationsForMessage(trimmed, currentGenerationEvidence(), controller.signal);
       if (controller.signal.aborted || requestId !== agentRequestIdRef.current) return;
+      updateAgentActivity("reading", "Reading the workspace", "Gathering the current project setup and active references");
       const workspace = await currentWorkspace();
+      updateAgentActivity("thinking", "Recalling project context", "Loading relevant preferences and earlier decisions");
       const memories = requestProjectId
         ? await recallAgentMemories({
           projectId: requestProjectId,
@@ -1794,6 +1869,7 @@ export default function PromptBar() {
           query: trimmed,
         })
         : [];
+      updateAgentActivity("thinking", "Planning the response", "Choosing the clearest next step for your request");
       const response = await requestBriefAgent({
         referenceSnapshot,
         messages: nextUserMessages,
@@ -1869,6 +1945,7 @@ export default function PromptBar() {
         agentAbortRef.current = null;
         agentPendingRef.current = false;
         setAgentPending(false);
+        setAgentActivity(null);
       }
     }
   };
@@ -1953,12 +2030,11 @@ export default function PromptBar() {
   const pinnedPrompt = agentRun?.currentPrompt && agentRun.currentPrompt !== newestPrompt
     ? agentRun.currentPrompt
     : "";
-  const footerModelSummary = agentModel && referenceReadModel && agentModel !== referenceReadModel
-    ? `PLANNER ${agentModel} / READER ${referenceReadModel}`
-    : `MODEL ${agentModel || referenceReadModel || "NO MODEL"}`;
   const agentIdle = !newestMessages.length
     && !agentPending
     && !agentWorkspaceHydrating
+    && !referenceReadPending
+    && activeGenerationCount === 0
     && queuedAgentInputs.length === 0
     && !agentError
     && !referenceReadError;
@@ -1969,6 +2045,13 @@ export default function PromptBar() {
   const submitButtonLabel = hasGenerateCommand
     ? activeGenerationCount > 0 ? "Image generation running" : "Generate image"
     : agentPending ? "Queue message" : "Send to agent";
+  const consoleStatusLabel = agentWorkspaceHydrating
+    ? "RESTORING"
+    : agentActivity || activeGenerationCount > 0 || referenceReadPending
+      ? "WORKING"
+      : queuedAgentInputs.length > 0
+        ? `${queuedAgentInputs.length} QUEUED`
+        : "READY";
 
   return (
     <div className="prompt-bar" id="promptBar" data-state="FRAME" ref={promptBarRef}>
@@ -2183,6 +2266,10 @@ export default function PromptBar() {
         )}
       </div>
       <div id="agentConsole" className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
+        <div className="agent-console-header" aria-hidden="true">
+          <span>CAFEHTML AGENT</span>
+          <span className={consoleStatusLabel === "READY" ? "ready" : "busy"}>{consoleStatusLabel}</span>
+        </div>
         <button
           className="agent-console-collapse"
           type="button"
@@ -2194,14 +2281,70 @@ export default function PromptBar() {
           }}
         ></button>
         <div className="agent-console-scroll" ref={agentConsoleScrollRef}>
+          {(agentWorkspaceHydrating || agentActivity || referenceReadPending || activeGenerationCount > 0) && (
+            <div className="agent-activity-list" role="status" aria-live="polite">
+              {agentWorkspaceHydrating && (
+                <div className="agent-activity restoring">
+                  <span className="agent-activity-indicator" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span className="agent-activity-copy">
+                    <strong>Restoring conversation</strong>
+                    <small>Loading the latest project chat</small>
+                  </span>
+                </div>
+              )}
+              {agentActivity && (
+                <div className={`agent-activity ${agentActivity.kind}`}>
+                  <span className="agent-activity-indicator" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span className="agent-activity-copy">
+                    <span className="agent-activity-title">
+                      <strong>{agentActivity.label}</strong>
+                      <time>{activityElapsedSeconds}s</time>
+                    </span>
+                    <small>{agentActivity.detail}</small>
+                  </span>
+                  {agentPending && (
+                    <button
+                      type="button"
+                      className="agent-activity-stop"
+                      onClick={() => agentAbortRef.current?.abort()}
+                    >
+                      STOP
+                    </button>
+                  )}
+                </div>
+              )}
+              {referenceReadPending && (
+                <div className="agent-activity reading">
+                  <span className="agent-activity-indicator" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span className="agent-activity-copy">
+                    <strong>Reading references</strong>
+                    <small>Inspecting the active images for useful visual details</small>
+                  </span>
+                </div>
+              )}
+              {activeGenerationCount > 0 && (
+                <div className="agent-activity generating">
+                  <span className="agent-activity-indicator" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span className="agent-activity-copy">
+                    <span className="agent-activity-title">
+                      <strong>{generationActivity?.stage || "Generating images"}</strong>
+                      {generationActivity && <time>{generationActivity.completed}/{generationActivity.total}</time>}
+                    </span>
+                    <small>{activeGenerationCount === 1 ? "Creating your image" : `${activeGenerationCount} image tasks are running`}</small>
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           {agentIdle ? (
             <div className="agent-idle">
               {promptText.trim() && (
                 <div className="agent-current-draft">&gt; {promptText}</div>
               )}
-              <div className="agent-brand-lockup">
-                <div className="agent-brand-model">{footerModelSummary}</div>
-                <div className="agent-brand-name">&copy; CAFEHTML</div>
+              <div className="agent-empty-copy">
+                <strong>What should we make?</strong>
+                <span>Describe an image or ask the agent to shape the idea with you.</span>
+                <small>Press Enter to chat · use /generate to create immediately</small>
               </div>
             </div>
           ) : (
@@ -2323,24 +2466,10 @@ export default function PromptBar() {
                     )}
                   </div>
                 ))}
-                {agentPending && (
-                  <div className="agent-turn agent">
-                    <div className="agent-speaker">CAFEHTML</div>
-                    <div className="agent-line">Thinking...</div>
-                  </div>
-                )}
-                {agentWorkspaceHydrating && (
-                  <div className="agent-turn system" aria-live="polite">
-                    <div className="agent-speaker">CAFEHTML</div>
-                    <div className="agent-line">Restoring conversation...</div>
-                  </div>
-                )}
                 {queuedAgentInputs.length > 0 && (
                   <div className="agent-turn system agent-queue" aria-live="polite">
-                    <div className="agent-speaker">QUEUE · {queuedAgentInputs.length}</div>
-                    {queuedAgentInputs.map((queuedInput, index) => (
-                      <div className="agent-line" key={`${queuedInput}-${index}`}>&gt; {queuedInput}</div>
-                    ))}
+                    <div className="agent-speaker">UP NEXT</div>
+                    <div className="agent-line agent-muted">{queuedAgentInputs.length} message{queuedAgentInputs.length === 1 ? "" : "s"} waiting</div>
                   </div>
                 )}
                 {agentError && !agentErrorInTranscript && (
@@ -2394,10 +2523,6 @@ export default function PromptBar() {
               {promptText.trim() && (
                 <div className="agent-current-draft">&gt; {promptText}</div>
               )}
-              <div className="agent-brand-lockup">
-                <div className="agent-brand-model">{footerModelSummary}</div>
-                <div className="agent-brand-name">&copy; CAFEHTML</div>
-              </div>
             </>
           )}
         </div>
