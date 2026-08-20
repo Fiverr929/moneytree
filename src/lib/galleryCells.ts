@@ -9,5 +9,15 @@ export function galleryCellForStorage(cell: GalleryCell): GalleryCell {
   delete stored.imgUrl;
   delete stored.loadingId;
   delete stored.retryFn;
+  if (stored.moduleSnapshot?.files) {
+    stored.moduleSnapshot = {
+      files: stored.moduleSnapshot.files.map((file) => ({ ...file, url: "" })),
+    };
+  }
+  if (stored.usedImages) {
+    stored.usedImages = stored.usedImages.map((image) => (
+      image.uuid ? { ...image, imgUrl: "" } : image
+    ));
+  }
   return stored;
 }

@@ -119,6 +119,7 @@ export async function requestBriefAgent(
 export async function requestReferenceRead(
   input: BriefReferenceReadRequest,
   apiKey?: string | null,
+  signal?: AbortSignal,
 ): Promise<BriefReferenceReadResponse> {
   const response = await fetch("/api/brief-agent/read-references", {
     method: "POST",
@@ -127,6 +128,7 @@ export async function requestReferenceRead(
       ...localGeminiHeaders(apiKey),
     },
     body: JSON.stringify(input),
+    signal,
   });
 
   const data = await response.json().catch(() => null);

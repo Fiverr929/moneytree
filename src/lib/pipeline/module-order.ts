@@ -29,3 +29,10 @@ export function getGenerationModuleImages<T extends OrderedModuleFile>(files?: T
     return GENERATION_ROLES.has(String(file.mode || "").toUpperCase());
   }).slice(0, MAX_ACTIVE_GENERATION_REFERENCES);
 }
+
+export function resolveGenerationModuleImages<T extends OrderedModuleFile>(
+  files: T[] | undefined,
+  snapshotFiles: T[] | undefined,
+) {
+  return getGenerationModuleImages(files || snapshotFiles);
+}

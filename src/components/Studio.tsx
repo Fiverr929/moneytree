@@ -635,7 +635,9 @@ export default function Studio() {
         const newUuid = crypto.randomUUID();
         const usedImages: GalleryImageUse[] = [{ imgUrl: currentActiveUrl, role: "BASE" }];
         currentGroups.forEach(g => {
-          g.images.forEach(img => usedImages.push({ imgUrl: img.url, uuid: img.uuid, role: g.action, label: g.name }));
+          g.images
+            .filter((img) => img.visible !== false)
+            .forEach(img => usedImages.push({ imgUrl: img.url, uuid: img.uuid, role: g.action, label: g.name }));
         });
 
         const createdAt = new Date().toISOString();

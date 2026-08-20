@@ -30,6 +30,8 @@ type LocalReference = {
   mode: string;
   visualRead?: string;
   visualReadSource?: "local" | "vision";
+  visualReadFingerprint?: string;
+  visualReadVersion?: string;
   cloudUpdatedAt?: string;
   cloudSyncedAt?: string | null;
 };
@@ -51,6 +53,8 @@ type CloudReference = {
   mode: string;
   visualRead?: string | null;
   visualReadSource?: "local" | "vision" | null;
+  visualReadFingerprint?: string | null;
+  visualReadVersion?: string | null;
   updatedAt: string;
 };
 type LocalGeneration = Record<string, unknown> & {
@@ -263,8 +267,10 @@ function numericReferenceId(uuid: string) {
   return Number.parseInt(uuid.replace(/[^a-fA-F0-9]/g, "").slice(0, 12), 16) || Date.now();
 }
 
-function imageFingerprint(dataUrl: string) {
-  return `${dataUrl.length}:${dataUrl.slice(0, 48)}:${dataUrl.slice(-48)}`;
+async function imageFingerprint(dataUrl: string) {
+  const bytes = await fetch(dataUrl).then((response) => response.arrayBuffer());
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function uploadReferenceImage(
@@ -273,7 +279,7 @@ async function uploadReferenceImage(
   dataUrl: string,
   storedFingerprint?: string | null,
 ) {
-  const fingerprint = imageFingerprint(dataUrl);
+  const fingerprint = await imageFingerprint(dataUrl);
   if (storedFingerprint === fingerprint || uploadedImageFingerprints.get(reference.uuid) === fingerprint) return false;
   const blob = await fetch(dataUrl).then((response) => response.blob());
   const params = new URLSearchParams({ project_id: projectCloudId, reference_id: reference.uuid });
@@ -290,7 +296,7 @@ async function uploadReferenceImage(
 
 async function downloadReferenceImage(projectCloudId: string, referenceId: string) {
   const params = new URLSearchParams({ project_id: projectCloudId, reference_id: referenceId });
-  const response = await fetch(`/api/cloud-workspace/image?${params}`);
+  const response = await fetch(`/api/cloud-workspace/image?${params}`, { cache: "no-store" });
   if (!response.ok) return null;
   const blob = await response.blob();
   return new Promise<string>((resolve, reject) => {
@@ -344,7 +350,7 @@ async function uploadGenerationImage(
   dataUrl: string,
   storedFingerprint?: string | null,
 ) {
-  const fingerprint = imageFingerprint(dataUrl);
+  const fingerprint = await imageFingerprint(dataUrl);
   const cacheKey = `generation:${generationId}`;
   if (storedFingerprint === fingerprint || uploadedImageFingerprints.get(cacheKey) === fingerprint) return false;
   const blob = await fetch(dataUrl).then((response) => response.blob());
@@ -362,7 +368,7 @@ async function uploadGenerationImage(
 
 async function downloadGenerationImage(projectCloudId: string, generationId: string) {
   const params = new URLSearchParams({ project_id: projectCloudId, generation_id: generationId });
-  const response = await fetch(`/api/cloud-workspace/generation-image?${params}`);
+  const response = await fetch(`/api/cloud-workspace/generation-image?${params}`, { cache: "no-store" });
   if (!response.ok) return null;
   const blob = await response.blob();
   return new Promise<string>((resolve, reject) => {
@@ -416,6 +422,8 @@ async function syncCloudProjectNow(projectId: number) {
       mode: reference.mode || "REFERENCE",
       visualRead: reference.visualRead,
       visualReadSource: reference.visualReadSource,
+      visualReadFingerprint: reference.visualReadFingerprint,
+      visualReadVersion: reference.visualReadVersion,
       updatedAt: reference.cloudUpdatedAt || new Date().toISOString(),
     })),
     referenceProjectId: identified.cloudId,
@@ -460,10 +468,10 @@ async function syncCloudProjectNow(projectId: number) {
   }
   const activeRemoteGenerationIds = new Set(body.generations.map((generation) => generation.id));
   const uploadableGenerations = generations.filter((generation) => activeRemoteGenerationIds.has(generation.uuid));
-  const generationImagesQueued = uploadableGenerations.filter((generation) => {
+  const generationImagesQueued = (await Promise.all(uploadableGenerations.map(async (generation) => {
     const image = imageByUuid.get(generation.uuid);
-    return Boolean(image?.dataUrl && image.generationCloudFingerprint !== imageFingerprint(image.dataUrl));
-  }).length;
+    return Boolean(image?.dataUrl && image.generationCloudFingerprint !== await imageFingerprint(image.dataUrl));
+  }))).filter(Boolean).length;
   void (async () => {
     for (let index = 0; index < uploadableGenerations.length; index += 3) {
       await Promise.all(uploadableGenerations.slice(index, index + 3).map(async (generation) => {
@@ -485,11 +493,12 @@ async function syncCloudProjectNow(projectId: number) {
       if (collision) localId = Date.now() + Math.floor(Math.random() * 10_000);
     }
     const existingImage = await DB.images.get(remote.id) as { dataUrl?: string } | undefined;
-    if (!existingImage?.dataUrl) {
+    const remoteImageMayBeNewer = !existing || remote.updatedAt > (existing.cloudUpdatedAt || "");
+    if (!existingImage?.dataUrl || remoteImageMayBeNewer) {
       const dataUrl = await downloadReferenceImage(identified.cloudId!, remote.id);
       if (dataUrl) {
         await DB.images.put(remote.id, dataUrl, projectId, true);
-        const fingerprint = imageFingerprint(dataUrl);
+        const fingerprint = await imageFingerprint(dataUrl);
         uploadedImageFingerprints.set(remote.id, fingerprint);
         await DB.images.markCloudSynced(remote.id, fingerprint);
         imagesDown += 1;
@@ -511,6 +520,8 @@ async function syncCloudProjectNow(projectId: number) {
       mode: remote.mode,
       visualRead: remote.visualRead || undefined,
       visualReadSource: remote.visualReadSource || undefined,
+      visualReadFingerprint: remote.visualReadFingerprint || undefined,
+      visualReadVersion: remote.visualReadVersion || undefined,
       url: "",
       cloudUpdatedAt: remote.updatedAt,
       cloudSyncedAt: syncedAt,
@@ -526,11 +537,12 @@ async function syncCloudProjectNow(projectId: number) {
       if (collision) localId = Date.now() + Math.floor(Math.random() * 10_000);
     }
     const existingImage = await DB.images.get(remote.id) as { dataUrl?: string } | undefined;
-    if (!existingImage?.dataUrl) {
+    const remoteImageMayBeNewer = !existing || remote.updatedAt > (existing.cloudUpdatedAt || existing.updatedAt || "");
+    if (!existingImage?.dataUrl || remoteImageMayBeNewer) {
       const dataUrl = await downloadGenerationImage(identified.cloudId!, remote.id);
       if (dataUrl) {
         await DB.images.put(remote.id, dataUrl, projectId, true);
-        const fingerprint = imageFingerprint(dataUrl);
+        const fingerprint = await imageFingerprint(dataUrl);
         uploadedImageFingerprints.set(`generation:${remote.id}`, fingerprint);
         await DB.images.markGenerationCloudSynced(remote.id, fingerprint);
         generationImagesDown += 1;

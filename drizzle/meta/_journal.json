@@ -29,6 +29,13 @@
       "when": 1787031000000,
       "tag": "0003_cloud_generations",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1787045400000,
+      "tag": "0004_reference_vision_freshness",
+      "breakpoints": true
     }
   ]
 }

@@ -188,16 +188,12 @@ export default function ModulePanel() {
 
   const updateFile = (id: number, patch: Partial<ModuleFile>) => {
     setFiles((prev) => {
-      const previous = prev.find((f) => f.id === id);
       const next = prev.map((f) => (f.id === id ? { ...f, ...patch } : f));
       const updated = next.find((f) => f.id === id);
       if (updated) {
         persistReference(updated);
         if (patch.url && updated.uuid) {
           persistImage(updated.uuid, patch.url);
-        }
-        if (patch.uuid && previous?.uuid && previous.uuid !== patch.uuid) {
-          deleteImage(previous.uuid);
         }
       }
       return next;
@@ -208,20 +204,30 @@ export default function ModulePanel() {
     loadImageMetadata(url)
       .then((meta) => {
         updateFile(file.id, {
+          uuid: crypto.randomUUID(),
           url,
           name: deriveEditedName(file.name),
           size: meta.size,
           dims: meta.dims,
           modified: new Date().toLocaleTimeString(),
+          visualRead: "",
+          visualReadSource: "local",
+          visualReadFingerprint: undefined,
+          visualReadVersion: undefined,
         });
       })
       .catch(() => {
         updateFile(file.id, {
+          uuid: crypto.randomUUID(),
           url,
           name: deriveEditedName(file.name),
           size: file.size,
           dims: file.dims || "IMAGE",
           modified: new Date().toLocaleTimeString(),
+          visualRead: "",
+          visualReadSource: "local",
+          visualReadFingerprint: undefined,
+          visualReadVersion: undefined,
         });
       });
   };
@@ -311,6 +317,10 @@ export default function ModulePanel() {
           name: upload.file.name,
           size: Math.round(upload.file.size / 1024) + " KB",
           uuid: crypto.randomUUID(),
+          visualRead: "",
+          visualReadSource: "local",
+          visualReadFingerprint: undefined,
+          visualReadVersion: undefined,
         });
         setPendingReplaceFileId(null);
       } else {

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { getGenerationModuleImages } from './module-order';
+import { resolveGenerationModuleImages } from './module-order';
 import DB from '@/lib/db';
 import {
   describeGenAIError,
@@ -235,10 +235,6 @@ export type GenerationPayload = {
 
 export { storeGenerationDebug } from './generation-debug';
 
-function getVisibleImageFiles(files?: Record<string, any>[]) {
-  return getGenerationModuleImages(files);
-}
-
 function normalizeRole(file: Record<string, any>): ReferenceRole {
   const mode = String(file.mode || '').toUpperCase();
   if (mode === 'SCENE') return 'SCENE';
@@ -331,7 +327,7 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
   const ratio = payload.settings?.aspectRatio || '1:1';
   const numImages = payload.settings?.variation || 1;
   const userPrompt = payload.userPrompt ?? payload.prompt ?? '';
-  const imageFiles = getVisibleImageFiles(files);
+  const imageFiles = resolveGenerationModuleImages(files, payload.moduleSnapshot?.files);
   const cleanPromptManaged = (
     payload.executionSource === 'agent-final-prompt' ||
     payload.executionSource === 'generate-command'

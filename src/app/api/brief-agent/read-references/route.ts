@@ -4,6 +4,7 @@ import { BRIEF_AGENT_SKILL_CONTRACT } from "@/lib/brief-agent/skillContract";
 import { createGoogleGenAI } from "@/lib/server/googleGenAI";
 import { logCachedModelUsage, logModelUsage, modelUsage, traceReferenceFingerprint, type UsageMetadata } from "@/lib/server/modelUsage";
 import { cacheReferenceRead } from "@/lib/server/referenceReadCache";
+import { REFERENCE_READER_CONTRACT_VERSION } from "@/lib/brief-agent/referenceFreshness";
 import type {
   BriefReferenceImageInput,
   BriefReferenceReadRequest,
@@ -180,6 +181,8 @@ type ReferenceReadResult = {
 function referenceReadCacheKey(input: BriefReferenceReadRequest, model: string) {
   const hash = createHash("sha256");
   hash.update(model);
+  hash.update("\0");
+  hash.update(REFERENCE_READER_CONTRACT_VERSION);
   hash.update("\0");
   hash.update(input.sourceFingerprint);
   input.images.forEach((image) => {

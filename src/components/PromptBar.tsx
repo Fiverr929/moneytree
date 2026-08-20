@@ -12,12 +12,19 @@ import {
   createReferenceSnapshot,
   fingerprintModuleFiles,
 } from "@/lib/brief-agent/referenceSnapshot";
+import {
+  fingerprintReferenceImage,
+  hasCurrentReferenceRead,
+  REFERENCE_READER_CONTRACT_VERSION,
+} from "@/lib/brief-agent/referenceFreshness";
 import { ReferenceReadRequestError, requestBriefAgent, requestGenerationInspection, requestReferenceRead } from "@/lib/brief-agent/client";
 import { requestGenerationEvaluation, type AiGenerationEvaluation } from "@/lib/evaluationReview";
 import type { AgentActionProposalStatus, AgentAppAction, AgentAppEvent, AgentMemoryScope, AgentMessage, BriefAgentAction, BriefDraft, BriefGenerationEvidence, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot, CafeWorkspaceSnapshot } from "@/lib/brief-agent/types";
 import { applyAgentAppAction, describeAgentAppAction } from "@/lib/brief-agent/appActions";
 import { canResolveAgentActionProposal, createAgentActionProposal, proposalStatusFromEvents, recoverInterruptedActionProposal, resolveAgentActionProposal } from "@/lib/brief-agent/actionApproval";
 import { moduleFileForStorage } from "@/lib/moduleFiles";
+import { getGenerationModuleImages } from "@/lib/pipeline/module-order";
+import { fingerprintReferenceValues } from "@/lib/brief-agent/referenceFingerprint";
 import {
   observeAgentGeneration,
   observeAgentReview,
@@ -37,10 +44,11 @@ import {
 
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
 const IMAGE_PROMPT_SETTINGS_KEY = "cafehtml-image-prompt-settings";
-const REFERENCE_SNAPSHOT_CACHE_KEY = "cafehtml-brief-reference-cache-v3";
+const REFERENCE_SNAPSHOT_CACHE_KEY = "cafehtml-brief-reference-cache-v4";
 const REFERENCE_SNAPSHOT_CACHE_LIMIT = 20;
+const REFERENCE_SNAPSHOT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AGENT_RUN_CLEARED_KEY = "cafehtml-agent-run-cleared";
-const GENERATION_VISION_CACHE_KEY = "cafehtml-generation-vision-cache-v1";
+const GENERATION_VISION_CACHE_KEY = "cafehtml-generation-vision-cache-v2";
 const GENERATION_VISION_CACHE_LIMIT = 30;
 const GENERATE_COMMAND = "/Generate";
 const CANVAS_COMMANDS = [
@@ -68,11 +76,13 @@ type ReferenceSnapshotCacheEntry = {
   snapshot: BriefReferenceSnapshot;
   model: string | null;
   cachedAt: string;
+  readerContractVersion: string;
 };
 
 type GenerationVisionCacheEntry = {
   cacheKey: string;
   generationId: string;
+  contentFingerprint: string;
   visualRead: string;
   comparison: string | null;
   inspectedAt: string;
@@ -119,6 +129,15 @@ function galleryCellKey(cell: GalleryCell) {
   return cell.uuid ? `uuid:${cell.uuid}` : `id:${cell.id}`;
 }
 
+function generationContentFingerprint(cell: GalleryCell) {
+  if (!cell.imgUrl) return "";
+  return fingerprintReferenceValues([[
+    cell.uuid || cell.id,
+    cell.imgUrl,
+    cell.effectivePrompt || cell.prompt || "",
+  ]]);
+}
+
 function agentRunClearedStorageKey(projectId: number) {
   return `${AGENT_RUN_CLEARED_KEY}:${projectId}`;
 }
@@ -135,7 +154,13 @@ function readReferenceSnapshotCache(): ReferenceSnapshotCacheEntry[] {
 }
 
 function findReferenceSnapshotCache(sourceFingerprint: string) {
-  return readReferenceSnapshotCache().find((entry) => entry.sourceFingerprint === sourceFingerprint) || null;
+  const now = Date.now();
+  return readReferenceSnapshotCache().find((entry) => (
+    entry.sourceFingerprint === sourceFingerprint
+    && entry.readerContractVersion === REFERENCE_READER_CONTRACT_VERSION
+    && Number.isFinite(Date.parse(entry.cachedAt))
+    && now - Date.parse(entry.cachedAt) <= REFERENCE_SNAPSHOT_CACHE_TTL_MS
+  )) || null;
 }
 
 function writeReferenceSnapshotCache(entry: ReferenceSnapshotCacheEntry) {
@@ -804,21 +829,35 @@ export default function PromptBar() {
         if (!observation) return file;
         const visualRead = observation.visualRead || "";
         const visualReadSource = observation.readSource || "local";
-        if (file.visualRead === visualRead && file.visualReadSource === visualReadSource) return file;
+        const visualReadFingerprint = fingerprintReferenceImage(file);
+        if (
+          file.visualRead === visualRead
+          && file.visualReadSource === visualReadSource
+          && file.visualReadFingerprint === visualReadFingerprint
+          && file.visualReadVersion === REFERENCE_READER_CONTRACT_VERSION
+        ) return file;
         changed = true;
-        return {
+        const updated = {
           ...file,
           visualRead,
           visualReadSource,
+          visualReadFingerprint,
+          visualReadVersion: REFERENCE_READER_CONTRACT_VERSION,
         };
+        if (activeProjectId) {
+          void DB.references.put({ ...moduleFileForStorage(updated), project_id: activeProjectId })
+            .catch((error) => console.error("Failed to persist reference vision read", error));
+        }
+        return updated;
       });
       return changed ? next : current;
     });
-  }, [setModuleFiles]);
+  }, [activeProjectId, setModuleFiles]);
 
   useEffect(() => {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const controller = new AbortController();
     const fallbackSnapshot = createReferenceSnapshot(moduleContext.files);
     setReferenceSnapshot((current) => {
       if (current.sourceFingerprint === referenceFingerprint) return current;
@@ -828,8 +867,8 @@ export default function PromptBar() {
     setReferenceReadError("");
     setReferenceReadModel(null);
 
-    const images: BriefReferenceImageInput[] = moduleContext.files
-      .filter((file) => file.eye !== false && file.url && !file.folder)
+    const activeReferenceFiles = getGenerationModuleImages(moduleContext.files);
+    const images: BriefReferenceImageInput[] = activeReferenceFiles
       .map((file) => {
         const role = String(file.mode || "").toUpperCase();
         return {
@@ -842,8 +881,8 @@ export default function PromptBar() {
       });
 
     const imageIdsNeedingRead = new Set(
-      moduleContext.files
-        .filter((file) => file.eye !== false && file.url && !file.folder && !file.visualRead?.trim())
+      activeReferenceFiles
+        .filter((file) => !hasCurrentReferenceRead(file))
         .map((file) => file.uuid || String(file.id)),
     );
     const imagesToRead = images.filter((image) => imageIdsNeedingRead.has(image.imageId));
@@ -886,7 +925,7 @@ export default function PromptBar() {
       requestReferenceRead({
         sourceFingerprint: referenceFingerprint,
         images: imagesToRead,
-      }, settings.geminiApiKey).then((response) => {
+      }, settings.geminiApiKey, controller.signal).then((response) => {
         if (cancelled) return;
         const newObservations = new Map(response.snapshot.observations.map((observation) => [observation.imageId, observation]));
         const mergedSnapshot: BriefReferenceSnapshot = {
@@ -904,9 +943,11 @@ export default function PromptBar() {
           snapshot: mergedSnapshot,
           model: response.model,
           cachedAt: new Date().toISOString(),
+          readerContractVersion: REFERENCE_READER_CONTRACT_VERSION,
         });
       }).catch((error) => {
         if (cancelled) return;
+        if (error instanceof DOMException && error.name === "AbortError") return;
         setReferenceSnapshot(fallbackSnapshot);
         if (error instanceof ReferenceReadRequestError && error.status === 429) {
           referenceReadAttemptsRef.current.set(referenceFingerprint, attempt);
@@ -925,11 +966,15 @@ export default function PromptBar() {
         setReferenceReadError(message);
       }).finally(() => {
         referenceReadInFlightRef.current.delete(referenceFingerprint);
+        if (cancelled && referenceFingerprintRef.current === referenceFingerprint) {
+          setReferenceReadRetryTick((tick) => tick + 1);
+        }
       });
     }, 600);
 
     return () => {
       cancelled = true;
+      controller.abort();
       clearTimeout(debounceTimer);
       if (retryTimer) clearTimeout(retryTimer);
     };
@@ -947,7 +992,12 @@ export default function PromptBar() {
     .slice(0, 6)
     .map((cell, index) => {
       const generationId = cell.uuid || String(cell.id);
-      const cached = readGenerationVisionCache().find((entry) => entry.generationId === generationId);
+      const contentFingerprint = generationContentFingerprint(cell);
+      const cached = contentFingerprint
+        ? readGenerationVisionCache().find((entry) => (
+          entry.generationId === generationId && entry.contentFingerprint === contentFingerprint
+        ))
+        : null;
       return {
       generationId,
       recency: index + 1,
@@ -989,7 +1039,11 @@ export default function PromptBar() {
         ? "Select two generations, or create at least two results, before comparing them."
         : "Select a generation or create a result before asking for visual inspection.");
     }
-    const cacheKey = targets.map((cell) => `${cell.uuid || cell.id}:${cell.updatedAt || cell.createdAt || cell.date || ""}`).join("|");
+    const cacheKey = fingerprintReferenceValues(targets.map((cell) => [
+      cell.uuid || cell.id,
+      cell.imgUrl || "",
+      cell.effectivePrompt || cell.prompt || "",
+    ]));
     const cachedEntries = readGenerationVisionCache().filter((entry) => entry.cacheKey === cacheKey);
     let inspectionEntries = cachedEntries;
     if (inspectionEntries.length !== targets.length) {
@@ -1004,6 +1058,9 @@ export default function PromptBar() {
       inspectionEntries = response.observations.map((observation) => ({
         cacheKey,
         generationId: observation.generationId,
+        contentFingerprint: generationContentFingerprint(targets.find((cell) => (
+          String(cell.uuid || cell.id) === observation.generationId
+        ))!),
         visualRead: observation.visualRead,
         comparison: response.comparison,
         inspectedAt,
@@ -1675,9 +1732,25 @@ export default function PromptBar() {
       setAgentConsoleOpen(true);
       return;
     }
+    const currentReferenceFingerprint = fingerprintModuleFiles(moduleFilesRef.current);
+    const currentActiveReferences = getGenerationModuleImages(moduleFilesRef.current);
+    const referenceReadsAreCurrent = currentActiveReferences.every(hasCurrentReferenceRead);
+    if (
+      currentActiveReferences.length > 0
+      && (
+        !referenceReadsAreCurrent
+        || referenceSnapshot.sourceFingerprint !== currentReferenceFingerprint
+        || referenceReadInFlightRef.current.has(currentReferenceFingerprint)
+      )
+    ) {
+      setAgentError("Current references are still being inspected. The agent will not use an older visual read; try again when the reference scan finishes.");
+      setAgentConsoleOpen(true);
+      return;
+    }
     const createdAt = new Date().toISOString();
     const requestProjectId = activeProjectId;
-    const previousSession = agentDraft?.session || null;
+    const continuingCurrentReferenceRun = agentRun?.referenceFingerprint === currentReferenceFingerprint;
+    const previousSession = continuingCurrentReferenceRun ? agentDraft?.session || null : null;
     const retryMessage = options?.retry
       ? [...agentMessagesRef.current].reverse().find((message) => message.role === "user" && message.text.trim() === trimmed)
       : null;
@@ -1693,9 +1766,14 @@ export default function PromptBar() {
       && latestMessage.text.startsWith("AGENT ERROR:")
       ? agentMessagesRef.current.slice(0, -1)
       : agentMessagesRef.current;
-    const nextUserMessages = retryMessage
+    const nextUserMessages = (retryMessage
       ? messagesWithoutFailedTurn
-      : [...messagesWithoutFailedTurn, userMessage];
+      : [...messagesWithoutFailedTurn, userMessage]).map((message) => (
+        message.promptArtifact?.sourceFingerprint
+        && message.promptArtifact.sourceFingerprint !== currentReferenceFingerprint
+          ? { ...message, promptArtifact: undefined }
+          : message
+      ));
     setAgentMessages(nextUserMessages);
     agentMessagesRef.current = nextUserMessages;
     agentPendingRef.current = true;
@@ -1717,7 +1795,7 @@ export default function PromptBar() {
       const memories = requestProjectId
         ? await recallAgentMemories({
           projectId: requestProjectId,
-          sessionId: agentRun?.id,
+          sessionId: continuingCurrentReferenceRun ? agentRun?.id : null,
           query: trimmed,
         })
         : [];
@@ -1725,7 +1803,7 @@ export default function PromptBar() {
         referenceSnapshot,
         messages: nextUserMessages,
         session: previousSession,
-        run: agentRun,
+        run: continuingCurrentReferenceRun ? agentRun : null,
         generations,
         workspace,
         memories,

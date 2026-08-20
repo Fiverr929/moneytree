@@ -23,6 +23,8 @@ export type ModuleFile = {
   url: string;
   visualRead?: string;
   visualReadSource?: "local" | "vision";
+  visualReadFingerprint?: string;
+  visualReadVersion?: string;
 };
 
 export type ModuleFolder = {
@@ -105,7 +107,9 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
   const [showUpload, setShowUpload] = useState(false);
   const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
   const [pendingUploadQueue, setPendingUploadQueue] = useState<PendingUpload[]>([]);
-  const [collapsed, setCollapsed] = useState(false);
+  // Start closed so the mobile panel cannot flash open before the viewport
+  // effect runs. Desktop restores its expanded default after hydration.
+  const [collapsed, setCollapsed] = useState(true);
 
   // New states for full functionality
   const [selectMode, setSelectMode] = useState(false);
@@ -120,20 +124,15 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
   const [renamingFileId, setRenamingFileId] = useState<number | null>(null);
   const [labelEditOpen, setLabelEditOpen] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
-  const responsiveCollapseInitialized = useRef(false);
   const responsiveAutoCollapsed = useRef(false);
   const foldersHydratedProjectRef = useRef<number | null>(null);
 
   const { activeProjectId } = useApp();
 
   useEffect(() => {
-    if (responsiveCollapseInitialized.current) return;
-    responsiveCollapseInitialized.current = true;
     const query = window.matchMedia("(max-width: 900px)");
-    if (query.matches) {
-      responsiveAutoCollapsed.current = true;
-      setCollapsed(true);
-    }
+    responsiveAutoCollapsed.current = query.matches;
+    setCollapsed(query.matches);
 
     const handleBreakpointChange = (event: MediaQueryListEvent) => {
       if (event.matches) {
