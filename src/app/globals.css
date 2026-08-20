@@ -7884,9 +7884,43 @@ body.module-collapsed .module-panel {
 
 @media (max-width: 680px) {
   .evaluation-body { grid-template-columns: 1fr; }
-  .evaluation-image { min-height: 180px; max-height: 32vh; }
+  .evaluation-image {
+    min-height: 140px;
+    max-height: min(30dvh, 230px);
+  }
   .evaluation-row { grid-template-columns: 1fr; gap: 6px; }
-  .evaluation-content { gap: 12px; }
+  .evaluation-content {
+    gap: 10px;
+    padding: 13px;
+  }
+  .evaluation-meta {
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .evaluation-meta > span:first-child { display: none; }
+  .evaluation-question {
+    line-height: 1.35;
+  }
+  .evaluation-reactions {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+  .evaluation-reactions button {
+    min-height: 58px;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 9px 13px;
+    text-align: left;
+  }
+  .evaluation-reaction-label {
+    flex: none;
+    font-size: 10px;
+  }
+  .evaluation-reaction-description {
+    max-width: 58%;
+    text-align: right;
+  }
 }
 .pm-foot-btn:disabled {
   cursor: default;
