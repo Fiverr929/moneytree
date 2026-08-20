@@ -7767,18 +7767,36 @@ body.module-collapsed .module-panel {
   gap: 6px;
 }
 .evaluation-reactions button {
-  min-height: 44px;
+  min-height: 74px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   border: 1px solid rgba(199, 199, 199, 0.34);
   background: transparent;
   color: #c7c7c7;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  padding: 9px 7px;
 }
 .evaluation-reactions button:hover { border-color: #c7c7c7; }
 .evaluation-reactions button.active { background: #5271ff; border-color: #5271ff; }
 .evaluation-reactions button.active.like { background: #39745c; border-color: #39745c; }
 .evaluation-reactions button.active.dislike { background: #a34334; border-color: #a34334; }
+.evaluation-reaction-label {
+  color: #e8e6e6;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.evaluation-reaction-description {
+  color: rgba(232, 230, 230, 0.68);
+  font-size: 9px;
+  line-height: 1.35;
+}
+.evaluation-reactions button.active .evaluation-reaction-description {
+  color: rgba(255, 255, 255, 0.82);
+}
 .evaluation-row {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);

@@ -7,10 +7,10 @@ import {
   type GenerationUserFeedback,
 } from "@/context/GalleryContext";
 
-const REACTIONS: Array<{ value: GenerationReaction; label: string }> = [
-  { value: "like", label: "Good" },
-  { value: "mixed", label: "Okay" },
-  { value: "dislike", label: "Needs work" },
+const REACTIONS: Array<{ value: GenerationReaction; label: string; description: string }> = [
+  { value: "like", label: "Nailed it", description: "Use this direction again" },
+  { value: "mixed", label: "Close", description: "Keep the idea, refine details" },
+  { value: "dislike", label: "Try again", description: "Change direction next time" },
 ];
 
 const REACTION_SCORE = { like: 5, mixed: 3, dislike: 1 } as const;
@@ -98,7 +98,7 @@ export default function EvaluationDialog() {
               {target.evaluation?.reviewSource === "ai" && <span>AI review available</span>}
               <span>{evaluationQueueLength} pending</span>
             </div>
-            <div className="evaluation-question">How did this generation turn out?</div>
+            <div className="evaluation-question">What should the agent learn from this?</div>
             <div className="evaluation-reactions">
               {REACTIONS.map((option) => (
                 <button
@@ -108,7 +108,8 @@ export default function EvaluationDialog() {
                   disabled={saving}
                   onClick={() => void handleRating(option.value)}
                 >
-                  {option.label}
+                  <span className="evaluation-reaction-label">{option.label}</span>
+                  <span className="evaluation-reaction-description">{option.description}</span>
                 </button>
               ))}
             </div>
