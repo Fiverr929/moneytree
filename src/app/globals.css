@@ -10939,3 +10939,311 @@ button.video-media-empty:focus-visible {
     right: 104px;
   }
 }
+
+/* Video composer mirrors the image prompt bar while retaining independent
+   frame/reference slots and video-only settings. */
+.video-prompt-bar {
+  gap: 0;
+}
+
+.video-prompt-slot {
+  border-top-color: var(--accent);
+  border-right-color: #c7c7c7;
+  border-bottom-color: var(--accent);
+  border-left: 0;
+  background: #5271ff;
+}
+
+.video-prompt-slot:first-child {
+  border-left: 1px solid var(--accent);
+}
+
+.video-prompt-slot.reference {
+  border-top-color: var(--accent);
+  border-right-color: #c7c7c7;
+  border-bottom-color: var(--accent);
+}
+
+.video-prompt-slot.frame.active,
+.video-prompt-slot.reference.active {
+  background: #5271ff;
+  box-shadow: inset 0 0 0 2px #ea5823;
+}
+
+.video-prompt-slot.filled {
+  background: #999997;
+}
+
+.video-prompt-slot-plus::before,
+.video-prompt-slot-plus::after,
+.video-prompt-slot.reference .video-prompt-slot-plus::before,
+.video-prompt-slot.reference .video-prompt-slot-plus::after,
+.video-prompt-slot.active .video-prompt-slot-plus::before,
+.video-prompt-slot.active .video-prompt-slot-plus::after {
+  margin-top: 0;
+  background: #c7c7c7;
+}
+
+.video-prompt-input-area {
+  position: relative;
+  border-right: 0;
+  box-shadow: none;
+}
+
+.video-prompt-text-field {
+  resize: none;
+  overflow: hidden;
+  border-radius: 0;
+  appearance: none;
+  line-height: 22px;
+  padding-block: 11px;
+}
+
+.video-prompt-clear {
+  right: 0;
+}
+
+.video-frame-btn {
+  width: 46px;
+  min-width: 46px;
+  padding: 0;
+  border: 1px solid var(--accent);
+  background: #5271ff;
+  color: #c7c7c7;
+  font-size: 0;
+}
+
+.video-frame-btn .generate-icon {
+  position: relative;
+  display: block;
+  width: 17px;
+  height: 14px;
+}
+
+.video-frame-btn .generate-icon::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 16px;
+  height: 2px;
+  background: currentColor;
+}
+
+.video-frame-btn .generate-icon::after {
+  content: "";
+  position: absolute;
+  right: 1px;
+  top: 2px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.video-frame-btn.cafe-loading .generate-icon {
+  animation: generate-icon-run 0.8s steps(2, end) infinite;
+}
+
+.cmp-menu.video-settings-dropdown .video-settings-column button.primary {
+  background: #5271ff;
+  color: #e8e6e6;
+  border-bottom-color: rgba(234, 88, 35, 0.55);
+}
+
+.cmp-menu.video-settings-dropdown .video-settings-column button.primary:hover {
+  background: #ea5823;
+}
+
+.cmp-menu.video-settings-dropdown {
+  width: min(448px, calc(100vw - 16px));
+  max-height: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: visible;
+}
+
+.cmp-menu.video-settings-dropdown[hidden] {
+  display: none;
+}
+
+.video-settings-column {
+  min-width: 0;
+}
+
+.video-settings-column:first-child {
+  border-right: 1px solid rgba(234, 88, 35, 0.55);
+}
+
+.video-settings-column > button {
+  min-height: 25px;
+}
+
+.mobile-video-settings-tabs {
+  display: none;
+}
+
+@media (min-width: 681px) and (max-width: 900px) {
+  .video-frame-btn {
+    width: 44px;
+    min-width: 44px;
+  }
+}
+
+@media (max-width: 680px) {
+  .video-stage {
+    grid-template-rows: 99px minmax(0, 1fr) 94px 154px;
+  }
+
+  .video-prompt-bar {
+    height: 99px;
+    grid-template-columns: auto 36px minmax(0, 1fr) 36px;
+    grid-template-rows: 36px 58px;
+    row-gap: 5px;
+  }
+
+  .video-prompt-slots {
+    grid-column: 1;
+    grid-row: 1;
+    height: 36px;
+  }
+
+  .video-prompt-slot {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+  }
+
+  .video-settings-anchor {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .video-settings-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .video-prompt-input-area {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: 58px;
+    border-right: 1px solid var(--accent);
+  }
+
+  .video-prompt-text-field {
+    height: 56px;
+    min-height: 56px;
+    padding: 7px 44px 7px 10px;
+    line-height: 18px;
+  }
+
+  .video-frame-btn {
+    grid-column: 4;
+    grid-row: 1;
+    justify-self: end;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    border-color: #ea5823;
+    background: #ea5823;
+  }
+
+  .video-prompt-clear {
+    right: 0;
+    width: 40px;
+    height: 56px;
+  }
+
+  .cmp-menu.video-settings-dropdown {
+    position: fixed;
+    top: calc(max(8px, env(safe-area-inset-top)) + 46px);
+    right: auto;
+    left: calc(max(8px, env(safe-area-inset-left)) + 36px);
+    width: min(224px, calc(100vw - max(52px, env(safe-area-inset-right))));
+    max-height: none;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: visible;
+  }
+
+  .cmp-menu.video-settings-dropdown::before {
+    display: block;
+    right: auto;
+    left: 14px;
+  }
+
+  .video-prompt-slots.slots-1 + .video-settings-anchor .video-settings-dropdown::before { left: 14px; }
+  .video-prompt-slots.slots-2 + .video-settings-anchor .video-settings-dropdown::before { left: 50px; }
+  .video-prompt-slots.slots-3 + .video-settings-anchor .video-settings-dropdown::before { left: 86px; }
+  .video-prompt-slots.slots-4 + .video-settings-anchor .video-settings-dropdown::before { left: 122px; }
+  .video-prompt-slots.slots-5 + .video-settings-anchor .video-settings-dropdown::before { left: 158px; }
+  .video-prompt-slots.slots-6 + .video-settings-anchor .video-settings-dropdown::before { left: 194px; }
+
+  .video-settings-dropdown .cmp-menu-title {
+    height: 21px;
+  }
+
+  .mobile-video-settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    height: 25px;
+    border-bottom: 1px solid rgba(234, 88, 35, 0.55);
+  }
+
+  .mobile-video-settings-tabs button {
+    width: auto;
+    height: 25px;
+    min-height: 25px;
+    justify-content: center;
+    padding: 0 6px;
+    border-right: 1px solid rgba(82, 113, 255, 0.24);
+  }
+
+  .mobile-video-settings-tabs button:last-child {
+    border-right: 0;
+  }
+
+  .mobile-video-settings-tabs button.primary:hover {
+    background: #5271ff;
+  }
+
+  .video-settings-column:first-of-type {
+    border-right: 0;
+  }
+
+  .video-settings-dropdown[data-mobile-tab="generation"] .video-settings-column.direction,
+  .video-settings-dropdown[data-mobile-tab="direction"] .video-settings-column.generation {
+    display: none;
+  }
+
+  .video-settings-column > button,
+  .video-settings-options button {
+    min-height: 25px;
+  }
+
+  .video-settings-select,
+  .video-seed-input {
+    height: 30px;
+  }
+
+  .video-settings-stepper {
+    height: 30px;
+    grid-template-columns: 34px minmax(0, 1fr) 34px;
+  }
+
+  .video-settings-stepper button {
+    width: 34px;
+    height: 30px;
+  }
+
+  .video-negative-prompt {
+    min-height: 58px;
+    font-size: 9px;
+    scrollbar-width: none;
+  }
+
+  .video-negative-prompt::-webkit-scrollbar {
+    display: none;
+  }
+}
