@@ -214,6 +214,7 @@ export default function VideoPage() {
   const { geminiApiKey } = useSettings();
   const [prompt, setPrompt] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mobileSettingsTab, setMobileSettingsTab] = useState<"generation" | "direction">("generation");
   const [videoSettings, setVideoSettings] = useState<VideoSettings>(DEFAULT_VIDEO_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [media, setMedia] = useState<VideoMedia[]>([]);
@@ -1117,7 +1118,13 @@ export default function VideoPage() {
           </section>
 
           <div className="video-prompt-bar" data-state="SCENE">
-            <div className={`video-prompt-slots ${videoSettings.inputMode}`}>
+            <div
+              className={`video-prompt-slots ${videoSettings.inputMode} slots-${
+                videoSettings.inputMode === "references"
+                  ? modelConfig.maxReferences
+                  : modelConfig.supportsEndFrame ? 2 : 1
+              }`}
+            >
               {videoSettings.inputMode === "frames" ? (
                 [
                   { key: "start", label: "START", mediaId: startFrameId },
@@ -1141,7 +1148,6 @@ export default function VideoPage() {
                         }}
                       >
                         {item ? <img src={item.url} alt={slot.label} /> : <span className="video-prompt-slot-plus"></span>}
-                        <span className="video-prompt-slot-label">{slot.label}</span>
                       </button>
                       {item && (
                         <button
@@ -1178,7 +1184,6 @@ export default function VideoPage() {
                         }}
                       >
                         {item ? <img src={item.url} alt={`Reference ${index + 1}`} /> : <span className="video-prompt-slot-plus"></span>}
-                        <span className="video-prompt-slot-label">REF {index + 1}</span>
                       </button>
                       {item && (
                         <button
@@ -1211,7 +1216,33 @@ export default function VideoPage() {
                 <img src="/assets/icon-settings.svg" alt="settings" />
               </button>
 
-              <div id="video-settings-menu" className="cmp-menu video-settings-dropdown" hidden={!settingsOpen}>
+              <div
+                id="video-settings-menu"
+                className="cmp-menu settings-dropdown video-settings-dropdown"
+                data-mobile-tab={mobileSettingsTab}
+                hidden={!settingsOpen}
+              >
+                <div className="mobile-video-settings-tabs" role="tablist" aria-label="Video setting groups">
+                  <button
+                    className={mobileSettingsTab === "generation" ? "primary" : ""}
+                    type="button"
+                    role="tab"
+                    aria-selected={mobileSettingsTab === "generation"}
+                    onClick={() => setMobileSettingsTab("generation")}
+                  >
+                    OUTPUT
+                  </button>
+                  <button
+                    className={mobileSettingsTab === "direction" ? "primary" : ""}
+                    type="button"
+                    role="tab"
+                    aria-selected={mobileSettingsTab === "direction"}
+                    onClick={() => setMobileSettingsTab("direction")}
+                  >
+                    MOTION
+                  </button>
+                </div>
+                <div className="video-settings-column generation">
                 <div className="cmp-menu-title">MODEL</div>
                 {(Object.keys(VIDEO_MODELS) as VideoModelKey[]).map((modelKey) => (
                   <button
@@ -1284,7 +1315,9 @@ export default function VideoPage() {
                     </button>
                   ))}
                 </div>
+                </div>
 
+                <div className="video-settings-column direction">
                 <div className="cmp-menu-title">MOTION ENERGY</div>
                 <div className="video-settings-options">
                   {(["subtle", "natural", "dynamic"] as VideoMotionProfile[]).map((motionProfile) => (
@@ -1376,16 +1409,20 @@ export default function VideoPage() {
                   placeholder={modelConfig.supportsSeed ? "RANDOM" : "UNSUPPORTED"}
                   aria-label="Video seed"
                 />
+                </div>
               </div>
             </div>
 
             <div className="video-prompt-input-area">
-              <input
+              <textarea
                 className="video-prompt-text-field"
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
                 placeholder="Describe the shot, camera movement, and action…"
                 aria-label="Video prompt"
+                rows={1}
+                autoComplete="off"
+                spellCheck="true"
               />
               {prompt && (
                 <button
@@ -1398,17 +1435,17 @@ export default function VideoPage() {
                   &times;
                 </button>
               )}
-              <button
-                className={`video-frame-btn ${activeGenerationCount > 0 ? "cafe-loading" : ""}`}
-                type="button"
-                disabled={!prompt.trim() || !activeProjectId}
-                onClick={handleGenerate}
-                title={`${modelConfig.label} | ${videoSettings.ratio} | ${videoSettings.duration}s | ${videoSettings.resolution}`}
-              >
-                <strong>{activeGenerationCount > 0 ? "WORKING" : "GENERATE"}</strong>
-                <small>{videoSettings.duration}S · {videoSettings.resolution}</small>
-              </button>
             </div>
+            <button
+              className={`video-frame-btn ${activeGenerationCount > 0 ? "cafe-loading" : ""}`}
+              type="button"
+              disabled={!prompt.trim() || !activeProjectId}
+              onClick={handleGenerate}
+              aria-label={activeGenerationCount > 0 ? "Video generation running" : "Generate video"}
+              title={`${modelConfig.label} | ${videoSettings.ratio} | ${videoSettings.duration}s | ${videoSettings.resolution}`}
+            >
+              <span className="generate-icon" aria-hidden="true"></span>
+            </button>
           </div>
         </section>
       </main>
