@@ -69,6 +69,9 @@ single failure should be inspected rather than blindly rerun until it passes.
 
 ## Next evaluation layer
 
+This is planned work rather than part of the current automated baseline. Its
+priority and completion criteria are maintained in `docs/ROADMAP.md`.
+
 The next layer should add paired generation trials for a smaller subset:
 
 - Raw user prompt.

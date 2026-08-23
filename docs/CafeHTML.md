@@ -8,7 +8,7 @@
 
 A structured AI media creation pipeline. Not a prompt box — a reference-based generation system where the user builds a scene from real images and the system writes the generation brief automatically.
 
-Current scope: Image generation (FRAME mode) and the active Video workspace (SCENE mode). Audio and the full Timeline remain future tabs.
+Current product scope: Image generation (FRAME mode) and the active Video workspace (SCENE mode). A substantial music workstation exists at `/music-test`, but it remains a prototype until it is integrated as the AUDIO product. The full Timeline is not built. Planned work and completion criteria live in `docs/ROADMAP.md`.
 
 ---
 
@@ -38,7 +38,7 @@ Current storage/recovery notes:
 - `generation-jobs` records are written before image/video generation requests start. On refresh or browser crash, running jobs are restored as interrupted placeholders instead of silently disappearing.
 - Image prompt settings persist under `cafehtml-image-prompt-settings`, including aspect ratio and variation count.
 - Video prompt/settings drafts persist separately under the video local-storage keys.
-- True server-side Veo resume is still a future improvement; the current browser-side job store prevents silent loss and gives the user a clear retry state after interruption.
+- True server-side Veo resume is not yet implemented; the current browser-side job store prevents silent loss and gives the user a clear retry state after interruption. Durable operation resume is tracked in `docs/ROADMAP.md`.
 
 Local dev note:
 - The working dev-server launch in this Windows workspace is a hidden non-interactive `cmd /c npm run dev` start. `Start-Process npm` is unreliable here because PowerShell sees duplicate `Path` / `PATH` entries, and Next may need approval-backed startup because the sandbox can block child-process spawning with `spawn EPERM`.
@@ -48,14 +48,14 @@ Debug capture:
 - The payload is runtime-scoped to the current browser tab and is meant for checking the latest prompt, settings, module files, manifest, request size, result status, and structured HTTP error details without manual copy/paste.
 
 Brief Agent:
-- The prompt bar owns the first mock Brief Agent console. It opens on prompt focus, collapses on outside click, and shifts the Gallery down while open.
-- `src/lib/brief-agent/types.ts` defines the first `BriefDraft` contract. `src/lib/brief-agent/mockPlanner.ts` fills that contract from active module files until a real planner API is added.
-- `src/app/api/brief-agent/route.ts` is the first agent harness boundary. The prompt bar calls it through `src/lib/brief-agent/client.ts`; the route tries a Vertex text planner first and falls back to the mock planner if `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` or model access is unavailable.
+- The prompt bar owns the active Brief Agent console. It opens on prompt focus, collapses on outside click, and shifts the Gallery down while open.
+- `src/lib/brief-agent/types.ts` defines the `BriefDraft` and persistent run contracts. The deterministic mock planner remains a fallback and test fixture; it is not the primary product planner.
+- `src/app/api/brief-agent/route.ts` is the server-backed planner boundary. The prompt bar calls it through `src/lib/brief-agent/client.ts`; the route uses the configured Gemini planner and falls back to the deterministic planner only when model configuration or access is unavailable.
 - `src/lib/brief-agent/skillContract.ts` holds the reusable Subject/Scene/Style and strength contract. Drafts pass through this compiler/check layer before returning to the UI, so role-boundary repairs and warnings are visible as checks.
 - `src/app/api/brief-agent/read-references/route.ts` is the first image reader. The prompt bar sends active module images, roles, labels, and strengths; the route returns vision-backed `ReferenceObservation` facts before planning.
 - Vision reference snapshots are cached in browser storage by module fingerprint. The console reports `CACHE: HIT`, `MISS`, `SAVED`, or `UNAVAILABLE`.
 - Brief drafts include a clarification state. When the user instruction is empty or too broad, the console asks role-specific questions and withholds the final prompt preview.
-- While the console is open, Enter submits a mock agent message instead of generating. The transcript renders newest-first with timestamps. Active references are read into a snapshot separately from the conversation and are reused until modules change.
+- While the console is open, Enter submits an agent message instead of generating directly. The transcript renders newest-first with timestamps. Active references are read into a snapshot separately from the conversation and are reused until modules change.
 - FRAME uses the agent final prompt when a clean `BriefDraft.finalPrompt` exists. If the user types after that draft, the console marks `UNSUBMITTED CHANGE` and blocks FRAME until Enter sends the new text to the agent.
 - Agent-managed FRAME runs bypass the legacy `buildSimplePrompt()` wrapper. The pipeline uses `BriefDraft.finalPrompt` directly and sends only lean role/label reference instructions so the old strength prompt text does not re-wrap the agent prompt.
 
@@ -335,7 +335,7 @@ Current Next.js implementation note (`src/components/Studio.tsx`, `src/component
 - **Gallery return** — replaces the original Gallery image in place with the selected active Studio image
 - **Module return** — replaces the module image in place and keeps the same module image UUID so Studio history remains attached
 - **References are image-specific** — Studio module/reference layers are stored as `layers` on the same per-UUID Studio session
-- **No automatic Gallery publishing** — Studio outputs do not auto-add new Gallery rows. Future behavior should be an explicit “Save to Gallery” action.
+- **No automatic Gallery publishing** — Studio outputs do not auto-add new Gallery rows. An explicit Save to Gallery action is an unscheduled design option in `docs/ROADMAP.md`, not a committed feature.
 - **REFINE stays active** — the Studio `REFINE` button is no longer visually disabled during in-flight Studio generations.
 
 ### Studio Reference Panel (`studio-module.js`)
@@ -475,10 +475,13 @@ No `CafeEntities` registry — direct window globals only.
 
 ---
 
-## Future Components (not built)
+## Planned Product Surfaces
 
-- **Audio Tab** — scoring, voiceover, sound design
-- **Timeline Tab** — full editing, trimming, transitions, and final assembly
+- **AUDIO** — a working music prototype exists at `/music-test`; product integration, persistence, recovery, and navigation are planned next.
+- **Timeline** — full editing, trimming, transitions, assembly, and final export remain later work.
+- **Studio Mask/Vector** — `/mask-test` and `/vector-test` are prototypes pending an explicit integrate-or-remove decision.
+
+See `docs/ROADMAP.md` for priority and completion criteria. These entries are not evidence that a user-facing feature is complete.
 - **SCENE mode** — shot-by-shot video pipeline
 
 ---

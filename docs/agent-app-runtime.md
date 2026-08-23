@@ -59,6 +59,9 @@ Approval commands apply only to app-changing proposals: `/pending` shows waiting
 
 ## Next runtime milestones
 
+These are roadmap items, not current capabilities. Priority and completion
+criteria are maintained in `docs/ROADMAP.md`.
+
 1. Route manual UI mutations through the same typed command layer.
 2. Extend approval objects to image editing, replacement, and destructive actions.
 3. Add action/observation iterations so the model can inspect results and choose a bounded next step.

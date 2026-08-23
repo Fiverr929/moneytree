@@ -1,66 +1,35 @@
-# Problem Log
+# Current Problem Log
 
----
+This file contains reproducible defects in the current Next.js product. Planned
+features belong in `docs/ROADMAP.md`; completed work belongs in `docs/log.md`.
+The former April 2026 compiler issue list described the legacy HTML/JavaScript
+implementation and is preserved by Git history.
 
-## 2026-04-18 — Vision and Prompt (Compiler)
+## Open defects
 
-1. ~~**Vision output truncated**~~ — **FIXED.** `maxOutputTokens` raised to 1024. `PROSE` suffix added to all prompts. Thinking budget disabled.
+| ID | Surface | Reproduction | Expected result |
+|---|---|---|---|
+| UI-1 | Help | Open the main CafeHTML menu and select **HELP**. | A current in-app guide opens. The control presently has no action. |
+| PROJECT-1 | Project import | Open Projects and select **Import**. | A `.cafe` project can be selected and restored. The control presently logs a development message only. |
+| PROJECT-2 | Project export | Select **EXPORT** from the main menu. | The active `.cafe` project is downloaded. The command presently opens Projects, where only evaluation export is implemented. |
 
-2. ~~**STYLE module not scanned**~~ — **FIXED.** `VisionScan.describeStyle()` called on STYLE image upload. Same layer structure as SUBJECT/STAGE.
+## Partial safeguards, not open legacy defects
 
-3. ~~**Slots not separated in enhancer**~~ — **FIXED.** Manifest entries carry slot labels. Enhancer knows slots are independent sets.
+- The former “no feedback loop” issue is complete in the current product:
+  ratings, user feedback, AI review, prompt revision, persistence, and evaluation
+  export are implemented.
+- Prompt/reference contradictions are partially addressed by the current
+  Subject/Scene/Style contracts, reference observations, and explicit cross-role
+  identity safeguards. General conflict explanation and resolution remains
+  roadmap work, not an absent pipeline.
+- The legacy VisionScan status issue does not describe the current reference
+  reader. Current failures surface in the agent activity state and fall back
+  without silently blocking generation.
+- The former sequence-bar context issue was superseded by the active VIDEO
+  workspace and its persisted project drafts.
 
-4. ~~**Vision scan has no goal context**~~ — **FIXED.** All prompts are extraction-focused and role-specific.
+## Reporting rule
 
-5. ~~**Custom layer names get no context**~~ — **FIXED.** Generic fallback in `vision.js` uses layer name as context.
-
-6. ~~**Enhancer has no system knowledge**~~ — **FIXED.** `SYSTEM_INSTRUCTION` in `enhancer.js` fully describes CafeHTML's structure to the model.
-
-7. ~~**Enhancer doesn't know the generation model**~~ — **FIXED.** System instruction references nano-banana and positional image references.
-
-8. ~~**Vision data sent twice to enhancer**~~ — **FIXED.** Manifest is the single source. Compiled string removed.
-
-9. ~~**fal.ai path ignores enhanced prompt**~~ — **REMOVED.** fal.ai removed from codebase entirely.
-
-10. ~~**compilePrompt() and enhancer competing**~~ — **FIXED.** `compilePrompt()` removed. Enhancer is the only prompt system.
-
-11. ~~**Enhancer never sees actual images**~~ — **FIXED.** Enhancer sends all images inline to Gemini 2.5 Flash, which analyzes them directly.
-
-12. **No feedback loop** — OPEN. No rating, no iteration, no memory of which prompts produced good results. See `IDEA.md` #2.
-
-13. ~~**Structured module hierarchy destroyed before AI**~~ — **FIXED.** Manifest carries slot/layer/section hierarchy. AI sees the full structure.
-
-15. ~~**No way to reload a frame's module state**~~ — **FIXED.** `info-popup-yes` loads `cell.moduleSnapshot` via `Workspace.applyModuleState()`.
-
-16. ~~**Favourites not persisted**~~ — **REMOVED.** Favourites feature removed.
-
-17. **Vision scan has no UI feedback** — PARTIAL. `scanning` class added to `.clr-main` during scan. No failure indicator yet.
-
-18. **Prompt bar and module state can silently contradict** — OPEN. Conflict detection not built. See `IDEA.md` #4 (Witty Director).
-
-19. ~~**Gallery cell doesn't record which images were used**~~ — **FIXED.** `usedImages` stored per cell, rendered in info panel.
-
-20. ~~**PRECISE and CREATIVE are too shallow**~~ — **REMOVED.** PRECISE/CREATIVE mode removed entirely from the app.
-
-21. ~~**No vision scan cache**~~ — **FIXED.** `_cache` and `_inFlight` dedup in `vision.js`. Session-persistent, keyed by image content + layer context.
-
-22. ~~**Global Reference images have no vision scan**~~ — **FIXED.** `VisionScan.describeRef()` called on ref chip upload.
-
-23. ~~**Enhancer's user intent input is the wrong data**~~ — **FIXED.** `payload.prompt` (raw user text) passed directly to enhancer.
-
----
-
-## 2026-04-20 — Image Manifest Architecture
-
-Resolved issues 3, 8, 11, 13 by building the manifest-first pipeline. Full details in git history.
-
----
-
-## Open Issues
-
-| # | Issue | Notes |
-|---|---|---|
-| 12 | No feedback loop | Needs rating UI on gallery cells + generation history log |
-| 17 | No vision scan failure indicator | `scanning` class exists, failure state not shown |
-| 18 | Prompt/module conflict detection | Witty Director agent — future feature |
-| V1 | Sequence bar loses all context for video | Deferred to Video tab build |
+Add an issue here only when it includes a repeatable action, an observed result,
+and an expected result. Ideas, milestones, and architectural preferences should
+be added to the roadmap only after they have a user-facing completion test.
