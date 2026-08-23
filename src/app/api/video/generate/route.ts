@@ -341,7 +341,6 @@ export async function POST(request: Request) {
       aspectRatio: input.aspectRatio,
       durationSeconds: input.durationSeconds,
       resolution: input.resolution,
-      generateAudio: true,
     };
 
     if (input.negativePrompt?.trim()) config.negativePrompt = input.negativePrompt.trim();

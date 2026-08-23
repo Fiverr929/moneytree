@@ -41,6 +41,8 @@ import {
   recallAgentMemories,
   rememberAgentMemory,
 } from "@/lib/brief-agent/memory";
+import CloseIcon from "@/components/ui/CloseIcon";
+import { useProjectDraft } from "@/hooks/useProjectDraft";
 
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
 const IMAGE_PROMPT_SETTINGS_KEY = "cafehtml-image-prompt-settings";
@@ -270,10 +272,9 @@ export default function PromptBar() {
   const [imagePromptSettingsLoaded, setImagePromptSettingsLoaded] = useState(false);
   
   // Prompt Input state
-  const [promptText, setPromptText] = useState("");
+  const [promptText, setPromptText] = useProjectDraft(PROMPT_DRAFT_STORAGE_KEY, activeProjectId);
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [draftProjectId, setDraftProjectId] = useState<number | null>(null);
   const [agentConsoleOpen, setAgentConsoleOpen] = useState(false);
   const [agentWorkspaceHydrating, setAgentWorkspaceHydrating] = useState(true);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
@@ -453,7 +454,7 @@ export default function PromptBar() {
     };
     window.addEventListener("set-prompt", handleSetPrompt);
     return () => window.removeEventListener("set-prompt", handleSetPrompt);
-  }, []);
+  }, [setPromptText]);
 
   useEffect(() => {
     try {
@@ -496,7 +497,6 @@ export default function PromptBar() {
     let cancelled = false;
     setAgentWorkspaceHydrating(true);
     agentRunHydratedProjectRef.current = null;
-    setDraftProjectId(null);
     setGenerationError("");
     setAgentMessages([]);
     agentMessagesRef.current = [];
@@ -528,14 +528,6 @@ export default function PromptBar() {
     setReferenceReadModel(null);
     setReferenceReadPending(false);
     setGenerationActivity(null);
-    try {
-      const savedDraft = window.localStorage.getItem(`${PROMPT_DRAFT_STORAGE_KEY}:${activeProjectId || "none"}`);
-      setPromptText(savedDraft || "");
-    } catch {
-      setPromptText("");
-      // Ignore storage access issues in embedded browsers.
-    }
-    setDraftProjectId(activeProjectId);
     if (activeProjectId) {
       const clearedKey = agentRunClearedStorageKey(activeProjectId);
       if (window.localStorage.getItem(clearedKey)) {
@@ -634,15 +626,6 @@ export default function PromptBar() {
       setRestoredReviewTargetKeys([]);
     }
   }, [gallery.cells, restoredReviewTargetKeys]);
-
-  useEffect(() => {
-    if (!activeProjectId || draftProjectId !== activeProjectId) return;
-    try {
-      window.localStorage.setItem(`${PROMPT_DRAFT_STORAGE_KEY}:${activeProjectId}`, promptText);
-    } catch {
-      // Ignore storage access issues in embedded browsers.
-    }
-  }, [activeProjectId, draftProjectId, promptText]);
 
   const handleGenerate = async (
     approvedArtifact?: NonNullable<AgentMessage["promptArtifact"]>,
@@ -2211,6 +2194,7 @@ export default function PromptBar() {
           <button
             className="prompt-clear-input"
             type="button"
+            disabled={!promptText}
             aria-label="Clear input"
             title="Clear input"
             onPointerDown={(event) => {
@@ -2225,7 +2209,7 @@ export default function PromptBar() {
               window.requestAnimationFrame(() => inputRef.current?.focus());
             }}
           >
-            <span aria-hidden="true">&times;</span>
+            <CloseIcon />
           </button>
         </div>
         <button
