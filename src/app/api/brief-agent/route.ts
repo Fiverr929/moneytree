@@ -744,6 +744,18 @@ function describeBriefAgentError(error: unknown) {
   if (lower.includes("resource_exhausted") || lower.includes("quota") || lower.includes("rate") || lower.includes("429")) {
     return { message: "Brief agent model quota or rate limit was hit. Wait a moment and try again.", status: 429 };
   }
+  if (
+    lower.includes("high demand")
+    || lower.includes("unavailable")
+    || lower.includes('"code":503')
+    || lower.includes(" 503")
+  ) {
+    return {
+      message: "The Gemini agent model is temporarily busy. CafeHTML will retry automatically.",
+      status: 503,
+      retryAfterSeconds: 3,
+    };
+  }
   if (lower.includes("permission_denied") || lower.includes("permission denied") || lower.includes("403")) {
     return { message: "Vertex AI access was denied. Check the project, API enablement, and the account's Vertex AI permissions.", status: 403 };
   }
@@ -796,8 +808,17 @@ export async function POST(request: Request) {
   } catch (error) {
     const described = describeBriefAgentError(error);
     return NextResponse.json(
-      { error: described.message },
-      { status: described.status, headers: { "X-CafeHTML-Request-Id": requestId } },
+      {
+        error: described.message,
+        ...(described.retryAfterSeconds ? { retryAfterSeconds: described.retryAfterSeconds } : {}),
+      },
+      {
+        status: described.status,
+        headers: {
+          "X-CafeHTML-Request-Id": requestId,
+          ...(described.retryAfterSeconds ? { "Retry-After": String(described.retryAfterSeconds) } : {}),
+        },
+      },
     );
   }
 }

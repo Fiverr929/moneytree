@@ -6,6 +6,7 @@ import type {
   GenerationInspectionRequest,
   GenerationInspectionResponse,
 } from "./types";
+import { localGeminiHeaders } from "@/lib/localGeminiAuth";
 
 export class ReferenceReadRequestError extends Error {
   status: number;
@@ -19,11 +20,18 @@ export class ReferenceReadRequestError extends Error {
   }
 }
 
-function localGeminiHeaders(apiKey?: string | null): Record<string, string> {
-  if (typeof window === "undefined" || !apiKey?.trim()) return {};
-  const hostname = window.location.hostname.toLowerCase();
-  if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "[::1]") return {};
-  return { "X-CafeHTML-Local-Gemini-Key": apiKey.trim() };
+function waitForRetry(delayMs: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("The request was cancelled.", "AbortError"));
+      return;
+    }
+    const timer = globalThis.setTimeout(resolve, delayMs);
+    signal?.addEventListener("abort", () => {
+      globalThis.clearTimeout(timer);
+      reject(new DOMException("The request was cancelled.", "AbortError"));
+    }, { once: true });
+  });
 }
 
 export async function requestGenerationInspection(
@@ -90,30 +98,45 @@ export async function requestBriefAgent(
   apiKey?: string | null,
   signal?: AbortSignal,
 ): Promise<BriefAgentResponse> {
-  const response = await fetch("/api/brief-agent", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...localGeminiHeaders(apiKey),
-    },
-    body: JSON.stringify(input),
-    signal,
-  });
+  const body = JSON.stringify(input);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await fetch("/api/brief-agent", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...localGeminiHeaders(apiKey),
+      },
+      body,
+      signal,
+    });
 
-  const data = await response.json().catch(() => null);
-  const requestId = response.headers.get("x-cafehtml-request-id");
-  if (!response.ok) {
-    const message = apiErrorMessage(data, "Brief agent request failed.");
-    throw new Error(requestId ? `${message} (Request ${requestId})` : message);
+    const data = await response.json().catch(() => null);
+    const requestId = response.headers.get("x-cafehtml-request-id");
+    if (!response.ok) {
+      const message = apiErrorMessage(data, "Brief agent request failed.");
+      if (response.status === 503 && attempt < 2) {
+        const retryAfterSeconds = Number((data as { retryAfterSeconds?: unknown } | null)?.retryAfterSeconds)
+          || Number(response.headers.get("retry-after"))
+          || [2, 5][attempt];
+        await waitForRetry(Math.max(1, retryAfterSeconds) * 1_000, signal);
+        continue;
+      }
+      const finalMessage = response.status === 503
+        ? "The Gemini agent is still busy after automatic retries. Use RETRY or /retry in a moment."
+        : message;
+      throw new Error(requestId ? `${finalMessage} (Request ${requestId})` : finalMessage);
+    }
+
+    if (!validBriefAgentResponse(data)) {
+      throw new Error(requestId
+        ? `The brief agent returned an incomplete response. Try again. (Request ${requestId})`
+        : "The brief agent returned an incomplete response. Try again.");
+    }
+
+    return data;
   }
 
-  if (!validBriefAgentResponse(data)) {
-    throw new Error(requestId
-      ? `The brief agent returned an incomplete response. Try again. (Request ${requestId})`
-      : "The brief agent returned an incomplete response. Try again.");
-  }
-
-  return data;
+  throw new Error("The Gemini agent is temporarily unavailable. Use RETRY or /retry in a moment.");
 }
 
 export async function requestReferenceRead(

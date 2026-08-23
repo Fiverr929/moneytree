@@ -1,3 +1,5 @@
+import { localGeminiHeaders } from "@/lib/localGeminiAuth";
+
 export type VeoGenerationRequest = {
   modelId: string;
   prompt: string;
@@ -17,13 +19,6 @@ export type VeoGenerationRequest = {
 export type GeneratedVideoResult = {
   blob: Blob;
 };
-
-function localGeminiHeaders(apiKey?: string | null): Record<string, string> {
-  if (typeof window === "undefined" || !apiKey?.trim()) return {};
-  const hostname = window.location.hostname.toLowerCase();
-  if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) return {};
-  return { "X-CafeHTML-Local-Gemini-Key": apiKey.trim() };
-}
 
 export async function generateVeoVideo(
   request: VeoGenerationRequest,
