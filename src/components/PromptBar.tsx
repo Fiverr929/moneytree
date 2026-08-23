@@ -2194,7 +2194,6 @@ export default function PromptBar() {
           <button
             className="prompt-clear-input"
             type="button"
-            disabled={!promptText}
             aria-label="Clear input"
             title="Clear input"
             onPointerDown={(event) => {
