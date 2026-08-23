@@ -9,6 +9,8 @@ import { useGallery } from "@/context/GalleryContext";
 import { useSettings } from "@/context/SettingsContext";
 import DB from "@/lib/db";
 import { generateVeoVideo } from "@/lib/video/api";
+import CloseIcon from "@/components/ui/CloseIcon";
+import { useProjectDraft } from "@/hooks/useProjectDraft";
 
 const VIDEO_SETTINGS_KEY = "cafehtml-video-settings";
 const VIDEO_PROMPT_DRAFT_KEY = "cafehtml-video-prompt";
@@ -55,6 +57,7 @@ type GeneratedVideoClip = {
   prompt?: string;
   modelId?: string;
   aspectRatio?: VideoRatio;
+  resolution?: VideoResolution;
   createdAt?: string;
   sequenceOrder?: number;
 };
@@ -68,6 +71,7 @@ type StoredVideoRecord = {
   prompt: string;
   modelId: string;
   aspectRatio?: VideoRatio;
+  resolution?: VideoResolution;
   createdAt: string;
   sequenceOrder: number;
 };
@@ -81,6 +85,7 @@ type StoredGenerationJob = {
   modelId?: string;
   aspectRatio?: VideoRatio;
   duration?: VideoDuration;
+  resolution?: VideoResolution;
   sequenceOrder?: number;
   createdAt: string;
 };
@@ -105,6 +110,36 @@ function formatVideoTime(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = Math.floor(seconds % 60);
   return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function describeVideoError(error: unknown) {
+  let message = error instanceof Error ? error.message : String(error || "");
+  try {
+    const parsed = JSON.parse(message) as { error?: { message?: string } | string; message?: string };
+    message = typeof parsed.error === "string"
+      ? parsed.error
+      : parsed.error?.message || parsed.message || message;
+  } catch {
+    // The error was already plain text.
+  }
+
+  const normalized = message.toLowerCase();
+  if (normalized.includes("generateaudio") && normalized.includes("developer api")) {
+    return "Audio generation is unavailable with the Gemini Developer API. Video generation will continue without generated audio.";
+  }
+  if (normalized.includes("429") || normalized.includes("resource_exhausted") || normalized.includes("quota")) {
+    return "Video generation is temporarily rate-limited. Wait a moment, then retry.";
+  }
+  if (normalized.includes("api key") || normalized.includes("unauthenticated") || normalized.includes("permission_denied")) {
+    return "Video generation could not authenticate. Check the Gemini API key in Settings.";
+  }
+  if (normalized.includes("safety") || normalized.includes("blocked")) {
+    return "This video request was blocked by the provider's safety checks. Adjust the prompt and retry.";
+  }
+  if (normalized.includes("fetch") || normalized.includes("network")) {
+    return "The video service could not be reached. Check the connection and retry.";
+  }
+  return message.replace(/\s+/g, " ").trim().slice(0, 240) || "Video generation failed. Please retry.";
 }
 
 const VIDEO_MODELS: Record<VideoModelKey, {
@@ -210,9 +245,9 @@ function normalizeVideoSettings(settings: VideoSettings): VideoSettings {
 
 export default function VideoPage() {
   const { activeProjectId } = useApp();
-  const { cells: galleryCells } = useGallery();
+  const { cells: galleryCells, isGalleryLoading } = useGallery();
   const { geminiApiKey } = useSettings();
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useProjectDraft(VIDEO_PROMPT_DRAFT_KEY, activeProjectId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileSettingsTab, setMobileSettingsTab] = useState<"generation" | "direction">("generation");
   const [videoSettings, setVideoSettings] = useState<VideoSettings>(DEFAULT_VIDEO_SETTINGS);
@@ -232,7 +267,10 @@ export default function VideoPage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
-  const [draftProjectId, setDraftProjectId] = useState<number | null>(null);
+  const [volume, setVolume] = useState(1);
+  const [isLooping, setIsLooping] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [videoLibraryLoading, setVideoLibraryLoading] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -240,12 +278,14 @@ export default function VideoPage() {
   const generatedClipsRef = useRef<GeneratedVideoClip[]>([]);
   const activeProjectIdRef = useRef<number | null>(activeProjectId);
   const discardedClipIdsRef = useRef(new Set<string>());
+  const resumePlaybackRef = useRef(false);
 
   const modelConfig = VIDEO_MODELS[videoSettings.model];
   const durationLocked = videoSettings.resolution !== "720p"
     || (videoSettings.inputMode === "references" && modelConfig.referencesRequireEightSeconds);
   const sequenceClips = generatedClips.filter((clip) => (clip.sequenceOrder ?? -1) >= 0);
   const selectedClip = generatedClips.find((clip) => clip.id === selectedClipId);
+  const selectedSequenceIndex = sequenceClips.findIndex((clip) => clip.id === selectedClipId);
   const hasSelectedVideo = !!selectedClip?.url;
   const galleryMedia: VideoMedia[] = galleryCells
     .filter((cell) => cell.kind === "image" && !!cell.imgUrl && !cell.loadingId && !cell.blocked && !cell.error)
@@ -294,25 +334,6 @@ export default function VideoPage() {
   }, []);
 
   useEffect(() => {
-    setDraftProjectId(null);
-    try {
-      setPrompt(window.localStorage.getItem(`${VIDEO_PROMPT_DRAFT_KEY}:${activeProjectId || "none"}`) || "");
-    } catch {
-      setPrompt("");
-    }
-    setDraftProjectId(activeProjectId);
-  }, [activeProjectId]);
-
-  useEffect(() => {
-    if (!activeProjectId || draftProjectId !== activeProjectId) return;
-    try {
-      window.localStorage.setItem(`${VIDEO_PROMPT_DRAFT_KEY}:${activeProjectId}`, prompt);
-    } catch {
-      // Ignore storage access issues in embedded browsers.
-    }
-  }, [activeProjectId, draftProjectId, prompt]);
-
-  useEffect(() => {
     void navigator.storage?.persist?.().catch(() => false);
   }, []);
 
@@ -332,7 +353,14 @@ export default function VideoPage() {
       }
     };
     document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsOpen(false);
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("click", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
   }, []);
 
   useEffect(() => {
@@ -357,7 +385,14 @@ export default function VideoPage() {
   }, [selectedClipId]);
 
   useEffect(() => {
+    const handleFullscreenChange = () => setIsFullscreen(document.fullscreenElement === previewRef.current);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
+    setVideoLibraryLoading(Boolean(activeProjectId));
 
     setMedia([]);
     setMediaFolder("image");
@@ -396,6 +431,7 @@ export default function VideoPage() {
                 prompt: record.prompt,
                 modelId: record.modelId,
                 aspectRatio,
+                resolution: record.resolution,
                 createdAt: record.createdAt,
                 sequenceOrder: record.sequenceOrder,
               };
@@ -425,6 +461,7 @@ export default function VideoPage() {
           prompt: job.prompt,
           modelId: job.modelId,
           aspectRatio: job.aspectRatio,
+          resolution: job.resolution,
           createdAt: job.createdAt,
           sequenceOrder: job.sequenceOrder ?? -1,
         }));
@@ -441,7 +478,10 @@ export default function VideoPage() {
         )));
       })
       .catch((error) => {
-        if (!cancelled) setGenerationError(error instanceof Error ? error.message : String(error));
+        if (!cancelled) setGenerationError(describeVideoError(error));
+      })
+      .finally(() => {
+        if (!cancelled) setVideoLibraryLoading(false);
       });
 
     return () => {
@@ -482,8 +522,80 @@ export default function VideoPage() {
   const toggleMute = () => {
     const player = playerRef.current;
     if (!player) return;
-    player.muted = !player.muted;
-    setIsMuted(player.muted);
+    if (player.muted || player.volume === 0) {
+      if (player.volume === 0) player.volume = volume > 0 ? volume : 0.5;
+      player.muted = false;
+    } else {
+      player.muted = true;
+    }
+    setIsMuted(player.muted || player.volume === 0);
+  };
+
+  const handleVolumeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const player = playerRef.current;
+    const nextVolume = Math.min(1, Math.max(0, Number(event.target.value)));
+    if (!player || !Number.isFinite(nextVolume)) return;
+    player.volume = nextVolume;
+    player.muted = nextVolume === 0;
+    setVolume(nextVolume);
+    setIsMuted(nextVolume === 0);
+  };
+
+  const selectAdjacentClip = (offset: -1 | 1, continuePlayback = false) => {
+    if (selectedSequenceIndex < 0) return;
+    const nextClip = sequenceClips[selectedSequenceIndex + offset];
+    if (!nextClip?.url) return;
+    resumePlaybackRef.current = continuePlayback;
+    setSelectedClipId(nextClip.id);
+  };
+
+  const handlePlayerEnded = () => {
+    setIsPlaying(false);
+    if (isLooping && playerRef.current) {
+      playerRef.current.currentTime = 0;
+      void playerRef.current.play().catch(() => undefined);
+      return;
+    }
+    if (selectedSequenceIndex >= 0 && selectedSequenceIndex < sequenceClips.length - 1) {
+      selectAdjacentClip(1, true);
+    }
+  };
+
+  const handlePlayerKeyDown = (event: React.KeyboardEvent<HTMLVideoElement>) => {
+    const player = playerRef.current;
+    if (!player) return;
+    if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      togglePlayback();
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      const direction = event.key === "ArrowLeft" ? -1 : 1;
+      player.currentTime = Math.min(playbackDuration || 0, Math.max(0, player.currentTime + direction * 5));
+    } else if (event.key.toLowerCase() === "m") {
+      event.preventDefault();
+      toggleMute();
+    } else if (event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      void toggleFullscreen();
+    } else if (event.key.toLowerCase() === "d") {
+      event.preventDefault();
+      downloadSelectedClip();
+    }
+  };
+
+  const downloadSelectedClip = () => {
+    if (!selectedClip?.url) return;
+    const created = selectedClip.createdAt ? new Date(selectedClip.createdAt) : new Date();
+    const stamp = Number.isNaN(created.getTime())
+      ? Date.now().toString()
+      : created.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+    const extension = selectedClip.blob?.type.includes("webm") ? "webm" : "mp4";
+    const link = document.createElement("a");
+    link.href = selectedClip.url;
+    link.download = `cafehtml-video-${stamp}.${extension}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
   const toggleFullscreen = async () => {
@@ -495,7 +607,7 @@ export default function VideoPage() {
         await previewRef.current.requestFullscreen();
       }
     } catch (error) {
-      setGenerationError(error instanceof Error ? error.message : "Fullscreen is unavailable.");
+      setGenerationError(describeVideoError(error));
     }
   };
 
@@ -528,7 +640,7 @@ export default function VideoPage() {
       setMedia((current) => [...current, ...additions]);
       setMediaFolder("uploads");
     } catch (error) {
-      setGenerationError(error instanceof Error ? error.message : "Could not load the selected images.");
+      setGenerationError(describeVideoError(error));
     } finally {
       event.target.value = "";
     }
@@ -567,6 +679,9 @@ export default function VideoPage() {
 
   const removeGeneratedClip = (id: string) => {
     const clip = generatedClips.find((entry) => entry.id === id);
+    if (!clip || !window.confirm(clip.status === "loading"
+      ? "Cancel and remove this video generation?"
+      : "Delete this video permanently? This cannot be undone.")) return;
     const clipIndex = generatedClips.findIndex((entry) => entry.id === id);
     const nextSelectedId = generatedClips[clipIndex + 1]?.id || generatedClips[clipIndex - 1]?.id || null;
     if (clip?.status === "loading") discardedClipIdsRef.current.add(id);
@@ -574,10 +689,10 @@ export default function VideoPage() {
     setGeneratedClips((current) => current.filter((entry) => entry.id !== id));
     setSelectedClipId((selectedId) => selectedId === id ? nextSelectedId : selectedId);
     void DB.videos.delete(id).catch((error) => {
-      setGenerationError(error instanceof Error ? error.message : String(error));
+      setGenerationError(describeVideoError(error));
     });
     void DB.generationJobs.delete(id).catch((error) => {
-      setGenerationError(error instanceof Error ? error.message : String(error));
+      setGenerationError(describeVideoError(error));
     });
   };
 
@@ -605,12 +720,13 @@ export default function VideoPage() {
           prompt: clip.prompt || "",
           modelId: clip.modelId || "",
           aspectRatio: clip.aspectRatio,
+          resolution: clip.resolution,
           createdAt: clip.createdAt || new Date().toISOString(),
           sequenceOrder: nextIndex,
         };
       });
     void DB.videos.putMany(records).catch((error) => {
-      setGenerationError(error instanceof Error ? error.message : String(error));
+      setGenerationError(describeVideoError(error));
     });
   };
   const placeDraggedClipInSequence = (targetId: string | null) => {
@@ -645,19 +761,32 @@ export default function VideoPage() {
             prompt: clip.prompt || "",
             modelId: clip.modelId || "",
             aspectRatio: clip.aspectRatio,
+            resolution: clip.resolution,
             createdAt: clip.createdAt || new Date().toISOString(),
             sequenceOrder: nextIndex,
           };
         });
       void DB.videos.putMany(records).catch((error) => {
-        setGenerationError(error instanceof Error ? error.message : String(error));
+        setGenerationError(describeVideoError(error));
       });
     }
     setDraggedClipId(null);
   };
-  const handleGenerate = () => {
-    const trimmedPrompt = prompt.trim();
+  const handleGenerate = (retryClip?: GeneratedVideoClip) => {
+    const trimmedPrompt = retryClip?.prompt?.trim() || prompt.trim();
     if (!trimmedPrompt || !activeProjectId) return;
+    const retryModel = retryClip?.modelId
+      ? (Object.keys(VIDEO_MODELS) as VideoModelKey[]).find((key) => VIDEO_MODELS[key].id === retryClip.modelId)
+      : undefined;
+    const requestSettings = normalizeVideoSettings({
+      ...videoSettings,
+      model: retryModel || videoSettings.model,
+      ratio: retryClip?.aspectRatio || videoSettings.ratio,
+      duration: retryClip?.duration || videoSettings.duration,
+      resolution: retryClip?.resolution || videoSettings.resolution,
+      variations: retryClip ? 1 : videoSettings.variations,
+    });
+    const requestModelConfig = VIDEO_MODELS[requestSettings.model];
     const launchProjectId = activeProjectId;
     const startFrame = startFrameId ? mediaById.get(startFrameId)?.url : undefined;
     const endFrame = endFrameId ? mediaById.get(endFrameId)?.url : undefined;
@@ -665,11 +794,11 @@ export default function VideoPage() {
       .map((id) => id ? mediaById.get(id)?.url : undefined)
       .filter((url): url is string => !!url);
 
-    if (videoSettings.inputMode === "frames" && endFrame && !startFrame) {
+    if (requestSettings.inputMode === "frames" && endFrame && !startFrame) {
       setGenerationError("Select a START frame before using an END frame.");
       return;
     }
-    if (videoSettings.inputMode === "references" && !references.length) {
+    if (requestSettings.inputMode === "references" && !references.length) {
       setGenerationError("Select at least one reference image.");
       return;
     }
@@ -678,10 +807,14 @@ export default function VideoPage() {
       (highest, clip) => Math.max(highest, clip.sequenceOrder ?? -1),
       -1,
     ) + 1;
-    const loadingClips = Array.from({ length: videoSettings.variations }, (_, variationIndex) => ({
+    const loadingClips = Array.from({ length: requestSettings.variations }, (_, variationIndex) => ({
       id: crypto.randomUUID(),
-      duration: videoSettings.duration,
+      duration: requestSettings.duration,
       status: "loading" as const,
+      prompt: trimmedPrompt,
+      modelId: requestModelConfig.id,
+      aspectRatio: requestSettings.ratio,
+      resolution: requestSettings.resolution,
       sequenceOrder: baseSequenceOrder + variationIndex,
     }));
     setGeneratedClips((current) => [...current, ...loadingClips]);
@@ -690,8 +823,8 @@ export default function VideoPage() {
     setGenerationError("");
 
     loadingClips.forEach((loadingClip, variationIndex) => {
-      const seed = modelConfig.supportsSeed && videoSettings.seed
-        ? Number(videoSettings.seed) + variationIndex
+      const seed = requestModelConfig.supportsSeed && requestSettings.seed
+        ? Number(requestSettings.seed) + variationIndex
         : undefined;
       const createdAt = new Date().toISOString();
 
@@ -702,28 +835,29 @@ export default function VideoPage() {
           kind: "video",
           status: "running",
           prompt: trimmedPrompt,
-          modelId: modelConfig.id,
-          aspectRatio: videoSettings.ratio,
-          duration: videoSettings.duration,
+          modelId: requestModelConfig.id,
+          aspectRatio: requestSettings.ratio,
+          duration: requestSettings.duration,
+          resolution: requestSettings.resolution,
           sequenceOrder: baseSequenceOrder + variationIndex,
           createdAt,
           updatedAt: createdAt,
         }).catch((error) => console.error("Failed to persist video generation job", error));
 
         return generateVeoVideo({
-          modelId: modelConfig.id,
+          modelId: requestModelConfig.id,
           prompt: trimmedPrompt,
-          aspectRatio: videoSettings.ratio,
-          durationSeconds: videoSettings.duration,
-          resolution: videoSettings.resolution,
+          aspectRatio: requestSettings.ratio,
+          durationSeconds: requestSettings.duration,
+          resolution: requestSettings.resolution,
           seed,
-          startFrame: videoSettings.inputMode === "frames" ? startFrame : undefined,
-          endFrame: videoSettings.inputMode === "frames" ? endFrame : undefined,
-          referenceImages: videoSettings.inputMode === "references" ? references : undefined,
-          motionProfile: videoSettings.motionProfile,
-          cameraMotion: videoSettings.cameraMotion,
-          negativePrompt: videoSettings.negativePrompt.trim() || undefined,
-          enhancePrompt: videoSettings.enhancePrompt,
+          startFrame: requestSettings.inputMode === "frames" ? startFrame : undefined,
+          endFrame: requestSettings.inputMode === "frames" ? endFrame : undefined,
+          referenceImages: requestSettings.inputMode === "references" ? references : undefined,
+          motionProfile: requestSettings.motionProfile,
+          cameraMotion: requestSettings.cameraMotion,
+          negativePrompt: requestSettings.negativePrompt.trim() || undefined,
+          enhancePrompt: requestSettings.enhancePrompt,
         }, geminiApiKey);
       };
 
@@ -739,10 +873,11 @@ export default function VideoPage() {
             project_id: launchProjectId,
             blob,
             mimeType: blob.type || "video/mp4",
-            duration: videoSettings.duration,
+            duration: requestSettings.duration,
             prompt: trimmedPrompt,
-            modelId: modelConfig.id,
-            aspectRatio: videoSettings.ratio,
+            modelId: requestModelConfig.id,
+            aspectRatio: requestSettings.ratio,
+            resolution: requestSettings.resolution,
             createdAt: completedAt,
             sequenceOrder: baseSequenceOrder + variationIndex,
           } satisfies StoredVideoRecord);
@@ -754,8 +889,9 @@ export default function VideoPage() {
             blob,
             status: "ready",
             prompt: trimmedPrompt,
-            modelId: modelConfig.id,
-            aspectRatio: videoSettings.ratio,
+            modelId: requestModelConfig.id,
+            aspectRatio: requestSettings.ratio,
+            resolution: requestSettings.resolution,
             createdAt: completedAt,
             sequenceOrder: baseSequenceOrder + variationIndex,
           };
@@ -766,10 +902,10 @@ export default function VideoPage() {
                 (a, b) => (a.sequenceOrder ?? Number.MAX_SAFE_INTEGER) - (b.sequenceOrder ?? Number.MAX_SAFE_INTEGER),
               )
           ));
-          setSelectedClipId(loadingClip.id);
+          setSelectedClipId((current) => current === loadingClip.id || !current ? loadingClip.id : current);
         })
         .catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = describeVideoError(error);
           if (activeProjectIdRef.current === launchProjectId) {
             setGenerationError(message);
             setGeneratedClips((current) => current.map((clip) => (
@@ -806,7 +942,7 @@ export default function VideoPage() {
                   aria-label="Upload images"
                   onClick={() => mediaInputRef.current?.click()}
                 >
-                  +
+                  <img src="/assets/icon-add-child.svg" alt="" aria-hidden="true" />
                 </button>
               </div>
               <div className="video-media-tabs" role="tablist" aria-label="Media sources">
@@ -857,13 +993,14 @@ export default function VideoPage() {
                         <video src={clip.url} muted preload="metadata" />
                         <button
                           type="button"
-                          title="Delete video"
+                          title="Delete video permanently"
+                          aria-label="Delete video permanently"
                           onClick={(event) => {
                             event.stopPropagation();
                             removeGeneratedClip(clip.id);
                           }}
                         >
-                          &times;
+                          <img src="/assets/icon-trash.svg" alt="" aria-hidden="true" />
                         </button>
                       </div>
                     ))
@@ -906,7 +1043,7 @@ export default function VideoPage() {
                               removeMedia(item.id);
                             }}
                           >
-                            &times;
+                            <CloseIcon />
                           </button>
                         )}
                       </div>
@@ -919,14 +1056,19 @@ export default function VideoPage() {
                     <small>GENERATED CLIPS WILL APPEAR HERE</small>
                   </div>
                 )}
-                {mediaFolder !== "video" && visibleMedia.length === 0 && (
+                {mediaFolder === "image" && isGalleryLoading && visibleMedia.length === 0 ? (
+                  <div className="video-media-empty is-loading" role="status" aria-live="polite">
+                    <span>LOADING PROJECT IMAGES</span>
+                    <small>SYNCING MEDIA</small>
+                  </div>
+                ) : mediaFolder !== "video" && visibleMedia.length === 0 && (
                   <button
                     className="video-media-empty"
                     type="button"
                     onClick={() => mediaInputRef.current?.click()}
                   >
                     <span>{mediaFolder === "image" ? "NO GALLERY IMAGES" : "NO UPLOADS YET"}</span>
-                    <small>+ ADD AN IMAGE</small>
+                    <small>ADD AN IMAGE</small>
                   </button>
                 )}
               </div>
@@ -942,12 +1084,22 @@ export default function VideoPage() {
 
             <div
               ref={previewRef}
-              className={`video-preview ${hasSelectedVideo ? "has-video" : "empty"}`}
+              className={`video-preview ${hasSelectedVideo ? "has-video" : "empty"} ${isPlaying ? "is-playing" : ""}`}
             >
-              <div className="video-preview-status" aria-live="polite">
-                <span>{activeGenerationCount > 0 ? `GENERATING ${activeGenerationCount}` : "PREVIEW"}</span>
-                <b>{selectedClip ? `${selectedClip.duration}S · ${selectedClip.aspectRatio || videoSettings.ratio}` : `${videoSettings.ratio} · ${videoSettings.resolution}`}</b>
-              </div>
+              {(activeGenerationCount > 0 || selectedClip) && (
+                <div className="video-preview-status" aria-live="polite">
+                  <span>{activeGenerationCount > 0 ? `GENERATING ${activeGenerationCount}` : `${selectedClip?.duration || 0}S`}</span>
+                  {selectedClip && <b>{selectedClip.aspectRatio || videoSettings.ratio}</b>}
+                </div>
+              )}
+              {generationError && (
+                <div className="video-player-error" role="alert">
+                  <span>{generationError}</span>
+                  <button type="button" aria-label="Dismiss video error" onClick={() => setGenerationError("")}>
+                    <CloseIcon />
+                  </button>
+                </div>
+              )}
               <div className="video-player-surface">
                 <div className="video-monitor-frame">
                   {selectedClip?.url ? (
@@ -962,33 +1114,50 @@ export default function VideoPage() {
                         aria-label={isPlaying ? "Pause video" : "Play video"}
                         onClick={togglePlayback}
                         onDoubleClick={() => void toggleFullscreen()}
-                        onKeyDown={(event) => {
-                          if (event.key === " " || event.key === "Enter") {
-                            event.preventDefault();
-                            togglePlayback();
-                          }
-                        }}
+                        onKeyDown={handlePlayerKeyDown}
                         onLoadedMetadata={(event) => {
-                          setPlaybackDuration(event.currentTarget.duration || 0);
-                          event.currentTarget.volume = 1;
+                          const duration = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;
+                          setPlaybackDuration(duration);
+                          event.currentTarget.volume = volume;
                           event.currentTarget.muted = isMuted;
                         }}
+                        onCanPlay={(event) => {
+                          if (!resumePlaybackRef.current) return;
+                          resumePlaybackRef.current = false;
+                          void event.currentTarget.play().catch(() => undefined);
+                        }}
                         onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-                        onDurationChange={(event) => setPlaybackDuration(event.currentTarget.duration || 0)}
+                        onDurationChange={(event) => setPlaybackDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+                        onVolumeChange={(event) => {
+                          setVolume(event.currentTarget.volume);
+                          setIsMuted(event.currentTarget.muted || event.currentTarget.volume === 0);
+                        }}
                         onPlay={() => setIsPlaying(true)}
                         onPause={() => setIsPlaying(false)}
-                        onEnded={() => setIsPlaying(false)}
+                        onEnded={handlePlayerEnded}
                       />
                   ) : (
-                    <div className="video-empty-preview">
-                      <span className="video-playhead" aria-hidden="true"><i></i></span>
-                      <b>BUILD YOUR FIRST SHOT</b>
-                      <small>ADD A FRAME, DESCRIBE THE MOTION, THEN GENERATE</small>
+                    <div className={`video-empty-preview ${videoLibraryLoading ? "is-loading" : ""}`} role={videoLibraryLoading ? "status" : undefined}>
+                      <span className="video-playhead" aria-hidden="true">
+                        <img src="/assets/icon-video-play.svg" alt="" />
+                      </span>
+                      <b>{videoLibraryLoading ? "LOADING PROJECT VIDEOS" : "BUILD YOUR FIRST SHOT"}</b>
+                      <small>{videoLibraryLoading ? "RESTORING YOUR SEQUENCE" : "ADD A FRAME, DESCRIBE THE MOTION, THEN GENERATE"}</small>
                     </div>
                   )}
                 </div>
               </div>
-              <div className="video-player-footer">
+              {hasSelectedVideo && <div className="video-player-footer">
+                <button
+                  className="video-control-button video-previous-toggle"
+                  type="button"
+                  title="Previous clip"
+                  aria-label="Previous clip"
+                  disabled={selectedSequenceIndex <= 0}
+                  onClick={() => selectAdjacentClip(-1, isPlaying)}
+                >
+                  <img src="/assets/icon-video-previous.svg" alt="" aria-hidden="true" />
+                </button>
                 <button
                   className="video-control-button"
                   type="button"
@@ -997,7 +1166,7 @@ export default function VideoPage() {
                   disabled={!hasSelectedVideo}
                   onClick={togglePlayback}
                 >
-                  {isPlaying ? "II" : "\u25B6"}
+                  <img src={isPlaying ? "/assets/icon-video-pause.svg" : "/assets/icon-video-play.svg"} alt="" aria-hidden="true" />
                 </button>
                 <span className="video-player-time">
                   {formatVideoTime(currentTime)} / {formatVideoTime(playbackDuration)}
@@ -1022,32 +1191,65 @@ export default function VideoPage() {
                   disabled={!hasSelectedVideo}
                   onClick={toggleMute}
                 >
-                  {isMuted ? "MUTE" : "VOL"}
+                  <img src={isMuted ? "/assets/icon-video-muted.svg" : "/assets/icon-video-volume.svg"} alt="" aria-hidden="true" />
+                </button>
+                <input
+                  className="video-volume-slider"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={isMuted ? 0 : volume}
+                  aria-label="Video volume"
+                  onChange={handleVolumeChange}
+                />
+                <button
+                  className={`video-control-button ${isLooping ? "active" : ""}`}
+                  type="button"
+                  title={isLooping ? "Turn loop off" : "Loop clip"}
+                  aria-label={isLooping ? "Turn loop off" : "Loop clip"}
+                  aria-pressed={isLooping}
+                  onClick={() => setIsLooping((current) => !current)}
+                >
+                  <img src="/assets/icon-video-loop.svg" alt="" aria-hidden="true" />
+                </button>
+                <button
+                  className="video-control-button video-download-toggle"
+                  type="button"
+                  title="Download video"
+                  aria-label="Download video"
+                  onClick={downloadSelectedClip}
+                >
+                  <img src="/assets/icon-video-download.svg" alt="" aria-hidden="true" />
                 </button>
                 <button
                   className="video-control-button video-fullscreen-toggle"
                   type="button"
-                  title="Enter fullscreen"
-                  aria-label="Enter fullscreen"
+                  title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                  aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
                   disabled={!hasSelectedVideo}
                   onClick={() => void toggleFullscreen()}
                 >
-                  FULL
+                  <img src={isFullscreen ? "/assets/icon-video-fullscreen-exit.svg" : "/assets/icon-video-fullscreen.svg"} alt="" aria-hidden="true" />
                 </button>
-              </div>
+                <button
+                  className="video-control-button video-next-toggle"
+                  type="button"
+                  title="Next clip"
+                  aria-label="Next clip"
+                  disabled={selectedSequenceIndex < 0 || selectedSequenceIndex >= sequenceClips.length - 1}
+                  onClick={() => selectAdjacentClip(1, isPlaying)}
+                >
+                  <img src="/assets/icon-video-next.svg" alt="" aria-hidden="true" />
+                </button>
+              </div>}
             </div>
           </div>
 
-          <section className="video-sequence-panel">
+          <section className={`video-sequence-panel ${sequenceClips.length === 0 ? "is-empty" : ""}`}>
             <div className="video-sequence-header">
               <span>SEQUENCE</span>
-              {generationError ? (
-                <button type="button" title={generationError} onClick={() => setGenerationError("")}>
-                  {generationError}
-                </button>
-              ) : (
-                <span className="video-sequence-count">{sequenceClips.length} CLIP{sequenceClips.length === 1 ? "" : "S"}</span>
-              )}
+              <span className="video-sequence-count">{sequenceClips.length} CLIP{sequenceClips.length === 1 ? "" : "S"}</span>
             </div>
             <div
               className="video-sequence-track"
@@ -1099,16 +1301,32 @@ export default function VideoPage() {
                   {clip.status === "failed" && <span className="video-sequence-error">FAILED</span>}
                   <span className="video-sequence-index">{String(index + 1).padStart(2, "0")}</span>
                   <span className="video-sequence-duration">{clip.duration}S</span>
-                  <button
-                    type="button"
-                    title="Remove clip"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      removeClipFromSequence(clip.id);
-                    }}
-                  >
-                    &times;
-                  </button>
+                  <div className="video-sequence-actions">
+                    {clip.status === "failed" && clip.prompt && (
+                      <button
+                        type="button"
+                        title="Retry generation"
+                        aria-label="Retry generation"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleGenerate(clip);
+                        }}
+                      >
+                        <img src="/assets/icon-video-retry.svg" alt="" aria-hidden="true" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title="Remove from sequence"
+                      aria-label="Remove from sequence"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removeClipFromSequence(clip.id);
+                      }}
+                    >
+                      <CloseIcon />
+                    </button>
+                  </div>
                 </div>
               ))}
               {sequenceClips.length === 0 && (
@@ -1159,7 +1377,7 @@ export default function VideoPage() {
                             else setEndFrameId(null);
                           }}
                         >
-                          &times;
+                          <CloseIcon />
                         </button>
                       )}
                     </div>
@@ -1194,7 +1412,7 @@ export default function VideoPage() {
                             setReferenceIds((current) => current.map((entry, entryIndex) => entryIndex === index ? "" : entry));
                           }}
                         >
-                          &times;
+                          <CloseIcon />
                         </button>
                       )}
                     </div>
@@ -1432,7 +1650,7 @@ export default function VideoPage() {
                   aria-label="Clear video prompt"
                   onClick={() => setPrompt("")}
                 >
-                  &times;
+                  <CloseIcon />
                 </button>
               )}
             </div>
@@ -1440,7 +1658,7 @@ export default function VideoPage() {
               className={`video-frame-btn ${activeGenerationCount > 0 ? "cafe-loading" : ""}`}
               type="button"
               disabled={!prompt.trim() || !activeProjectId}
-              onClick={handleGenerate}
+              onClick={() => handleGenerate()}
               aria-label={activeGenerationCount > 0 ? "Video generation running" : "Generate video"}
               title={`${modelConfig.label} | ${videoSettings.ratio} | ${videoSettings.duration}s | ${videoSettings.resolution}`}
             >

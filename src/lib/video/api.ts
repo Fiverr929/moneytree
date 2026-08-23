@@ -40,9 +40,13 @@ export async function generateVeoVideo(
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ error: "The video server returned an invalid response." })) as {
-      error?: string;
+      error?: string | { message?: string };
+      message?: string;
     };
-    throw new Error(payload.error || `Video generation failed with status ${response.status}.`);
+    const message = typeof payload.error === "string"
+      ? payload.error
+      : payload.error?.message || payload.message;
+    throw new Error(message || `Video generation failed with status ${response.status}.`);
   }
 
   return { blob: await response.blob() };
