@@ -2050,7 +2050,7 @@ export default function PromptBar() {
         
         <div className="settings-anchor" ref={dropdownRef}>
           <button
-            className={`btn-settings ${dropdownOpen ? "open" : ""}`}
+            className="btn-settings"
             id="settingsBtn"
             type="button"
             title="Image settings"
