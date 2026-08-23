@@ -5,11 +5,11 @@ type CloseIconProps = {
 
 export default function CloseIcon({ muted = false, className = "" }: CloseIconProps) {
   return (
-    <img
-      className={`ui-close-icon ${className}`.trim()}
-      src={muted ? "/assets/icon-x-inactive.svg" : "/assets/icon-x-active.svg"}
-      alt=""
+    <span
+      className={`ui-close-icon ${muted ? "is-muted" : ""} ${className}`.trim()}
       aria-hidden="true"
-    />
+    >
+      &times;
+    </span>
   );
 }
