@@ -1665,10 +1665,20 @@ export default function PromptBar() {
     if (command === "/status") {
       setPromptText("");
       const pendingActions = agentMessagesRef.current.filter((message) => message.toolProposal?.status === "pending").length;
+      const statusReferences = getGenerationModuleImages(moduleFilesRef.current);
+      const readerStatus = referenceReadError
+        ? "ERROR"
+        : referenceReadPending
+          ? "SCANNING"
+          : statusReferences.every(hasCurrentReferenceRead)
+            ? "READY"
+            : "WAITING";
       addLocalAgentMessage([
         `AGENT ${agentPending ? "THINKING" : "READY"} | MODEL ${agentModel || referenceReadModel || "UNAVAILABLE"}`,
         `RUN ${agentRun?.status?.replaceAll("_", " ").toUpperCase() || "IDLE"} | GENERATIONS ${activeGenerationCount} ACTIVE`,
-        `REFERENCES ${activeModuleCount} | QUEUE ${queuedAgentInputs.length} | APPROVALS ${pendingActions}`,
+        `REFERENCES ${activeModuleCount} | READER ${readerStatus} | QUEUE ${queuedAgentInputs.length}`,
+        `LOCAL AI STUDIO KEY ${settings.geminiApiKey.trim() ? "SAVED" : "MISSING"} | APPROVALS ${pendingActions}`,
+        ...(referenceReadError ? [`READER ERROR: ${referenceReadError}`] : []),
       ].join("\n"), "inspect");
       return;
     }
@@ -1804,7 +1814,9 @@ export default function PromptBar() {
         || referenceReadInFlightRef.current.has(currentReferenceFingerprint)
       )
     ) {
-      setAgentError("Current references are still being inspected. The agent will not use an older visual read; try again when the reference scan finishes.");
+      setAgentError(referenceReadError
+        ? `Reference inspection failed: ${referenceReadError} Fix the reported issue, then use /reload.`
+        : "Current references are still being inspected. The agent will not use an older visual read; try again when the reference scan finishes.");
       setAgentConsoleOpen(true);
       return;
     }
@@ -2044,9 +2056,16 @@ export default function PromptBar() {
     ? "RESTORING"
     : agentActivity || activeGenerationCount > 0 || referenceReadPending
       ? "WORKING"
+      : agentError || referenceReadError || generationError
+        ? "ERROR"
       : queuedAgentInputs.length > 0
         ? `${queuedAgentInputs.length} QUEUED`
         : "READY";
+  const consoleStatusClass = consoleStatusLabel === "READY"
+    ? "ready"
+    : consoleStatusLabel === "ERROR"
+      ? "error"
+      : "busy";
 
   return (
     <div className="prompt-bar" id="promptBar" data-state="FRAME" ref={promptBarRef}>
@@ -2231,7 +2250,9 @@ export default function PromptBar() {
           aria-label={submitButtonLabel}
           title={submitButtonLabel}
           onClick={() => {
-            if (parseGenerateCommand(promptText) !== null) void handleGenerate();
+            const localCommand = parseCanvasLocalCommand(promptText);
+            if (localCommand) runCanvasLocalCommand(localCommand, promptText);
+            else if (parseGenerateCommand(promptText) !== null) void handleGenerate();
             else void submitAgentMessage();
           }}
         >
@@ -2263,7 +2284,7 @@ export default function PromptBar() {
       <div id="agentConsole" className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
         <div className="agent-console-header" aria-hidden="true">
           <span>CAFEHTML AGENT</span>
-          <span className={consoleStatusLabel === "READY" ? "ready" : "busy"}>{consoleStatusLabel}</span>
+          <span className={consoleStatusClass}>{consoleStatusLabel}</span>
         </div>
         <button
           className="agent-console-collapse"
@@ -2513,6 +2534,9 @@ export default function PromptBar() {
               {referenceReadError && (
                 <div className="agent-section agent-reference">
                   <div className="agent-line agent-muted">&gt; READER STATUS: <mark>{referenceReadError}</mark></div>
+                  {/billing|authentication|api key|credential|permission/i.test(referenceReadError) && (
+                    <div className="agent-line agent-muted">&gt; FIX: Open CAFEHTML → SETTINGS → API, save the AI Studio key, then run /reload.</div>
+                  )}
                 </div>
               )}
               {promptText.trim() && (

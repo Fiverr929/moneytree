@@ -6,6 +6,7 @@ import {
   type GenerateContentResponse,
   type Part,
 } from "@google/genai";
+import { localGeminiHeaders } from "@/lib/localGeminiAuth";
 
 export type GenAIRequest = {
   model: string;
@@ -40,13 +41,6 @@ export function toThinkingLevel(value?: string) {
     high: ThinkingLevel.HIGH,
   };
   return value ? levels[value.toLowerCase()] : undefined;
-}
-
-function localGeminiHeaders(apiKey?: string | null): Record<string, string> {
-  if (typeof window === "undefined" || !apiKey?.trim()) return {};
-  const hostname = window.location.hostname.toLowerCase();
-  if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "[::1]") return {};
-  return { "X-CafeHTML-Local-Gemini-Key": apiKey.trim() };
 }
 
 export async function sendGenerationRequest(
