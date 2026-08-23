@@ -1,18 +1,98 @@
 # CafeHTML Build Log
 
-Track component work, decisions, and session continuations here.
+Append-only implementation history. Use the subsystem index to follow a product
+area across sessions. Current behavior belongs in `docs/CafeHTML.md`, planned
+work in `docs/ROADMAP.md`, and reproducible defects in `docs/problem.md`.
 
 ---
 
 ## How to Use This Log
 
 - Each session gets a dated entry
-- Record what was built, what decisions were made, and what's left to do
+- Keep entries newest-first; never rewrite an older entry to describe current behavior
+- Record product area, objective, changes, verification, remaining follow-ups, and related commits
+- Move accepted follow-ups to `docs/ROADMAP.md` or `docs/problem.md`; do not use this log as a backlog
 - If a session ends abruptly, pick up from the last "IN PROGRESS" entry
+
+### Future entry template
+
+```md
+### YYYY-MM-DD - Short outcome title
+
+**Status:** COMPLETED | IN PROGRESS | BLOCKED
+**Product area:** Image | Video | Agent | Projects/Cloud | Gallery/Evaluation | Modules/References | Studio | Audio | Auth/Hosting | Documentation
+
+**Objective:**
+- The user-visible or architectural outcome pursued.
+
+**What changed:**
+- Concrete implementation and decisions.
+
+**Verification:**
+- Repeatable checks and their result.
+
+**Remaining follow-ups:**
+- Links to ROADMAP or problem IDs, or `None`.
+
+**Related commits:**
+- Commit SHA and subject when available.
+```
+
+## Subsystem Index
+
+This index points to the most useful sessions for each area. Entries before the
+Next.js migration are historical implementation evidence, not current product
+documentation.
+
+| Product area | Current-era starting points | Important legacy history |
+|---|---|---|
+| Video | [Google AI Studio migration](#2026-08-20---google-ai-studio-video-migration), [recovery and performance](#2026-06-28---backend-hardening-recovery-and-performance-polish), [workspace and sequence UX](#2026-06-20---video-workspace-and-sequence-ux) | Earlier sequence work is superseded by the current VIDEO workspace. |
+| Brief Agent | Use `docs/agent-app-runtime.md` and `docs/brief-agent-evaluation.md`; later agent commits were not consistently recorded as log sessions. | Prompt compiler and VisionScan entries describe the pre-agent pipeline. |
+| Projects, storage, and cloud | [Recovery and storage hardening](#2026-06-28---backend-hardening-recovery-and-performance-polish), [Next.js migration baseline](#2026-06-05---nextjs-migration-baseline--repo-hygiene) | [UUID image storage](#2026-05-25---uuid-image-storage-refactor), [Studio/project persistence](#2026-05-26---studio-persistence--project-modal-fixes) |
+| Gallery and evaluation | [Subject evaluation and research export](#2026-06-20---subject-strength-evaluation-and-research-export), [Gallery/HUD stabilization](#2026-06-11---galleryhudstudio-stabilization--error-state-polish) | [Per-variation error cells](#2026-05-27--per-variation-gallery-resolution--error-cells) |
+| Modules and references | [Reference card polish](#2026-06-24---module-reference-card-polish), [Module order](#2026-06-17---module-order--prompt-cleanup) | [S-C redesign](#2026-05-28--cafehtml-module-panel-s-c-redesign), [base Reference layer](#2026-05-30---base-module-state-reference-layer) |
+| Studio | [Workflow polish and upscale](#2026-06-17---studio-workflow-polish--upscale-command), [active image persistence](#2026-06-11---studio-active-image-persistence) | [Initial Studio](#2026-05-19--studio), [action system](#2026-05-26--studio-module-action-system--visual-polish) |
+| Image pipeline | [Recovery and performance](#2026-06-28---backend-hardening-recovery-and-performance-polish), [subject evaluation](#2026-06-20---subject-strength-evaluation-and-research-export) | VisionScan, enhancer, manifest, retry, and legacy SDK sessions below are archived architecture history. |
+| Audio | The music workstation was developed in commits but does not have a dedicated session entry here; `/music-test` remains a prototype. | Local `sandbox/MUSIC-CODE-DJ/` experiments are unrelated and ignored. |
+| Authentication and hosting | Consult Git history and current Sites configuration; these changes were not consistently summarized as log sessions. | None. |
+| Documentation | [Current/legacy separation](#2026-08-23---separate-current-architecture-from-legacy-history), [roadmap](ROADMAP.md), [Next.js migration baseline](#2026-06-05---nextjs-migration-baseline--repo-hygiene) | [Docs overhaul and consolidation](#2026-05-06--docs-overhaul--consolidation) |
 
 ---
 
 ## Sessions
+### 2026-08-23 - Separate Current Architecture from Legacy History
+
+**Status:** COMPLETED
+**Product area:** Documentation
+
+**Objective:**
+- Make the documentation distinguish current product behavior, planned work,
+  reproducible defects, session history, and legacy architecture.
+
+**What changed:**
+- Replaced the mixed `docs/CafeHTML.md` reference with a concise current-only
+  Next.js product and architecture document.
+- Preserved the former document and its decisions at
+  `docs/legacy/CafeHTML-legacy.md`.
+- Added `docs/ROADMAP.md` with priorities and completion criteria.
+- Reconciled stale problem and Brief Agent claims with the implemented product.
+- Added this subsystem index and a standard template for future log entries.
+
+**Verification:**
+- Documentation diffs pass Git whitespace checks.
+- Current architecture contains no active references to the legacy `logic/`,
+  `CafeHTML-v2.html`, global-window, or `style.css` implementation surfaces.
+- Documentation map targets exist and the original mixed reference remains
+  available in the legacy archive.
+
+**Remaining follow-ups:**
+- None. Product work remains in `docs/ROADMAP.md`; current defects remain in
+  `docs/problem.md`.
+
+**Related commits:**
+- `Establish product roadmap and reconcile docs`
+- `Separate current architecture from legacy history`
+
 ### 2026-08-20 - Google AI Studio Video Migration
 
 **Status:** COMPLETED
