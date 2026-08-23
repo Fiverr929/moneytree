@@ -54,7 +54,7 @@ export default function LoginPage() {
   return (
     <main className={styles.page}>
       <section className={styles.card} aria-labelledby="auth-title">
-        <div className={styles.brand}><span>©</span> CAFEHTML</div>
+        <div className={styles.brand}><span>©</span> cafehtml</div>
         <h1 id="auth-title">{isLoading ? "Loading" : mode === "signup" ? "Create account" : "Sign in"}</h1>
 
         {!isLoading && (
