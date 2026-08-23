@@ -57,6 +57,7 @@ const CANVAS_COMMANDS = [
   { value: GENERATE_COMMAND, label: "/generate", description: "Generate a frame" },
   { value: "/undo", label: "/undo", description: "Undo the last change" },
   { value: "/status", label: "/status", description: "Show what is running" },
+  { value: "/reload", label: "/reload", description: "Restart the reference scan" },
   { value: "/retry", label: "/retry", description: "Retry the failed message" },
   { value: "/stop", label: "/stop", description: "Stop the current task" },
   { value: "/clear", label: "/clear", description: "Start a fresh chat" },
@@ -96,7 +97,7 @@ type PersistedAgentWorkspace = {
   queuedInputs?: string[];
 };
 
-type CanvasLocalCommand = "/help" | "/clear" | "/undo" | "/actions" | "/approve" | "/reject" | "/pending" | "/status" | "/memory" | "/remember" | "/forget" | "/retry" | "/stop";
+type CanvasLocalCommand = "/help" | "/clear" | "/undo" | "/actions" | "/approve" | "/reject" | "/pending" | "/status" | "/memory" | "/remember" | "/forget" | "/reload" | "/retry" | "/stop";
 
 type AgentActivity = {
   kind: "thinking" | "reading" | "working" | "reviewing";
@@ -246,7 +247,7 @@ function parseCanvasLocalCommand(text: string) {
   return command === "/help" || command === "/clear" || command === "/undo" || command === "/actions"
     || command === "/approve" || command === "/reject" || command === "/pending" || command === "/status"
     || command === "/memory" || command === "/remember" || command === "/forget"
-    || command === "/retry" || command === "/stop" ? command as CanvasLocalCommand : null;
+    || command === "/reload" || command === "/retry" || command === "/stop" ? command as CanvasLocalCommand : null;
 }
 
 function normalizeFrameVariations(value: unknown) {
@@ -1671,6 +1672,16 @@ export default function PromptBar() {
       ].join("\n"), "inspect");
       return;
     }
+    if (command === "/reload") {
+      setPromptText("");
+      const currentReferenceFingerprint = fingerprintModuleFiles(moduleFilesRef.current);
+      referenceReadAttemptsRef.current.delete(currentReferenceFingerprint);
+      setReferenceReadError("");
+      setAgentError("");
+      setReferenceReadRetryTick((tick) => tick + 1);
+      addLocalAgentMessage("REFERENCE RELOAD REQUESTED · restarting the current visual scan.", "inspect");
+      return;
+    }
     if (command === "/memory") {
       setPromptText("");
       void showAgentMemory().catch((error) => setAgentError(error instanceof Error ? error.message : "Could not read memory."));
@@ -1758,6 +1769,7 @@ export default function PromptBar() {
       "/generate <prompt> creates an image.",
       "/undo reverses the last workspace change.",
       "/status shows what is currently running.",
+      "/reload restarts the current reference scan.",
       "/retry repeats the latest failed message.",
       "/stop cancels the current agent task.",
       "/clear starts a fresh chat.",
