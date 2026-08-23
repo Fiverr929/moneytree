@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, ChangeEvent, useEffect, useState, useCallback } from "react";
+import React, { useRef, ChangeEvent, useEffect, useLayoutEffect, useState, useCallback } from "react";
 import { useModule, ModuleFile, ModuleFolder } from "@/context/ModuleContext";
 import { useStudio } from "@/context/StudioContext";
 import { useApp } from "@/context/AppContext";
@@ -119,6 +119,44 @@ export default function ModulePanel() {
   const [roleDrawerFileId, setRoleDrawerFileId] = useState<number | null>(null);
   const [pendingReplaceFileId, setPendingReplaceFileId] = useState<number | null>(null);
   const [uploadRole, setUploadRole] = useState(MODES[0]);
+  const [menuOpensUp, setMenuOpensUp] = useState(false);
+
+  useLayoutEffect(() => {
+    const openFileId = moveFileId ?? menuFileId;
+    const panel = panelRef.current;
+    if (openFileId === null || !panel) {
+      setMenuOpensUp(false);
+      return;
+    }
+
+    const row = Array.from(
+      panel.querySelectorAll<HTMLElement>(".cmp-image-row[data-module-file-id]"),
+    ).find((candidate) => Number(candidate.dataset.moduleFileId) === openFileId);
+    const menu = row?.querySelector<HTMLElement>(":scope > .cmp-menu");
+    const scroll = row?.closest<HTMLElement>(".cmp-scroll");
+    if (!row || !menu || !scroll) return;
+
+    const updatePlacement = () => {
+      const rowRect = row.getBoundingClientRect();
+      const scrollRect = scroll.getBoundingClientRect();
+      const spaceAbove = rowRect.top - scrollRect.top;
+      const spaceBelow = scrollRect.bottom - rowRect.bottom;
+      setMenuOpensUp(menu.offsetHeight > spaceBelow && spaceAbove > spaceBelow);
+    };
+
+    updatePlacement();
+    scroll.addEventListener("scroll", updatePlacement, { passive: true });
+    window.addEventListener("resize", updatePlacement);
+    const resizeObserver = new ResizeObserver(updatePlacement);
+    resizeObserver.observe(menu);
+    resizeObserver.observe(scroll);
+
+    return () => {
+      scroll.removeEventListener("scroll", updatePlacement);
+      window.removeEventListener("resize", updatePlacement);
+      resizeObserver.disconnect();
+    };
+  }, [folders.length, menuFileId, moveFileId]);
   const [uploadRoleOpen, setUploadRoleOpen] = useState(false);
 
   const [folderFormName, setFolderFormName] = useState("");
@@ -830,7 +868,7 @@ export default function ModulePanel() {
       <div
         key={f.id}
         data-module-file-id={f.id}
-        className={`cmp-image-row ${f.folder === null ? "loose" : ""} ${selected ? "selected" : ""} ${!f.eye ? "hidden" : ""}`}
+        className={`cmp-image-row ${f.folder === null ? "loose" : ""} ${selected ? "selected" : ""} ${!f.eye ? "hidden" : ""} ${menuFileId === f.id || moveFileId === f.id ? "menu-open" : ""} ${(menuFileId === f.id || moveFileId === f.id) && menuOpensUp ? "menu-opens-up" : ""}`}
         draggable={!rootFilesForDrag}
         onPointerDown={(e) => {
           if (rootFilesForDrag) startRootPointerReorder(e, f.id, rootFilesForDrag);

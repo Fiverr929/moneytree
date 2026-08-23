@@ -2399,6 +2399,13 @@
       border: 0.756px solid #ea5823;
       box-shadow: 0 0 0 1px rgba(82,113,255,0.35) inset;
     }
+    .cmp-image-row.menu-open {
+      z-index: 31;
+    }
+    .cmp-image-row.menu-opens-up .cmp-menu {
+      top: auto;
+      bottom: calc(100% - 3px);
+    }
     .cmp-menu::before {
       content: "";
       position: absolute;
@@ -2410,6 +2417,11 @@
       border-left: 0.756px solid #ea5823;
       border-top: 0.756px solid #ea5823;
       transform: rotate(45deg);
+    }
+    .cmp-image-row.menu-opens-up .cmp-menu::before {
+      top: auto;
+      bottom: -5px;
+      transform: rotate(225deg);
     }
     .cmp-menu button {
       width: 100%;

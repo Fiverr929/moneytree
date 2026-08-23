@@ -67,3 +67,8 @@ mingit.zip
 /.codex-release-prompt/
 /.npm-cache/
 /.wrangler/
+
+# local Sites deployment packages
+/.codex-deploy/
+/.sites-package/
+/cafehtml-site-models.tar.gz
