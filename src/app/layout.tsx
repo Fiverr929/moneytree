@@ -3,8 +3,8 @@ import "./globals.css";
 import AppShell from "@/components/AppShell";
 
 export const metadata: Metadata = {
-  title: "MoneyTree",
-  description: "MoneyTree AI Image Generator",
+  title: "© cafehtml",
+  description: "cafehtml AI image and video workspace",
 };
 
 export const viewport: Viewport = {

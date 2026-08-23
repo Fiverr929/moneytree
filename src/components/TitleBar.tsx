@@ -58,7 +58,7 @@ export default function TitleBar() {
             </svg>
           </div>
           <div className={`cafe-menu ${menuOpen ? "open" : ""}`} id="cafeMenu">
-            <div className="cafe-menu-title"><span className="cafe-menu-mark">&copy;</span><span>CAFEHTML</span></div>
+            <div className="cafe-menu-title"><span className="cafe-menu-mark">&copy;</span><span>cafehtml</span></div>
             <button className="menu-item primary" type="button" onClick={() => { setProjectsOpen(true); setMenuOpen(false); }}><span>PROJECTS</span><b>&gt;</b></button>
             <button className="menu-item" type="button" onClick={() => { setSettingsOpen(true); setMenuOpen(false); }}><span>SETTINGS</span><b>&gt;</b></button>
             <button className="menu-item" type="button"><span>HELP</span></button>
