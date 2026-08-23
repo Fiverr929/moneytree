@@ -5,6 +5,11 @@ import { useStudio } from "@/context/StudioContext";
 import { useSettings } from "@/context/SettingsContext";
 import { useGallery, type GalleryImageUse } from "@/context/GalleryContext";
 import { studioGenerate } from "@/lib/pipeline/api";
+import {
+  buildCharacterReferencePrompt,
+  getCharacterReferenceProfile,
+  listCharacterReferenceProfiles,
+} from "@/lib/studio/skills/characterReference";
 import StudioModule from "./StudioModule";
 
 type Point = { x: number, y: number };
@@ -15,6 +20,7 @@ type StudioFlavor = "normal" | "creative";
 type StudioPromptCommand =
   | { kind: "refine"; prompt: string; flavor: StudioFlavor }
   | { kind: "upscale"; prompt: string; imageSize: "2K" | "4K" }
+  | { kind: "character-reference"; prompt: string; profileId: string }
   | { kind: "invalid-command"; message: string };
 
 const MAX_STUDIO_HISTORY = 20;
@@ -91,6 +97,7 @@ const FREE_CROP_HANDLES: Array<{ pos: CropHandlePos; cursor: string; className: 
 const LOCKED_CROP_HANDLES = FREE_CROP_HANDLES.filter(({ pos }) => ["tl", "tr", "br", "bl"].includes(pos));
 
 const STUDIO_COMMANDS = [
+  { value: "/character-reference", label: "/character-reference", description: "Create a photoreal three-panel character sheet" },
   { value: "/creative", label: "/creative", description: "Creative reinterpretation" },
   { value: "/upscale 2k", label: "/upscale 2k", description: "Upscale to 2K" },
   { value: "/upscale 4k", label: "/upscale 4k", description: "Upscale to 4K" },
@@ -107,6 +114,22 @@ const parseStudioPromptCommand = (rawPrompt: string): StudioPromptCommand => {
     return { kind: "refine", prompt: creativeMatch[1]?.trim() || "", flavor: "creative" };
   }
 
+  const characterReferenceMatch = trimmed.match(/^\/(?:character-reference|character-reference-sheet)(?:\s+([\s\S]*))?$/i);
+  if (characterReferenceMatch) {
+    const args = characterReferenceMatch[1]?.trim() || "";
+    const profileMatch = args.match(/^--profile(?:=|\s+)([a-z0-9-]+)(?:\s+([\s\S]*))?$/i);
+    const profileId = profileMatch?.[1]?.toLowerCase() || "";
+    const prompt = profileMatch ? profileMatch[2]?.trim() || "" : args;
+    const profile = getCharacterReferenceProfile(profileId || undefined);
+    if (!profile) {
+      return {
+        kind: "invalid-command",
+        message: `Unknown character reference profile. Available profiles: ${listCharacterReferenceProfiles().join(", ")}.`,
+      };
+    }
+    return { kind: "character-reference", prompt, profileId: profile.id };
+  }
+
   const match = trimmed.match(/^\/upscale(?:\s+(2k|4k))?(?:\s+([\s\S]*))?$/i);
   if (trimmed.toLowerCase().startsWith("/upscale")) {
     if (!match || !match[1]) {
@@ -120,7 +143,7 @@ const parseStudioPromptCommand = (rawPrompt: string): StudioPromptCommand => {
     };
   }
 
-  return { kind: "invalid-command", message: "Unknown Studio command. Use /creative, /upscale 2k, or /upscale 4k." };
+  return { kind: "invalid-command", message: "Unknown Studio command. Use /character-reference, /creative, /upscale 2k, or /upscale 4k." };
 };
 
 export default function Studio() {
@@ -577,20 +600,31 @@ export default function Studio() {
       alert(parsedCommand.message);
       return;
     }
-    if (
-      parsedCommand.kind === "upscale" &&
-      !activeModel.resolutions.includes(parsedCommand.imageSize)
-    ) {
-      alert(`${activeModel.label} does not support ${parsedCommand.imageSize} output.`);
+    const characterReferenceProfile = parsedCommand.kind === "character-reference"
+      ? getCharacterReferenceProfile(parsedCommand.profileId)
+      : undefined;
+    const requestedImageSize = parsedCommand.kind === "upscale"
+      ? parsedCommand.imageSize
+      : characterReferenceProfile?.generation?.imageSize;
+    if (requestedImageSize && !activeModel.resolutions.includes(requestedImageSize)) {
+      alert(`${activeModel.label} does not support ${requestedImageSize} output.`);
       return;
     }
 
     // Capture state
-    const currentPrompt = parsedCommand.prompt;
+    const currentPrompt = parsedCommand.kind === "character-reference"
+      ? buildCharacterReferencePrompt(parsedCommand.prompt, parsedCommand.profileId)
+      : parsedCommand.prompt;
     const isUpscale = parsedCommand.kind === "upscale";
     const studioFlavor = parsedCommand.kind === "refine" ? parsedCommand.flavor : "normal";
+    const studioSkill = parsedCommand.kind === "character-reference" ? "character-reference" : undefined;
+    const studioSkillProfile = parsedCommand.kind === "character-reference" ? parsedCommand.profileId : undefined;
     const currentActiveUrl = activeUrl;
-    const currentAspectRatio = aspectRatioFromImage(canvasRef.current?.querySelector('img'));
+    const currentAspectRatio = characterReferenceProfile?.generation?.aspectRatio
+      || aspectRatioFromImage(canvasRef.current?.querySelector('img'));
+    const currentImageSize = isUpscale
+      ? parsedCommand.imageSize
+      : characterReferenceProfile?.generation?.imageSize;
     const currentGroups = groups.map(g => ({
        action: g.action,
        name: g.name,
@@ -624,7 +658,7 @@ export default function Studio() {
           baseImageUrl: currentActiveUrl,
           annotationImageUrl: isUpscale ? undefined : annotationImageUrl,
           references: isUpscale ? [] : references,
-          imageSize: isUpscale ? parsedCommand.imageSize : undefined,
+          imageSize: currentImageSize,
           apiKey: geminiApiKey,
           flavor: studioFlavor,
           aspectRatio: currentAspectRatio,
@@ -645,8 +679,8 @@ export default function Studio() {
           id: Date.now(),
           uuid: newUuid,
           ratio: currentAspectRatio || "1:1",
-          mode: isUpscale ? "STUDIO UPSCALE" : "STUDIO REFINE",
-          type: isUpscale ? "Studio Upscale" : "Studio Edit",
+          mode: isUpscale ? "STUDIO UPSCALE" : studioSkill ? "STUDIO CHARACTER REFERENCE" : "STUDIO REFINE",
+          type: isUpscale ? "Studio Upscale" : studioSkill ? "Character Reference" : "Studio Edit",
           kind: "image",
           origin: "studio-edit",
           createdAt,
@@ -660,7 +694,10 @@ export default function Studio() {
           usedImages,
           generationSettings: {
             aspectRatio: currentAspectRatio || "1:1",
-            studioFlavor
+            imageSize: currentImageSize,
+            studioFlavor,
+            studioSkill,
+            studioSkillProfile,
           }
         });
 
