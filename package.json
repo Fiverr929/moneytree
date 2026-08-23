@@ -15,7 +15,8 @@
     "test:agent-actions": "node --experimental-strip-types scripts/check-agent-app-actions.mjs",
     "test:agent-skills": "node --experimental-strip-types scripts/check-agent-skills.mjs",
     "test:agent-memory": "node --experimental-strip-types scripts/check-agent-memory.mjs",
-    "test:reference-pipeline": "node --experimental-strip-types scripts/check-reference-pipeline.mjs"
+    "test:reference-pipeline": "node --experimental-strip-types scripts/check-reference-pipeline.mjs",
+    "test:studio-skills": "node --experimental-strip-types scripts/check-studio-skills.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",

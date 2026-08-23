@@ -77,6 +77,8 @@ export type GalleryCell = {
     imageSize?: string;
     thinkingLevel?: string | null;
     studioFlavor?: "normal" | "creative";
+    studioSkill?: "character-reference";
+    studioSkillProfile?: string;
   };
   evaluation?: GenerationEvaluation;
   generationTimeMs?: number;
