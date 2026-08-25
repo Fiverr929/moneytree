@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
+    "dev:cloud": "vite --port 3001",
     "build": "vinext build",
     "build:next": "next build",
     "build:sites": "vinext build",
@@ -17,6 +18,9 @@
     "test:agent-memory": "node --experimental-strip-types scripts/check-agent-memory.mjs",
     "test:agent-insights": "node --experimental-strip-types scripts/check-agent-insights.mjs",
     "test:agent-decisions": "node --experimental-strip-types scripts/check-agent-decisions.mjs",
+    "test:prompt-compiler": "node --experimental-strip-types scripts/check-prompt-compiler.mjs",
+    "test:conversation-context": "node --experimental-strip-types scripts/check-conversation-context.mjs",
+    "test:project-lifecycle": "node --experimental-strip-types scripts/check-project-lifecycle.mjs",
     "test:reference-pipeline": "node --experimental-strip-types scripts/check-reference-pipeline.mjs",
     "test:studio-skills": "node --experimental-strip-types scripts/check-studio-skills.mjs"
   },

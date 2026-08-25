@@ -4929,6 +4929,25 @@
     }
     .pm-close:hover { opacity: 1; }
 
+    .pm-sections {
+      display: flex;
+      gap: 2px;
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(199, 199, 199, 0.25);
+    }
+    .pm-sections button,
+    .pm-trash-actions button {
+      border: 0;
+      background: transparent;
+      color: #c7c7c7;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      cursor: pointer;
+    }
+    .pm-sections button { padding: 5px 8px; }
+    .pm-sections button.active { color: #e8e6e6; background: rgba(82, 113, 255, 0.45); }
+    .pm-sections span { opacity: 0.65; }
+
     .pm-list {
       flex: 1;
       overflow-y: auto;
@@ -5010,6 +5029,9 @@
     .pm-item:hover .pm-delete { opacity: 0.85; }
     .pm-delete:hover { opacity: 1 !important; color: #ea5823; }
     .pm-item.active .pm-delete:hover { color: #5271ff; }
+    .pm-trash-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+    .pm-trash-actions button { padding: 2px 0; }
+    .pm-trash-actions button:hover { color: #ea5823; }
 
     .pm-empty {
       padding: 48px 20px;

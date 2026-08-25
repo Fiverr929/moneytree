@@ -10,6 +10,8 @@ import { createGoogleGenAI } from "@/lib/server/googleGenAI";
 import { logModelUsage, traceReferenceFingerprint } from "@/lib/server/modelUsage";
 import { parseAgentAppActions } from "@/lib/brief-agent/appActions";
 import { cleanReplyForDirections, createClarificationFlow, createDirectionFlow } from "@/lib/brief-agent/decisionFlow";
+import { compileGenerationPrompt, DEFAULT_GENERATION_PROMPT_LIMIT } from "@/lib/brief-agent/promptCompiler";
+import { MODEL_REGISTRY } from "@/lib/modelRegistry";
 import {
   isClearlyNonCreativeMessage,
   isCreativeBrief,
@@ -36,12 +38,12 @@ import type {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const DEFAULT_BRIEF_AGENT_MODEL = "gemini-3.7-flash";
+const DEFAULT_BRIEF_AGENT_MODEL = MODEL_REGISTRY.briefAgent;
 const MAX_MESSAGE_COUNT = 24;
 const MAX_MODEL_MESSAGE_COUNT = 10;
 const MAX_MESSAGE_CHARS = 2_000;
 const MAX_MODEL_MESSAGE_CHARS = 1_500;
-const MAX_FINAL_PROMPT_CHARS = 4_000;
+const MAX_FINAL_PROMPT_CHARS = DEFAULT_GENERATION_PROMPT_LIMIT;
 const MAX_MODEL_PROMPT_MEMORY_CHARS = 3_000;
 const MAX_REFERENCE_READ_CHARS = 650;
 const MAX_SESSION_TEXT_CHARS = 900;
@@ -132,7 +134,7 @@ const BRIEF_AGENT_RESPONSE_SCHEMA = {
         notes: { type: "array", items: { type: "string" } },
       },
     },
-    finalPrompt: { type: "string" },
+    finalPrompt: { type: "string", maxLength: MAX_FINAL_PROMPT_CHARS },
     warnings: { type: "array", items: { type: "string" } },
     readyToExecute: { type: "boolean" },
     appActions: {
@@ -654,10 +656,19 @@ function draftFromModelJson(value: Record<string, unknown>, fallback: BriefDraft
   // omitted the optional-looking JSON field. The user's own brief is a safe,
   // generation-capable fallback and remains visible for editing.
   const promptFallback = action === "draft" ? latestText : fallback.finalPrompt;
-  const finalPrompt = action !== "draft" || clarification.needed
-    ? ""
-    : stringValue(modelPrompt, promptFallback).slice(0, MAX_FINAL_PROMPT_CHARS);
-  const status = action === "ask"
+  const compiledPrompt = action !== "draft" || clarification.needed
+    ? compileGenerationPrompt("")
+    : compileGenerationPrompt(modelPrompt || promptFallback);
+  const promptTooLong = action === "draft" && compiledPrompt.blocked;
+  const finalPrompt = promptTooLong ? "" : compiledPrompt.prompt;
+  const effectiveClarification: BriefClarification = promptTooLong
+    ? {
+      needed: true,
+      reason: compiledPrompt.warnings[0],
+      questions: ["Which details should be prioritized so I can prepare a focused generation brief?"],
+    }
+    : clarification;
+  const status = action === "ask" || promptTooLong
     ? "needs_clarification"
     : action === "draft" && finalPrompt
     ? "draft"
@@ -666,22 +677,25 @@ function draftFromModelJson(value: Record<string, unknown>, fallback: BriefDraft
   const nextSession: BriefSessionState = {
     ...session,
     lastDraftPrompt: finalPrompt || session.lastDraftPrompt,
-    unresolvedQuestions: action === "ask" ? clarification.questions : session.unresolvedQuestions,
+    unresolvedQuestions: action === "ask" || promptTooLong ? effectiveClarification.questions : session.unresolvedQuestions,
   };
-  const decisionQuestions = decisionQuestionsValue(value.decisions, clarification.questions);
+  const decisionQuestions = decisionQuestionsValue(promptTooLong ? [] : value.decisions, effectiveClarification.questions);
 
   return {
     ...fallback,
     status,
-    action: finalPrompt ? "draft" : action === "draft" ? "talk" : action,
-    reply: stringValue(value.reply, fallback.reply),
-    clarification,
+    action: promptTooLong ? "ask" : finalPrompt ? "draft" : action === "draft" ? "talk" : action,
+    reply: promptTooLong
+      ? `${compiledPrompt.warnings[0]} ${effectiveClarification.questions[0]}`
+      : stringValue(value.reply, fallback.reply),
+    clarification: effectiveClarification,
     decisionQuestions,
     plan: planValue(value.plan, fallback.plan),
     session: nextSession,
     finalPrompt,
     warnings: Array.from(new Set([
       ...stringArray(value.warnings, fallback.warnings),
+      ...compiledPrompt.warnings,
       ...(action === "draft" && !modelPrompt && finalPrompt
         ? ["The planner omitted its composed prompt, so the original creative brief was preserved as the draft."]
         : []),

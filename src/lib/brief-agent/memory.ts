@@ -9,6 +9,7 @@ import type {
   BriefSessionState,
 } from "./types";
 import { extractMemoryCandidates, normalizeMemoryText, rankMemories } from "./memoryPolicy";
+import { canUseCloudWorkspace } from "@/lib/cloudWorkspace";
 
 const MAX_MEMORY_ITEMS = 250;
 const CLOUD_SYNC_INTERVAL_MS = 15_000;
@@ -64,6 +65,7 @@ function isCloudMemory(value: unknown): value is AgentMemoryItem {
 }
 
 async function syncAgentMemoriesNow(projectId: number) {
+  if (!await canUseCloudWorkspace()) return;
   const projectKey = await getProjectMemoryKey(projectId);
   const all = await DB.agentMemories.getAll() as AgentMemoryItem[];
   const visible = all.filter((item) => item.scope === "user" || (item.scope === "project" && item.projectId === projectId));
@@ -123,6 +125,7 @@ async function syncAgentMemories(projectId: number, force = false) {
 }
 
 async function deleteCloudMemories(scope: AgentMemoryScope | "all", projectId: number) {
+  if (!await canUseCloudWorkspace()) return;
   if (scope === "session") return;
   const projectKey = await getProjectMemoryKey(projectId);
   const params = new URLSearchParams({ scope, project_key: projectKey });

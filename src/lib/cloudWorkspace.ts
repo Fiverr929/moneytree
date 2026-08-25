@@ -12,6 +12,8 @@ type LocalProject = {
   date_modified: string;
   cloudUpdatedAt?: string;
   cloudSyncedAt?: string | null;
+  deletedAt?: string | null;
+  purgeAfter?: string | null;
 };
 
 type LocalReference = {
@@ -37,7 +39,7 @@ type LocalReference = {
 };
 
 type CloudProject = { id: string; name: string; mode: string; createdAt: string; updatedAt: string };
-type CloudState = { projectId: string; folders: unknown[]; updatedAt: string };
+type CloudState = { projectId: string; folders: unknown[]; iterationBrief?: unknown; updatedAt: string };
 type CloudReference = {
   id: string;
   projectId: string;
@@ -79,6 +81,7 @@ type SyncResponse = {
   projects: CloudProject[];
   states: CloudState[];
   deletedProjects: Array<{ id: string; deletedAt: string }>;
+  purgedProjects?: Array<{ id: string; deletedAt: string }>;
   references: CloudReference[];
   deletedReferences: Array<{ id: string; projectId: string; deletedAt: string }>;
   generations: CloudGeneration[];
@@ -99,6 +102,20 @@ const projectSyncs = new Map<number, Promise<void>>();
 let workspaceSync: Promise<void> | null = null;
 let listenerInstalled = false;
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
+let cloudEndpointAvailable: boolean | null = null;
+
+export async function canUseCloudWorkspace() {
+  if (typeof window === "undefined") return false;
+  if (!['localhost', '127.0.0.1'].includes(window.location.hostname)) return true;
+  if (cloudEndpointAvailable !== null) return cloudEndpointAvailable;
+  try {
+    const response = await fetch("/api/cloud-workspace/status", { cache: "no-store" });
+    cloudEndpointAvailable = response.status !== 404;
+  } catch {
+    cloudEndpointAvailable = false;
+  }
+  return cloudEndpointAvailable;
+}
 
 function validSyncResponse(value: unknown): value is SyncResponse {
   if (!value || typeof value !== "object") return false;
@@ -106,6 +123,7 @@ function validSyncResponse(value: unknown): value is SyncResponse {
   return Array.isArray(body.projects)
     && Array.isArray(body.states)
     && Array.isArray(body.deletedProjects)
+    && (body.purgedProjects === undefined || Array.isArray(body.purgedProjects))
     && Array.isArray(body.references)
     && Array.isArray(body.deletedReferences)
     && Array.isArray(body.generations)
@@ -160,11 +178,24 @@ async function applyWorkspaceResponse(body: SyncResponse, localProjects: LocalPr
     .map((project) => [project.cloudId || project.memoryCloudId, project] as const)
     .filter((entry): entry is [string, LocalProject] => Boolean(entry[0])));
 
-  for (const deletion of body.deletedProjects) {
+  for (const deletion of body.purgedProjects || []) {
     const local = localByCloudId.get(deletion.id);
     if (local) {
       await DB.projects.deleteLocal(local.id);
       localByCloudId.delete(deletion.id);
+    }
+  }
+
+  for (const deletion of body.deletedProjects) {
+    const local = localByCloudId.get(deletion.id);
+    if (local) {
+      const deletedAt = deletion.deletedAt;
+      await DB.projects.update(local.id, {
+        deletedAt,
+        purgeAfter: new Date(Date.parse(deletedAt) + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        cloudUpdatedAt: deletedAt,
+        cloudSyncedAt: syncedAt,
+      }, true);
     }
   }
 
@@ -203,6 +234,8 @@ async function applyWorkspaceResponse(body: SyncResponse, localProjects: LocalPr
       date_modified: remote.updatedAt,
       cloudUpdatedAt: remote.updatedAt,
       cloudSyncedAt: syncedAt,
+      deletedAt: null,
+      purgeAfter: null,
     }, true);
   }
 
@@ -210,9 +243,14 @@ async function applyWorkspaceResponse(body: SyncResponse, localProjects: LocalPr
     const project = localByCloudId.get(state.projectId);
     if (!project) continue;
     const localState = await DB.moduleState.get(project.id) as { iterationBrief?: unknown } | undefined;
+    const localBrief = localState?.iterationBrief as { version?: number } | undefined;
+    const remoteBrief = state.iterationBrief as { version?: number } | null | undefined;
+    const iterationBrief = remoteBrief && Number(remoteBrief.version || 0) >= Number(localBrief?.version || 0)
+      ? remoteBrief
+      : localBrief;
     await DB.moduleState.put(project.id, {
       folders: state.folders,
-      ...(localState?.iterationBrief ? { iterationBrief: localState.iterationBrief } : {}),
+      ...(iterationBrief ? { iterationBrief } : {}),
       cloudUpdatedAt: state.updatedAt,
       cloudSyncedAt: syncedAt,
     }, true);
@@ -221,16 +259,17 @@ async function applyWorkspaceResponse(body: SyncResponse, localProjects: LocalPr
 
 async function syncWorkspaceProjectsNow() {
   const deletionCount = await processTombstones();
-  const projects = await Promise.all(((await DB.projects.getAll()) as LocalProject[]).map(ensureProjectIdentity));
+  const projects = await Promise.all(((await DB.projects.getAllIncludingDeleted()) as LocalProject[]).map(ensureProjectIdentity));
   const states = await Promise.all(projects.map(async (project) => ({
     project,
-    state: await DB.moduleState.get(project.id) as { folders?: unknown[]; cloudUpdatedAt?: string; cloudSyncedAt?: string | null } | undefined,
+    state: await DB.moduleState.get(project.id) as { folders?: unknown[]; iterationBrief?: unknown; cloudUpdatedAt?: string; cloudSyncedAt?: string | null } | undefined,
   })));
   const pendingProjects = projects.filter((project) => (
     !project.cloudSyncedAt || (project.cloudUpdatedAt || project.date_modified) > project.cloudSyncedAt
   ));
-  const pendingStates = states.filter(({ state }) => (
-    state && (!state.cloudSyncedAt || (state.cloudUpdatedAt || "") > state.cloudSyncedAt)
+  const pendingStates = states.filter(({ project, state }) => (
+    state && !project.deletedAt
+      && (!state.cloudSyncedAt || (state.cloudUpdatedAt || "") > state.cloudSyncedAt)
   ));
   const body = await postSync({
     projects: pendingProjects.map((project) => ({
@@ -239,10 +278,12 @@ async function syncWorkspaceProjectsNow() {
       mode: project.mode || "FRAME",
       createdAt: project.date_created,
       updatedAt: project.cloudUpdatedAt || project.date_modified,
+      deletedAt: project.deletedAt || null,
     })),
     states: pendingStates.map(({ project, state }) => ({
       projectId: project.cloudId,
       folders: state?.folders || [],
+      iterationBrief: state?.iterationBrief,
       updatedAt: state?.cloudUpdatedAt || project.cloudUpdatedAt || project.date_modified,
     })),
     references: [],
@@ -260,6 +301,7 @@ async function syncWorkspaceProjectsNow() {
 }
 
 export async function syncWorkspaceProjects() {
+  if (!await canUseCloudWorkspace()) return;
   if (workspaceSync) return workspaceSync;
   workspaceSync = syncWorkspaceProjectsNow().finally(() => { workspaceSync = null; });
   return workspaceSync;
@@ -385,6 +427,7 @@ async function syncCloudProjectNow(projectId: number) {
   await syncWorkspaceProjects();
   const project = await DB.projects.get(projectId) as LocalProject | undefined;
   if (!project) return;
+  if (project.deletedAt) return;
   const identified = await ensureProjectIdentity(project);
   const references = await DB.references.getByProject(projectId) as LocalReference[];
   const generations = (await DB.gallery.getByProject(projectId) as LocalGeneration[])
@@ -576,6 +619,7 @@ async function syncCloudProjectNow(projectId: number) {
 }
 
 export async function syncCloudProject(projectId: number) {
+  if (!await canUseCloudWorkspace()) return;
   const active = projectSyncs.get(projectId);
   if (active) return active;
   const promise = syncCloudProjectNow(projectId).finally(() => projectSyncs.delete(projectId));

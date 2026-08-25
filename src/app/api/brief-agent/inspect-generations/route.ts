@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import type { GenerationInspectionRequest, GenerationInspectionResponse } from "@/lib/brief-agent/types";
 import { createGoogleGenAI } from "@/lib/server/googleGenAI";
+import { MODEL_REGISTRY } from "@/lib/modelRegistry";
 import { logModelUsage } from "@/lib/server/modelUsage";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
 
-const DEFAULT_MODEL = "gemini-3.5-flash-lite";
+const DEFAULT_MODEL = MODEL_REGISTRY.generationInspection;
 const MAX_IMAGES = 2;
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);

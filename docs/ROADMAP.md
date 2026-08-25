@@ -75,6 +75,8 @@ share validation, persistence, undo, interruption handling, and result tests.
 
 ## Later
 
+- Evaluate true multi-user collaboration only after the single-user memory, compaction, and deletion lifecycle is stable; ownership fields remain migration-ready without exposing collaboration UI.
+
 ### Build the Timeline
 
 Assemble image, video, and audio assets with ordering, trimming, transitions,

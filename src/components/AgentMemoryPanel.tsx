@@ -11,6 +11,7 @@ type Props = {
   memories: AgentMemoryItem[];
   insights: AgentInsight[];
   events: AgentAppEvent[];
+  contextStats: { transcriptMessages: number; checkpoints: number };
   onTabChange: (tab: AgentMemoryPanelTab) => void;
   onClose: () => void;
   onClearMemory: (scope: "user" | "project" | "session" | "all") => void;
@@ -36,6 +37,7 @@ export default function AgentMemoryPanel({
   memories,
   insights,
   events,
+  contextStats,
   onTabChange,
   onClose,
   onClearMemory,
@@ -76,6 +78,8 @@ export default function AgentMemoryPanel({
             <span>USER {memoryCounts.user}</span>
             <span>PROJECT {memoryCounts.project}</span>
             <span>SESSION {memoryCounts.session}</span>
+            <span>TRANSCRIPT {contextStats.transcriptMessages}</span>
+            <span>CHECKPOINTS {contextStats.checkpoints}</span>
           </div>
           {memories.length ? memories.map((memory) => (
             <article className="agent-memory-record" key={memory.id}>

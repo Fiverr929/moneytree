@@ -36,6 +36,20 @@
       "when": 1787045400000,
       "tag": "0004_reference_vision_freshness",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1787616000000,
+      "tag": "0005_agent_context",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787616060000,
+      "tag": "0006_iteration_brief_cloud",
+      "breakpoints": true
     }
   ]
 }

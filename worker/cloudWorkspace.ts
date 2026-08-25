@@ -24,8 +24,8 @@ export interface CloudWorkspaceEnv {
   MEDIA: R2Bucket;
 }
 
-type ProjectInput = { id: string; name: string; mode: string; createdAt: string; updatedAt: string };
-type StateInput = { projectId: string; folders: unknown[]; updatedAt: string };
+type ProjectInput = { id: string; name: string; mode: string; createdAt: string; updatedAt: string; deletedAt: string | null };
+type StateInput = { projectId: string; folders: unknown[]; iterationBrief?: unknown; updatedAt: string };
 type ReferenceInput = {
   id: string;
   projectId: string;
@@ -77,13 +77,15 @@ function validProject(value: unknown): value is ProjectInput {
   return validId(item.id)
     && typeof item.name === "string" && item.name.length <= 160
     && typeof item.mode === "string" && item.mode.length <= 40
-    && validDate(item.createdAt) && validDate(item.updatedAt);
+    && validDate(item.createdAt) && validDate(item.updatedAt)
+    && (item.deletedAt === null || validDate(item.deletedAt));
 }
 
 function validState(value: unknown): value is StateInput {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
-  return validId(item.projectId) && Array.isArray(item.folders) && item.folders.length <= 50 && validDate(item.updatedAt);
+  if (!validId(item.projectId) || !Array.isArray(item.folders) || item.folders.length > 50 || !validDate(item.updatedAt)) return false;
+  try { return item.iterationBrief === undefined || JSON.stringify(item.iterationBrief).length <= 50_000; } catch { return false; }
 }
 
 function validReference(value: unknown): value is ReferenceInput {
@@ -160,7 +162,7 @@ function ensureSchema(db: D1Database) {
     )`),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_cloud_project_owner_updated ON cloud_project (owner_key, updated_at)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS cloud_project_state (
-      owner_key TEXT NOT NULL, project_id TEXT NOT NULL, folders_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+      owner_key TEXT NOT NULL, project_id TEXT NOT NULL, folders_json TEXT NOT NULL, iteration_json TEXT, updated_at TEXT NOT NULL,
       PRIMARY KEY (owner_key, project_id)
     )`),
     db.prepare(`CREATE TABLE IF NOT EXISTS cloud_reference (
@@ -180,7 +182,12 @@ function ensureSchema(db: D1Database) {
     )`),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_cloud_generation_owner_project_updated ON cloud_generation (owner_key, project_id, updated_at)"),
     db.prepare("PRAGMA optimize"),
-  ]).then(() => undefined).catch((error) => {
+  ]).then(async () => {
+    const columns = await db.prepare("PRAGMA table_info(cloud_project_state)").all<{ name: string }>();
+    if (!columns.results.some((column) => column.name === "iteration_json")) {
+      await db.prepare("ALTER TABLE cloud_project_state ADD COLUMN iteration_json TEXT").run();
+    }
+  }).catch((error) => {
     schemaReady = null;
     throw error;
   });
@@ -208,18 +215,20 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
   const statements: D1Statement[] = [];
   body.projects.forEach((project) => statements.push(env.DB.prepare(`INSERT INTO cloud_project
     (owner_key, id, name, mode, created_at, updated_at, deleted_at)
-    VALUES (?, ?, ?, ?, ?, ?, NULL)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(owner_key, id) DO UPDATE SET
-      name = excluded.name, mode = excluded.mode, updated_at = excluded.updated_at, deleted_at = NULL
-    WHERE (cloud_project.deleted_at IS NULL AND excluded.updated_at >= cloud_project.updated_at)
-      OR (cloud_project.deleted_at IS NOT NULL AND excluded.updated_at > cloud_project.deleted_at)`)
-    .bind(ownerKey, project.id, project.name, project.mode, project.createdAt, project.updatedAt)));
+      name = excluded.name, mode = excluded.mode, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at
+    WHERE cloud_project.mode != '__PURGED__' AND (
+      (cloud_project.deleted_at IS NULL AND excluded.updated_at >= cloud_project.updated_at)
+      OR (cloud_project.deleted_at IS NOT NULL AND excluded.updated_at > cloud_project.deleted_at)
+    )`)
+    .bind(ownerKey, project.id, project.name, project.mode, project.createdAt, project.updatedAt, project.deletedAt)));
   body.states.forEach((state) => statements.push(env.DB.prepare(`INSERT INTO cloud_project_state
-    (owner_key, project_id, folders_json, updated_at) VALUES (?, ?, ?, ?)
+    (owner_key, project_id, folders_json, iteration_json, updated_at) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(owner_key, project_id) DO UPDATE SET
-      folders_json = excluded.folders_json, updated_at = excluded.updated_at
+      folders_json = excluded.folders_json, iteration_json = excluded.iteration_json, updated_at = excluded.updated_at
     WHERE excluded.updated_at >= cloud_project_state.updated_at`)
-    .bind(ownerKey, state.projectId, JSON.stringify(state.folders), state.updatedAt)));
+    .bind(ownerKey, state.projectId, JSON.stringify(state.folders), state.iterationBrief === undefined ? null : JSON.stringify(state.iterationBrief), state.updatedAt)));
   body.references.forEach((reference) => statements.push(env.DB.prepare(`INSERT INTO cloud_reference
     (owner_key, id, project_id, name, label, folder, kind, size, dims, modified, eye, strength,
       mode, visual_read, visual_read_source, visual_read_fingerprint, visual_read_version, updated_at, deleted_at)
@@ -254,14 +263,16 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
     )));
   await runBatches(env.DB, statements);
 
-  const [projectRows, stateRows, deletedProjectRows] = await Promise.all([
+  const [projectRows, stateRows, deletedProjectRows, purgedProjectRows] = await Promise.all([
     env.DB.prepare("SELECT * FROM cloud_project WHERE owner_key = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 100")
       .bind(ownerKey).all<Record<string, unknown>>(),
     env.DB.prepare(`SELECT state.* FROM cloud_project_state state
       JOIN cloud_project project ON project.owner_key = state.owner_key AND project.id = state.project_id
       WHERE state.owner_key = ? AND project.deleted_at IS NULL LIMIT 100`)
       .bind(ownerKey).all<Record<string, unknown>>(),
-    env.DB.prepare("SELECT id, deleted_at FROM cloud_project WHERE owner_key = ? AND deleted_at IS NOT NULL LIMIT 100")
+    env.DB.prepare("SELECT id, deleted_at FROM cloud_project WHERE owner_key = ? AND deleted_at IS NOT NULL AND mode != '__PURGED__' LIMIT 100")
+      .bind(ownerKey).all<Record<string, unknown>>(),
+    env.DB.prepare("SELECT id, deleted_at FROM cloud_project WHERE owner_key = ? AND mode = '__PURGED__' LIMIT 100")
       .bind(ownerKey).all<Record<string, unknown>>(),
   ]);
 
@@ -297,9 +308,11 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
     states: stateRows.results.map((row) => ({
       projectId: row.project_id,
       folders: (() => { try { return JSON.parse(String(row.folders_json)); } catch { return []; } })(),
+      iterationBrief: (() => { try { return row.iteration_json ? JSON.parse(String(row.iteration_json)) : null; } catch { return null; } })(),
       updatedAt: row.updated_at,
     })),
     deletedProjects: deletedProjectRows.results.map((row) => ({ id: row.id, deletedAt: row.deleted_at })),
+    purgedProjects: purgedProjectRows.results.map((row) => ({ id: row.id, deletedAt: row.deleted_at })),
     references: references.map((row) => ({
       id: row.id, projectId: row.project_id, name: row.name, label: row.label, folder: row.folder,
       kind: row.kind, size: row.size, dims: row.dims, modified: row.modified, eye: Boolean(row.eye),
@@ -361,13 +374,13 @@ async function deleteProject(request: Request, env: CloudWorkspaceEnv, ownerKey:
     await env.MEDIA.delete(generationRows.results.map((row) => generationObjectKey(ownerKey, projectId, row.id)));
   }
   await env.DB.batch([
-    env.DB.prepare(`UPDATE cloud_reference SET deleted_at = ?, updated_at = ?
-      WHERE owner_key = ? AND project_id = ? AND (deleted_at IS NULL OR deleted_at < ?)`)
-      .bind(deletedAt, deletedAt, ownerKey, projectId, deletedAt),
-    env.DB.prepare(`UPDATE cloud_generation SET deleted_at = ?, updated_at = ?
-      WHERE owner_key = ? AND project_id = ? AND (deleted_at IS NULL OR deleted_at < ?)`)
-      .bind(deletedAt, deletedAt, ownerKey, projectId, deletedAt),
-    env.DB.prepare(`UPDATE cloud_project SET deleted_at = ?, updated_at = ?
+    env.DB.prepare("DELETE FROM cloud_reference WHERE owner_key = ? AND project_id = ?").bind(ownerKey, projectId),
+    env.DB.prepare("DELETE FROM cloud_generation WHERE owner_key = ? AND project_id = ?").bind(ownerKey, projectId),
+    env.DB.prepare("DELETE FROM cloud_project_state WHERE owner_key = ? AND project_id = ?").bind(ownerKey, projectId),
+    env.DB.prepare("DELETE FROM agent_memory WHERE owner_key = ? AND scope = 'project' AND project_key = ?").bind(ownerKey, projectId),
+    env.DB.prepare("DELETE FROM agent_message WHERE owner_key = ? AND project_key = ?").bind(ownerKey, projectId),
+    env.DB.prepare("DELETE FROM agent_checkpoint WHERE owner_key = ? AND project_key = ?").bind(ownerKey, projectId),
+    env.DB.prepare(`UPDATE cloud_project SET deleted_at = ?, updated_at = ?, mode = '__PURGED__'
       WHERE owner_key = ? AND id = ? AND (deleted_at IS NULL OR deleted_at < ?)`)
       .bind(deletedAt, deletedAt, ownerKey, projectId, deletedAt),
   ]);
@@ -438,6 +451,7 @@ export async function handleCloudWorkspace(
 ) {
   await ensureSchema(env.DB);
   const pathname = new URL(request.url).pathname;
+  if (pathname === "/api/cloud-workspace/status" && request.method === "GET") return json({ ok: true });
   if (request.method !== "GET" && !sameOrigin) return json({ error: "Invalid request origin." }, 403);
   if (pathname === "/api/cloud-workspace/sync" && request.method === "POST") return syncWorkspace(request, env, ownerKey);
   if (pathname === "/api/cloud-workspace/reference" && request.method === "DELETE") return deleteReference(request, env, ownerKey);

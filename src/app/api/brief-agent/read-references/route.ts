@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { BRIEF_AGENT_SKILL_CONTRACT } from "@/lib/brief-agent/skillContract";
 import { createGoogleGenAI } from "@/lib/server/googleGenAI";
+import { MODEL_REGISTRY } from "@/lib/modelRegistry";
 import { logCachedModelUsage, logModelUsage, modelUsage, traceReferenceFingerprint, type UsageMetadata } from "@/lib/server/modelUsage";
 import { cacheReferenceRead } from "@/lib/server/referenceReadCache";
 import { REFERENCE_READER_CONTRACT_VERSION } from "@/lib/brief-agent/referenceFreshness";
@@ -16,7 +17,7 @@ import type {
 export const runtime = "nodejs";
 export const maxDuration = 90;
 
-const DEFAULT_REFERENCE_READER_MODEL = "gemini-3.5-flash-lite";
+const DEFAULT_REFERENCE_READER_MODEL = MODEL_REGISTRY.referenceReader;
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);

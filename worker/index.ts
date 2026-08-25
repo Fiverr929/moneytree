@@ -195,6 +195,29 @@ function ensureSchema(db: D1Database) {
       ON agent_memory (owner_key, scope)`),
     db.prepare(`CREATE INDEX IF NOT EXISTS idx_agent_memory_owner_project
       ON agent_memory (owner_key, project_key)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS agent_message (
+      owner_key TEXT NOT NULL,
+      id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (owner_key, id)
+    )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_agent_message_owner_project_session_created
+      ON agent_message (owner_key, project_key, session_id, created_at)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS agent_checkpoint (
+      owner_key TEXT NOT NULL,
+      id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (owner_key, id)
+    )`),
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_agent_checkpoint_owner_project_session_updated
+      ON agent_checkpoint (owner_key, project_key, session_id, updated_at)`),
   ]).then(() => undefined).catch((error) => {
     schemaReady = null;
     throw error;
@@ -356,6 +379,71 @@ async function handleAgentMemory(request: Request, env: Env) {
   return json({ error: "Method not allowed." }, 405);
 }
 
+async function handleAgentContext(request: Request, env: Env) {
+  await ensureSchema(env.DB);
+  const secret = env.AUTH_SESSION_SECRET;
+  const session = secret ? await readSession(request, secret) : null;
+  if (!session) return json({ error: "Authentication required." }, 401);
+  if (request.method !== "POST" || !isSameOrigin(request)) return json({ error: "Invalid request." }, 403);
+  let body: { projectKey?: unknown; messages?: unknown; checkpoints?: unknown };
+  try {
+    const raw = await request.text();
+    if (raw.length > 1_000_000) return json({ error: "Context payload is too large." }, 413);
+    body = JSON.parse(raw);
+  } catch {
+    return json({ error: "Invalid context payload." }, 400);
+  }
+  const projectKey = typeof body.projectKey === "string" && body.projectKey.length <= 180 ? body.projectKey : "";
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const checkpoints = Array.isArray(body.checkpoints) ? body.checkpoints : [];
+  if (!projectKey || messages.length > 250 || checkpoints.length > 50) return json({ error: "Invalid context payload." }, 400);
+  const validRecord = (value: unknown, checkpoint: boolean) => {
+    if (!value || typeof value !== "object") return false;
+    const record = value as Record<string, unknown>;
+    if (typeof record.id !== "string" || record.id.length > 220 || typeof record.sessionId !== "string" || record.sessionId.length > 180) return false;
+    const timestamp = checkpoint ? record.updatedAt : record.createdAt;
+    if (typeof timestamp !== "string" || Number.isNaN(Date.parse(timestamp))) return false;
+    try { return JSON.stringify(record.payload).length <= (checkpoint ? 20_000 : 120_000); } catch { return false; }
+  };
+  if (!messages.every((item) => validRecord(item, false)) || !checkpoints.every((item) => validRecord(item, true))) {
+    return json({ error: "Invalid context record." }, 400);
+  }
+  const now = new Date().toISOString();
+  const statements = [
+    ...messages.map((record) => {
+      const item = record as { id: string; sessionId: string; createdAt: string; payload: unknown };
+      return env.DB.prepare(`INSERT INTO agent_message
+        (owner_key, id, project_key, session_id, payload_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(owner_key, id) DO UPDATE SET
+          project_key = excluded.project_key, session_id = excluded.session_id,
+          payload_json = excluded.payload_json, updated_at = excluded.updated_at`)
+        .bind(session.username, item.id, projectKey, item.sessionId, JSON.stringify(item.payload), item.createdAt, now);
+    }),
+    ...checkpoints.map((record) => {
+      const item = record as { id: string; sessionId: string; updatedAt: string; payload: unknown };
+      return env.DB.prepare(`INSERT INTO agent_checkpoint
+        (owner_key, id, project_key, session_id, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(owner_key, id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at
+        WHERE excluded.updated_at >= agent_checkpoint.updated_at`)
+        .bind(session.username, item.id, projectKey, item.sessionId, JSON.stringify(item.payload), item.updatedAt);
+    }),
+  ];
+  for (let index = 0; index < statements.length; index += 50) await env.DB.batch(statements.slice(index, index + 50));
+  const [messageRows, checkpointRows] = await Promise.all([
+    env.DB.prepare("SELECT session_id, payload_json FROM agent_message WHERE owner_key = ? AND project_key = ? ORDER BY created_at DESC LIMIT 500")
+      .bind(session.username, projectKey).all<Record<string, unknown>>(),
+    env.DB.prepare("SELECT session_id, payload_json FROM agent_checkpoint WHERE owner_key = ? AND project_key = ? ORDER BY updated_at DESC LIMIT 100")
+      .bind(session.username, projectKey).all<Record<string, unknown>>(),
+  ]);
+  const parse = (value: unknown) => { try { return JSON.parse(String(value)); } catch { return null; } };
+  return json({
+    messages: messageRows.results.map((row) => ({ sessionId: row.session_id, payload: parse(row.payload_json) })).filter((row) => row.payload),
+    checkpoints: checkpointRows.results.map((row) => ({ sessionId: row.session_id, payload: parse(row.payload_json) })).filter((row) => row.payload),
+  });
+}
+
 function isSameOrigin(request: Request) {
   const origin = request.headers.get("origin");
   return origin === new URL(request.url).origin;
@@ -489,7 +577,12 @@ const worker = {
       return handleAgentMemory(request, env);
     }
 
+    if (url.pathname === "/api/agent-context") {
+      return handleAgentContext(request, env);
+    }
+
     if (url.pathname.startsWith("/api/cloud-workspace/")) {
+      await ensureSchema(env.DB);
       const secret = env.AUTH_SESSION_SECRET;
       const session = secret ? await readSession(request, secret) : null;
       if (!session) return json({ error: "Authentication required." }, 401);

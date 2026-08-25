@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
+import { projectTrashExpired, projectTrashMetadata } from "@/lib/projectLifecycle";
+
 const DB_NAME = 'cafehtml-db';
 let _db: IDBDatabase | null = null;
 
@@ -19,6 +21,8 @@ const S = {
   AGENT_EVENTS: 'agent-events',
   AGENT_MEMORIES: 'agent-memories',
   AGENT_INSIGHTS: 'agent-insights',
+  AGENT_MESSAGES: 'agent-messages',
+  AGENT_CHECKPOINTS: 'agent-checkpoints',
   SYNC_TOMBSTONES: 'sync-tombstones'
 };
 
@@ -60,6 +64,8 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
                           !hasIndex(S.AGENT_EVENTS, 'by_project_created') ||
                          !db.objectStoreNames.contains(S.AGENT_MEMORIES) ||
                          !db.objectStoreNames.contains(S.AGENT_INSIGHTS) ||
+                         !db.objectStoreNames.contains(S.AGENT_MESSAGES) ||
+                         !db.objectStoreNames.contains(S.AGENT_CHECKPOINTS) ||
                          !db.objectStoreNames.contains(S.SYNC_TOMBSTONES) ||
                          !hasIndex(S.AGENT_MEMORIES, 'by_scope') ||
                          !hasIndex(S.AGENT_MEMORIES, 'by_project') ||
@@ -67,9 +73,15 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
     const needsInsightUpgrade = !db.objectStoreNames.contains(S.AGENT_INSIGHTS)
       || !hasIndex(S.AGENT_INSIGHTS, 'by_project')
       || !hasIndex(S.AGENT_INSIGHTS, 'by_status');
+    const needsConversationUpgrade = !db.objectStoreNames.contains(S.AGENT_MESSAGES)
+      || !hasIndex(S.AGENT_MESSAGES, 'by_project')
+      || !hasIndex(S.AGENT_MESSAGES, 'by_project_session_created')
+      || !db.objectStoreNames.contains(S.AGENT_CHECKPOINTS)
+      || !hasIndex(S.AGENT_CHECKPOINTS, 'by_project')
+      || !hasIndex(S.AGENT_CHECKPOINTS, 'by_project_session_updated');
     db.close();
 
-    const targetVersion = needsUpgrade || needsInsightUpgrade ? currentVersion + 1 : currentVersion;
+    const targetVersion = needsUpgrade || needsInsightUpgrade || needsConversationUpgrade ? currentVersion + 1 : currentVersion;
 
     const req = indexedDB.open(DB_NAME, targetVersion);
     req.onupgradeneeded = (e2: any) => {
@@ -158,6 +170,24 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
         if (!ais.indexNames.contains('by_project')) ais.createIndex('by_project', 'projectId');
         if (!ais.indexNames.contains('by_status')) ais.createIndex('by_status', 'status');
       }
+      if (!db2.objectStoreNames.contains(S.AGENT_MESSAGES)) {
+        const messages = db2.createObjectStore(S.AGENT_MESSAGES, { keyPath: 'id' });
+        messages.createIndex('by_project', 'project_id');
+        messages.createIndex('by_project_session_created', ['project_id', 'session_id', 'createdAt']);
+      } else {
+        const messages = e2.target.transaction.objectStore(S.AGENT_MESSAGES);
+        if (!messages.indexNames.contains('by_project')) messages.createIndex('by_project', 'project_id');
+        if (!messages.indexNames.contains('by_project_session_created')) messages.createIndex('by_project_session_created', ['project_id', 'session_id', 'createdAt']);
+      }
+      if (!db2.objectStoreNames.contains(S.AGENT_CHECKPOINTS)) {
+        const checkpoints = db2.createObjectStore(S.AGENT_CHECKPOINTS, { keyPath: 'id' });
+        checkpoints.createIndex('by_project', 'project_id');
+        checkpoints.createIndex('by_project_session_updated', ['project_id', 'session_id', 'updatedAt']);
+      } else {
+        const checkpoints = e2.target.transaction.objectStore(S.AGENT_CHECKPOINTS);
+        if (!checkpoints.indexNames.contains('by_project')) checkpoints.createIndex('by_project', 'project_id');
+        if (!checkpoints.indexNames.contains('by_project_session_updated')) checkpoints.createIndex('by_project_session_updated', ['project_id', 'session_id', 'updatedAt']);
+      }
       if (!db2.objectStoreNames.contains(S.SYNC_TOMBSTONES)) {
         db2.createObjectStore(S.SYNC_TOMBSTONES, { keyPath: 'id' });
       }
@@ -225,6 +255,8 @@ async function deleteProjectCascade(id: number) {
       S.AGENT_EVENTS,
       S.AGENT_MEMORIES,
       S.AGENT_INSIGHTS,
+      S.AGENT_MESSAGES,
+      S.AGENT_CHECKPOINTS,
     ],
     "readwrite",
   );
@@ -252,6 +284,8 @@ async function deleteProjectCascade(id: number) {
   deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_RUNS), id);
   deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_MEMORIES), id);
   deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_INSIGHTS), id);
+  deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_MESSAGES), id);
+  deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_CHECKPOINTS), id);
   const agentEventsStore = transaction.objectStore(S.AGENT_EVENTS);
   const agentEventsRequest = agentEventsStore.index('by_project_created').openKeyCursor(
     IDBKeyRange.bound([id, ""], [id, "\uffff"]),
@@ -285,7 +319,13 @@ async function deleteProjectWithTombstone(id: number) {
 }
 
 const projects = {
-  getAll: () => ready.then(() => wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).getAll())),
+  getAllIncludingDeleted: () => ready.then(() => wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).getAll())),
+  getAll: () => ready.then(async () => (
+    (await wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).getAll())).filter((project: any) => !project.deletedAt)
+  )),
+  getTrash: () => ready.then(async () => (
+    (await wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).getAll())).filter((project: any) => Boolean(project.deletedAt))
+  )),
   get: (id: number) => ready.then(() => wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).get(id))),
   create: (data: any, syncSilent = false) => ready.then(() => {
     const now = new Date().toISOString();
@@ -316,7 +356,53 @@ const projects = {
       });
     });
   }),
-  delete: deleteProjectWithTombstone,
+  trash: (id: number) => ready.then(async () => {
+    const store = tx(S.PROJECTS, 'readwrite').objectStore(S.PROJECTS);
+    const existing = await wrap(store.get(id));
+    if (!existing) throw new Error('[DB] project not found: ' + id);
+    if (existing.deletedAt) return existing;
+    const { deletedAt, purgeAfter } = projectTrashMetadata();
+    const updated = {
+      ...existing,
+      id,
+      deletedAt,
+      purgeAfter,
+      date_modified: deletedAt,
+      cloudUpdatedAt: deletedAt,
+      cloudSyncedAt: null,
+    };
+    await wrap(store.put(updated));
+    emitCloudChange(id, "project-trash");
+    return updated;
+  }),
+  restore: (id: number) => ready.then(async () => {
+    const store = tx(S.PROJECTS, 'readwrite').objectStore(S.PROJECTS);
+    const existing = await wrap(store.get(id));
+    if (!existing) throw new Error('[DB] project not found: ' + id);
+    const restoredAt = new Date().toISOString();
+    const active = { ...existing };
+    delete active.deletedAt;
+    delete active.purgeAfter;
+    const updated = {
+      ...active,
+      id,
+      date_modified: restoredAt,
+      cloudUpdatedAt: restoredAt,
+      cloudSyncedAt: null,
+    };
+    await wrap(store.put(updated));
+    emitCloudChange(id, "project-restore");
+    return updated;
+  }),
+  delete: (id: number) => projects.trash(id),
+  deletePermanently: deleteProjectWithTombstone,
+  purgeExpired: () => ready.then(async () => {
+    const all = await wrap(tx(S.PROJECTS).objectStore(S.PROJECTS).getAll());
+    const now = Date.now();
+    const expired = all.filter((project: any) => projectTrashExpired(project, now));
+    for (const project of expired) await deleteProjectWithTombstone(project.id);
+    return expired.length;
+  }),
   deleteLocal: deleteProjectCascade,
 };
 
@@ -687,6 +773,48 @@ const agentInsights = {
   )),
 };
 
+const agentMessages = {
+  putMany: (projectId: number, sessionId: string, messages: any[]) => ready.then(async () => {
+    if (!messages.length) return;
+    const transaction = tx(S.AGENT_MESSAGES, 'readwrite');
+    const store = transaction.objectStore(S.AGENT_MESSAGES);
+    messages.forEach((message) => store.put({
+      ...message,
+      project_id: projectId,
+      session_id: sessionId,
+      schemaVersion: 1,
+    }));
+    await transactionDone(transaction);
+  }),
+  getBySession: (projectId: number, sessionId: string) => ready.then(() => {
+    const index = tx(S.AGENT_MESSAGES).objectStore(S.AGENT_MESSAGES).index('by_project_session_created');
+    return wrap(index.getAll(IDBKeyRange.bound(
+      [projectId, sessionId, ""],
+      [projectId, sessionId, "\uffff"],
+    )));
+  }),
+};
+
+const agentCheckpoints = {
+  put: (data: any) => ready.then(() => (
+    wrap(tx(S.AGENT_CHECKPOINTS, 'readwrite').objectStore(S.AGENT_CHECKPOINTS).put(data))
+  )),
+  putMany: (records: any[]) => ready.then(async () => {
+    if (!records.length) return;
+    const transaction = tx(S.AGENT_CHECKPOINTS, 'readwrite');
+    const store = transaction.objectStore(S.AGENT_CHECKPOINTS);
+    records.forEach((record) => store.put(record));
+    await transactionDone(transaction);
+  }),
+  getBySession: (projectId: number, sessionId: string) => ready.then(() => {
+    const index = tx(S.AGENT_CHECKPOINTS).objectStore(S.AGENT_CHECKPOINTS).index('by_project_session_updated');
+    return wrap(index.getAll(IDBKeyRange.bound(
+      [projectId, sessionId, ""],
+      [projectId, sessionId, "\uffff"],
+    )));
+  }),
+};
+
 const syncTombstones = {
   getAll: () => ready.then(() => wrap(tx(S.SYNC_TOMBSTONES).objectStore(S.SYNC_TOMBSTONES).getAll())),
   delete: (id: string) => ready.then(() => (
@@ -709,6 +837,8 @@ const DB = {
   agentEvents,
   agentMemories,
   agentInsights,
+  agentMessages,
+  agentCheckpoints,
   syncTombstones,
 };
 export default DB;

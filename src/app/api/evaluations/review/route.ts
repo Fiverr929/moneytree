@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { GENERATION_SAFETY_SETTINGS, type Part } from "@/lib/pipeline/genai-client";
 import type { AiGenerationEvaluation, EvaluationScoreValue } from "@/lib/evaluationReview";
 import { createGoogleGenAI } from "@/lib/server/googleGenAI";
+import { MODEL_REGISTRY } from "@/lib/modelRegistry";
 
 export const runtime = "nodejs";
 export const maxDuration = 90;
 
-const DEFAULT_REVIEW_MODEL = "gemini-3.1-flash-lite";
+const DEFAULT_REVIEW_MODEL = MODEL_REGISTRY.generationReview;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_REFERENCES = 4;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);

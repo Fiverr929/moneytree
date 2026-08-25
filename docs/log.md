@@ -60,6 +60,24 @@ documentation.
 ---
 
 ## Sessions
+### 2026-08-25 - Single-user brain continuity, safe prompts, and project Trash
+
+**Status:** COMPLETED
+**Product area:** Agent | Persistence | Projects
+
+**What changed:**
+- Replaced silent 4,000-character prompt slicing with normalization and a blocking revision path.
+- Added durable raw transcript records and versioned structured conversation checkpoints.
+- Added authenticated cloud synchronization for transcripts and checkpoints and cloud-backed iteration briefs.
+- Consolidated model defaults in one registry and moved routine review to Gemini 3.5 Flash-Lite.
+- Changed project deletion into a 30-day Projects → Trash lifecycle with restore and permanent purge.
+- Made ordinary localhost explicitly local-only when Worker endpoints are absent and added a local Cloudflare development command.
+
+**Verification:**
+- Prompt compiler, conversation-context, project-lifecycle, memory, and iteration checks.
+- TypeScript validation.
+- Focused lint and the Vinext production build.
+
 ### 2026-08-24 - Consolidated Memory, Insights, and Activity interface
 
 **Status:** COMPLETED

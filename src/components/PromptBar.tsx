@@ -50,6 +50,7 @@ import AgentDecisionFlowCard from "@/components/AgentDecisionFlow";
 import { cleanDecisionLabel, cleanReplyForDirections } from "@/lib/brief-agent/decisionFlow";
 import { useProjectDraft } from "@/hooks/useProjectDraft";
 import { iterationPreflight } from "@/lib/brief-agent/iterationBrief";
+import { persistConversationMessages, prepareConversationContext } from "@/lib/brief-agent/conversationContext";
 
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
 const IMAGE_PROMPT_SETTINGS_KEY = "cafehtml-image-prompt-settings";
@@ -293,6 +294,7 @@ export default function PromptBar() {
   const [memoryPanelMemories, setMemoryPanelMemories] = useState<AgentMemoryItem[]>([]);
   const [memoryPanelInsights, setMemoryPanelInsights] = useState<AgentInsight[]>([]);
   const [memoryPanelEvents, setMemoryPanelEvents] = useState<AgentAppEvent[]>([]);
+  const [memoryPanelContext, setMemoryPanelContext] = useState({ transcriptMessages: 0, checkpoints: 0 });
   const [agentWorkspaceHydrating, setAgentWorkspaceHydrating] = useState(true);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [agentPending, setAgentPending] = useState(false);
@@ -647,6 +649,12 @@ export default function PromptBar() {
     agentRun,
     queuedAgentInputs,
   ]);
+
+  useEffect(() => {
+    if (!activeProjectId || !agentRun?.id || !agentMessages.length) return;
+    void persistConversationMessages(activeProjectId, agentRun.id, agentMessages)
+      .catch((error) => console.error("Failed to preserve agent transcript", error));
+  }, [activeProjectId, agentMessages, agentRun?.id]);
 
   useEffect(() => {
     if (!restoredReviewTargetKeys.length || !gallery.cells.length) return;
@@ -1310,9 +1318,12 @@ export default function PromptBar() {
           query: userMessage.text,
         })
         : [];
+      const revisionContext = revisionProjectId
+        ? await prepareConversationContext({ projectId: revisionProjectId, sessionId: revisionRun.id, messages: nextMessages })
+        : { messages: nextMessages };
       const response = await requestBriefAgent({
         referenceSnapshot,
-        messages: nextMessages,
+        messages: revisionContext.messages,
         session: agentDraft?.session || null,
         run: revisionRun,
         generations: currentGenerationEvidence(),
@@ -1632,14 +1643,17 @@ export default function PromptBar() {
     setAgentConsoleOpen(true);
     setMemoryPanelLoading(true);
     try {
-      const [memories, insights, events] = await Promise.all([
+      const [memories, insights, events, transcript, checkpoints] = await Promise.all([
         listAgentMemories(activeProjectId, agentRun?.id),
         listAgentInsights(activeProjectId),
         DB.agentEvents.getByProject(activeProjectId) as Promise<AgentAppEvent[]>,
+        agentRun?.id ? DB.agentMessages.getBySession(activeProjectId, agentRun.id) as Promise<unknown[]> : Promise.resolve([]),
+        agentRun?.id ? DB.agentCheckpoints.getBySession(activeProjectId, agentRun.id) as Promise<unknown[]> : Promise.resolve([]),
       ]);
       setMemoryPanelMemories([...memories].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
       setMemoryPanelInsights([...insights].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
       setMemoryPanelEvents(events);
+      setMemoryPanelContext({ transcriptMessages: transcript.length, checkpoints: checkpoints.length });
     } finally {
       setMemoryPanelLoading(false);
     }
@@ -1929,9 +1943,12 @@ export default function PromptBar() {
         })
         : [];
       updateAgentActivity("thinking", "Planning the response", "Choosing the clearest next step for your request");
+      const preparedContext = requestProjectId
+        ? await prepareConversationContext({ projectId: requestProjectId, sessionId: agentRun?.id || userMessage.id, messages: nextUserMessages })
+        : { messages: nextUserMessages };
       const response = await requestBriefAgent({
         referenceSnapshot,
-        messages: nextUserMessages,
+        messages: preparedContext.messages,
         session: previousSession,
         run: continuingCurrentReferenceRun ? agentRun : null,
         generations,
@@ -2381,6 +2398,7 @@ export default function PromptBar() {
               memories={memoryPanelMemories}
               insights={memoryPanelInsights}
               events={memoryPanelEvents}
+              contextStats={memoryPanelContext}
               onTabChange={(tab) => void loadMemoryPanel(tab).catch((error) => setAgentError(error instanceof Error ? error.message : "Could not load memory."))}
               onClose={() => setMemoryPanelOpen(false)}
               onClearMemory={(scope) => void clearMemoryFromPanel(scope).catch((error) => setAgentError(error instanceof Error ? error.message : "Could not clear memory."))}
