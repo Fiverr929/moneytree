@@ -79,6 +79,7 @@ export type GalleryCell = {
   createdAt?: string;
   updatedAt?: string;
   sourceUuid?: string;
+  studioWorkspaceKey?: string;
   dims?: string;
   generated?: boolean;
   mode?: string;

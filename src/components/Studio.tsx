@@ -155,7 +155,10 @@ export default function Studio() {
     strokeSize, setStrokeSize,
     strokeColor, setStrokeColor,
     cropRatio, setCropRatio,
-    groups
+    groups,
+    studioSession,
+    completeStudioGeneration,
+    isStudioSessionCurrent,
   } = useStudio();
   
   const { addCell } = useGallery();
@@ -184,6 +187,10 @@ export default function Studio() {
   const [undoStack, setUndoStack] = useState<Stroke[]>([]);
   const [redoStack, setRedoStack] = useState<Stroke[]>([]);
   const undoStackRef = useRef<Stroke[]>([]);
+
+  useEffect(() => {
+    setLoadingCount(0);
+  }, [studioSession?.id]);
 
   // Crop state
   const cropDrag = useRef<{startX: number, startY: number, origLeft: number, origTop: number} | null>(null);
@@ -593,7 +600,7 @@ export default function Studio() {
   };
 
   const handleRefine = () => {
-    if (!activeUrl || !activeModel) return;
+    if (!activeUrl || !activeModel || !studioSession) return;
     
     const parsedCommand = parseStudioPromptCommand(prompt);
     if (parsedCommand.kind === "invalid-command") {
@@ -620,6 +627,8 @@ export default function Studio() {
     const studioSkill = parsedCommand.kind === "character-reference" ? "character-reference" : undefined;
     const studioSkillProfile = parsedCommand.kind === "character-reference" ? parsedCommand.profileId : undefined;
     const currentActiveUrl = activeUrl;
+    const currentHistory = [...history];
+    const currentSession = studioSession;
     const currentAspectRatio = characterReferenceProfile?.generation?.aspectRatio
       || aspectRatioFromImage(canvasRef.current?.querySelector('img'));
     const currentImageSize = isUpscale
@@ -664,10 +673,25 @@ export default function Studio() {
           aspectRatio: currentAspectRatio,
         });
 
-        setHistory(prev => limitStudioHistory([generatedUrl, ...prev]));
+        let isCurrentSession = isStudioSessionCurrent(currentSession.id);
+        try {
+          isCurrentSession = await completeStudioGeneration({
+            session: currentSession,
+            generatedUrl,
+            fallbackHistory: currentHistory,
+            fallbackGroups: currentGroups,
+          });
+        } catch (error) {
+          console.error("Failed to persist Studio generation history", error);
+          isCurrentSession = isStudioSessionCurrent(currentSession.id);
+        }
         
         const newUuid = crypto.randomUUID();
-        const usedImages: GalleryImageUse[] = [{ imgUrl: currentActiveUrl, role: "BASE" }];
+        const usedImages: GalleryImageUse[] = [{
+          imgUrl: currentActiveUrl,
+          uuid: currentSession.sourceUuid,
+          role: "BASE",
+        }];
         currentGroups.forEach(g => {
           g.images
             .filter((img) => img.visible !== false)
@@ -685,7 +709,8 @@ export default function Studio() {
           origin: "studio-edit",
           createdAt,
           updatedAt: createdAt,
-          sourceUuid: undefined,
+          sourceUuid: currentSession.sourceUuid,
+          studioWorkspaceKey: currentSession.workspaceKey || undefined,
           generated: true,
           imgUrl: generatedUrl,
           prompt: currentPrompt,
@@ -702,15 +727,20 @@ export default function Studio() {
         });
 
         // Switch to the generated image only if the user hasn't started new work
-        if (promptRef.current === "" && undoLengthRef.current === 0) {
-          setActiveUrl(generatedUrl);
+        if (isCurrentSession && isStudioSessionCurrent(currentSession.id)) {
+          setHistory(prev => limitStudioHistory([generatedUrl, ...prev.filter((url) => url !== generatedUrl)]));
+          if (promptRef.current === "" && undoLengthRef.current === 0) {
+            setActiveUrl(generatedUrl);
+          }
         }
 
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Unknown error';
-        alert(`Generation failed: ${message}`);
+        if (isStudioSessionCurrent(currentSession.id)) alert(`Generation failed: ${message}`);
       } finally {
-        setLoadingCount(c => c - 1);
+        if (isStudioSessionCurrent(currentSession.id)) {
+          setLoadingCount(c => Math.max(0, c - 1));
+        }
       }
     })();
   };
