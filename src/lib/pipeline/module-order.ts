@@ -9,6 +9,13 @@ type OrderedModuleFile = {
 const GENERATION_ROLES = new Set(["SUBJECT", "SCENE", "STYLE"]);
 export const MAX_ACTIVE_GENERATION_REFERENCES = 6;
 
+export function multiSubjectCompositionRule(files: OrderedModuleFile[]) {
+  const subjectCount = files.filter((file) => String(file.mode || "").toUpperCase() === "SUBJECT").length;
+  return subjectCount > 1
+    ? "Include every active Subject as a separately visible subject unless the Task explicitly says that the Subject images are alternate views of the same entity."
+    : null;
+}
+
 function modifiedValue(file: OrderedModuleFile) {
   return String(file.modified || "");
 }

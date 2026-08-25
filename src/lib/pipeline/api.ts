@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { resolveGenerationModuleImages } from './module-order';
+import { multiSubjectCompositionRule, resolveGenerationModuleImages } from './module-order';
 import DB from '@/lib/db';
 import {
   describeGenAIError,
@@ -296,6 +296,8 @@ export function buildSimplePrompt(rawPrompt: string, imageFiles: Record<string, 
       }
       rule += " Keep lighting, shadows, scale, and integration natural.";
       lines.push(rule);
+      const subjectCompositionRule = multiSubjectCompositionRule(imageFiles);
+      if (subjectCompositionRule) lines.push(`- ${subjectCompositionRule}`);
     }
   }
 
@@ -394,6 +396,11 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
       finalPrompt: effectivePrompt,
       executionSource: payload.executionSource || 'prompt-bar',
       agentDraft: payload.agentDraft || null,
+      iterationContext: payload.iterationBrief ? {
+        anchorGenerationId: payload.iterationBrief.anchorGenerationId || null,
+        parentGenerationId: payload.iterationBrief.parentGenerationId || null,
+        briefVersion: Number(payload.iterationBrief.version) || 1,
+      } : null,
       manifest: manifest.map(({ imgUrl, ...item }) => ({
         ...item,
         hasImage: !!imgUrl
@@ -431,6 +438,11 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
         usedImages: payload.usedImages || [],
         executionSource: payload.executionSource || 'prompt-bar',
         agentDraft: payload.agentDraft || null,
+        iterationContext: payload.iterationBrief ? {
+          anchorGenerationId: payload.iterationBrief.anchorGenerationId || null,
+          parentGenerationId: payload.iterationBrief.parentGenerationId || null,
+          briefVersion: Number(payload.iterationBrief.version) || 1,
+        } : null,
         pipelineVersion: IMAGE_PIPELINE_VERSION,
         modelId: model?.id,
         generationSettings: {

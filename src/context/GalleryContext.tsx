@@ -5,10 +5,19 @@ import DB from "@/lib/db";
 import { useApp } from "@/context/AppContext";
 import { galleryCellForStorage } from "@/lib/galleryCells";
 import { requestGenerationEvaluation } from "@/lib/evaluationReview";
-import { rememberGenerationFeedback } from "@/lib/brief-agent/memory";
+import { rememberAgentMemory } from "@/lib/brief-agent/memory";
+import { createEvaluationInsight } from "@/lib/brief-agent/insightPolicy";
+import { recordAgentInsight } from "@/lib/brief-agent/insights";
 import type { ModuleFile } from "@/context/ModuleContext";
 import type { StrengthBand } from "@/lib/pipeline/strength";
 import { syncCloudProject } from "@/lib/cloudWorkspace";
+import {
+  applyGenerationFeedback,
+  emptyIterationBrief,
+  setIterationAnchor,
+} from "@/lib/brief-agent/iterationBrief";
+import { loadIterationBrief, saveIterationBrief } from "@/lib/brief-agent/iterationStore";
+import type { AgentDecisionAnswer, IterationBrief } from "@/lib/brief-agent/types";
 export type GalleryImageUse = { uuid?: string; imgUrl: string; role?: string; label?: string; strength?: number; strengthBand?: StrengthBand };
 export type EvaluationScore = 1 | 2 | 3 | 4 | 5;
 export type GenerationReaction = "like" | "mixed" | "dislike";
@@ -18,6 +27,7 @@ export type GenerationUserFeedback = {
   keep: FeedbackAspect[];
   change: FeedbackAspect[];
   note: string;
+  remember?: boolean;
 };
 export type GenerationEvaluation = {
   promptMatch: EvaluationScore;
@@ -56,6 +66,11 @@ export type GalleryCell = {
     model?: string | null;
     skillChecks?: unknown[];
     warnings?: string[];
+  } | null;
+  iterationContext?: {
+    anchorGenerationId: string | null;
+    parentGenerationId: string | null;
+    briefVersion: number;
   } | null;
   date?: string;
   type?: string;
@@ -140,6 +155,9 @@ interface GalleryContextType {
   closeEvaluationQueue: () => void;
   skipEvaluation: (cellId: number) => void;
   saveEvaluation: (cellId: number, evaluation: GenerationEvaluation) => Promise<void>;
+  iterationBrief: IterationBrief | null;
+  setGenerationAnchor: (cellId: number | null) => Promise<void>;
+  recordIterationDecision: (answers: AgentDecisionAnswer[], referenceFingerprint: string) => Promise<void>;
 }
 
 const GalleryContext = createContext<GalleryContextType | undefined>(undefined);
@@ -164,9 +182,22 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
   const [infoPanelOpen, setInfoPanelOpen] = useState(false);
   const [evaluationQueue, setEvaluationQueue] = useState<number[]>([]);
   const [evaluationTargetId, setEvaluationTargetId] = useState<number | null>(null);
+  const [iterationBrief, setIterationBrief] = useState<IterationBrief | null>(null);
   const evaluationTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { activeProjectId } = useApp();
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeProjectId) {
+      setIterationBrief(null);
+      return;
+    }
+    void loadIterationBrief(activeProjectId).then((brief) => {
+      if (!cancelled) setIterationBrief(brief);
+    });
+    return () => { cancelled = true; };
+  }, [activeProjectId]);
 
   const scheduleEvaluation = useCallback((cellId: number) => {
     setEvaluationQueue((current) => current.includes(cellId) ? current : [...current, cellId]);
@@ -458,18 +489,67 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
         project_id: projectId,
       }));
       if (evaluation.userFeedback) {
-        await rememberGenerationFeedback({
-          projectId,
-          generationId: updated.uuid || String(updated.id),
-          reaction: evaluation.userFeedback.reaction,
-          keep: evaluation.userFeedback.keep,
-          change: evaluation.userFeedback.change,
-          note: evaluation.userFeedback.note,
+        const generationId = updated.uuid || String(updated.id);
+        await Promise.all([
+          evaluation.userFeedback.remember && evaluation.userFeedback.note.trim()
+            ? rememberAgentMemory({
+              scope: "project",
+              kind: "preference",
+              text: evaluation.userFeedback.note.trim(),
+              projectId,
+              source: "feedback",
+              sourceId: generationId,
+              confidence: 1,
+            })
+            : Promise.resolve(),
+          recordAgentInsight(createEvaluationInsight({
+            projectId,
+            generationId,
+            reaction: evaluation.userFeedback.reaction,
+            note: evaluation.userFeedback.note,
+            issues: evaluation.issues,
+            suggestions: evaluation.suggestions,
+            subjectScore: evaluation.subjectMatch,
+            referenceFingerprint: updated.agentDraft?.sourceFingerprint,
+            references: updated.usedImages,
+          })),
+        ]);
+        setIterationBrief((current) => {
+          const base = current?.projectId === projectId ? current : emptyIterationBrief(projectId);
+          const next = applyGenerationFeedback(base, generationId, evaluation.userFeedback!);
+          void saveIterationBrief(next).catch((error) => console.error("Failed to save iteration feedback", error));
+          return next;
         });
       }
     }
     advanceEvaluationQueue(cellId);
   }, [activeProjectId, advanceEvaluationQueue, cells]);
+
+  const setGenerationAnchor = useCallback(async (cellId: number | null) => {
+    if (!activeProjectId) return;
+    const cell = cellId === null ? null : cells.find((entry) => entry.id === cellId);
+    if (cellId !== null && !cell) throw new Error("Generation is unavailable in this project.");
+    const generationId = cell ? cell.uuid || String(cell.id) : null;
+    const base = iterationBrief?.projectId === activeProjectId ? iterationBrief : emptyIterationBrief(activeProjectId);
+    const next = setIterationAnchor(base, generationId);
+    setIterationBrief(next);
+    await saveIterationBrief(next);
+  }, [activeProjectId, cells, iterationBrief]);
+
+  const recordIterationDecision = useCallback(async (answers: AgentDecisionAnswer[], referenceFingerprint: string) => {
+    if (!activeProjectId) return;
+    const base = iterationBrief?.projectId === activeProjectId ? iterationBrief : emptyIterationBrief(activeProjectId);
+    const next: IterationBrief = {
+      ...base,
+      selectedDirection: answers[0]?.value || base.selectedDirection,
+      decisionAnswers: answers,
+      referenceFingerprint,
+      version: base.version + 1,
+      updatedAt: new Date().toISOString(),
+    };
+    setIterationBrief(next);
+    await saveIterationBrief(next);
+  }, [activeProjectId, iterationBrief]);
 
   const value = useMemo(() => ({
     cells, setCells,
@@ -488,7 +568,10 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
     openEvaluation,
     closeEvaluationQueue,
     skipEvaluation,
-    saveEvaluation
+    saveEvaluation,
+    iterationBrief,
+    setGenerationAnchor,
+    recordIterationDecision
   }), [
     addCell,
     addLoading,
@@ -503,11 +586,14 @@ export function GalleryProvider({ children }: { children: ReactNode }) {
     hudOpen,
     infoPanelOpen,
     isGalleryLoading,
+    iterationBrief,
     openEvaluation,
     ratioFilter,
     resolveLoading,
     saveEvaluation,
     selectMode,
+    setGenerationAnchor,
+    recordIterationDecision,
     selectedIds,
     skipEvaluation,
     sortOrder,

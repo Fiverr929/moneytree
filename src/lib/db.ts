@@ -18,6 +18,7 @@ const S = {
   AGENT_RUNS: 'agent-runs',
   AGENT_EVENTS: 'agent-events',
   AGENT_MEMORIES: 'agent-memories',
+  AGENT_INSIGHTS: 'agent-insights',
   SYNC_TOMBSTONES: 'sync-tombstones'
 };
 
@@ -58,13 +59,17 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
                           !hasIndex(S.AGENT_RUNS, 'by_project_active') ||
                           !hasIndex(S.AGENT_EVENTS, 'by_project_created') ||
                          !db.objectStoreNames.contains(S.AGENT_MEMORIES) ||
+                         !db.objectStoreNames.contains(S.AGENT_INSIGHTS) ||
                          !db.objectStoreNames.contains(S.SYNC_TOMBSTONES) ||
                          !hasIndex(S.AGENT_MEMORIES, 'by_scope') ||
                          !hasIndex(S.AGENT_MEMORIES, 'by_project') ||
                          !hasIndex(S.AGENT_MEMORIES, 'by_session');
+    const needsInsightUpgrade = !db.objectStoreNames.contains(S.AGENT_INSIGHTS)
+      || !hasIndex(S.AGENT_INSIGHTS, 'by_project')
+      || !hasIndex(S.AGENT_INSIGHTS, 'by_status');
     db.close();
 
-    const targetVersion = needsUpgrade ? currentVersion + 1 : currentVersion;
+    const targetVersion = needsUpgrade || needsInsightUpgrade ? currentVersion + 1 : currentVersion;
 
     const req = indexedDB.open(DB_NAME, targetVersion);
     req.onupgradeneeded = (e2: any) => {
@@ -144,6 +149,15 @@ const ready = new Promise<IDBDatabase>((resolve, reject) => {
         if (!ams.indexNames.contains('by_project')) ams.createIndex('by_project', 'projectId');
         if (!ams.indexNames.contains('by_session')) ams.createIndex('by_session', 'sessionId');
       }
+      if (!db2.objectStoreNames.contains(S.AGENT_INSIGHTS)) {
+        const ais = db2.createObjectStore(S.AGENT_INSIGHTS, { keyPath: 'id' });
+        ais.createIndex('by_project', 'projectId');
+        ais.createIndex('by_status', 'status');
+      } else {
+        const ais = e2.target.transaction.objectStore(S.AGENT_INSIGHTS);
+        if (!ais.indexNames.contains('by_project')) ais.createIndex('by_project', 'projectId');
+        if (!ais.indexNames.contains('by_status')) ais.createIndex('by_status', 'status');
+      }
       if (!db2.objectStoreNames.contains(S.SYNC_TOMBSTONES)) {
         db2.createObjectStore(S.SYNC_TOMBSTONES, { keyPath: 'id' });
       }
@@ -210,6 +224,7 @@ async function deleteProjectCascade(id: number) {
       S.AGENT_RUNS,
       S.AGENT_EVENTS,
       S.AGENT_MEMORIES,
+      S.AGENT_INSIGHTS,
     ],
     "readwrite",
   );
@@ -236,6 +251,7 @@ async function deleteProjectCascade(id: number) {
   deleteProjectRecordsByIndex(transaction.objectStore(S.GENERATION_JOBS), id);
   deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_RUNS), id);
   deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_MEMORIES), id);
+  deleteProjectRecordsByIndex(transaction.objectStore(S.AGENT_INSIGHTS), id);
   const agentEventsStore = transaction.objectStore(S.AGENT_EVENTS);
   const agentEventsRequest = agentEventsStore.index('by_project_created').openKeyCursor(
     IDBKeyRange.bound([id, ""], [id, "\uffff"]),
@@ -659,6 +675,18 @@ const agentMemories = {
   }),
 };
 
+const agentInsights = {
+  get: (id: string) => ready.then(() => (
+    wrap(tx(S.AGENT_INSIGHTS).objectStore(S.AGENT_INSIGHTS).get(id))
+  )),
+  getByProject: (projectId: number) => ready.then(() => (
+    wrap(tx(S.AGENT_INSIGHTS).objectStore(S.AGENT_INSIGHTS).index('by_project').getAll(projectId))
+  )),
+  put: (data: any) => ready.then(() => (
+    wrap(tx(S.AGENT_INSIGHTS, 'readwrite').objectStore(S.AGENT_INSIGHTS).put(data))
+  )),
+};
+
 const syncTombstones = {
   getAll: () => ready.then(() => wrap(tx(S.SYNC_TOMBSTONES).objectStore(S.SYNC_TOMBSTONES).getAll())),
   delete: (id: string) => ready.then(() => (
@@ -680,6 +708,7 @@ const DB = {
   agentRuns,
   agentEvents,
   agentMemories,
+  agentInsights,
   syncTombstones,
 };
 export default DB;

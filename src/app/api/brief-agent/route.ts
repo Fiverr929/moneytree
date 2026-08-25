@@ -9,12 +9,14 @@ import { getReferenceInfluence } from "@/lib/pipeline/strength";
 import { createGoogleGenAI } from "@/lib/server/googleGenAI";
 import { logModelUsage, traceReferenceFingerprint } from "@/lib/server/modelUsage";
 import { parseAgentAppActions } from "@/lib/brief-agent/appActions";
+import { cleanReplyForDirections, createClarificationFlow, createDirectionFlow } from "@/lib/brief-agent/decisionFlow";
 import {
   isClearlyNonCreativeMessage,
   isCreativeBrief,
   shouldProduceDraft,
 } from "@/lib/brief-agent/intent";
 import type {
+  AgentDecisionQuestion,
   AgentMessage,
   BriefAgentMemory,
   BriefAgentAction,
@@ -27,6 +29,8 @@ import type {
   BriefReferenceSnapshot,
   BriefSessionState,
   CafeWorkspaceSnapshot,
+  IterationBrief,
+  IterationConstraint,
 } from "@/lib/brief-agent/types";
 
 export const runtime = "nodejs";
@@ -53,6 +57,7 @@ const BRIEF_AGENT_RESPONSE_SCHEMA = {
     "action",
     "reply",
     "clarification",
+    "decisions",
     "plan",
     "session",
     "finalPrompt",
@@ -71,6 +76,36 @@ const BRIEF_AGENT_RESPONSE_SCHEMA = {
         needed: { type: "boolean" },
         reason: { type: ["string", "null"] },
         questions: { type: "array", items: { type: "string" } },
+      },
+    },
+    decisions: {
+      type: "array",
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "prompt", "options", "allowCustom", "dependsOnQuestionId", "dependsOnOptionId"],
+        properties: {
+          id: { type: "string" },
+          prompt: { type: "string" },
+          options: {
+            type: "array",
+            maxItems: 4,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "label", "description"],
+              properties: {
+                id: { type: "string" },
+                label: { type: "string" },
+                description: { type: "string" },
+              },
+            },
+          },
+          allowCustom: { type: "boolean" },
+          dependsOnQuestionId: { type: ["string", "null"] },
+          dependsOnOptionId: { type: ["string", "null"] },
+        },
       },
     },
     plan: {
@@ -207,6 +242,7 @@ function validateGenerationEvidence(value: unknown): BriefGenerationEvidence[] {
     return [{
       generationId: trimText(candidate.generationId, 120),
       recency: index + 1,
+      anchored: candidate.anchored === true,
       createdAt: typeof candidate.createdAt === "string" ? candidate.createdAt : null,
       prompt: typeof candidate.prompt === "string" ? trimText(candidate.prompt, MAX_MODEL_PROMPT_MEMORY_CHARS) : "",
       model: typeof candidate.model === "string" ? trimText(candidate.model, 120) : null,
@@ -229,6 +265,7 @@ function validateGenerationEvidence(value: unknown): BriefGenerationEvidence[] {
           keep: stringArray(feedback.keep, []).slice(0, 8),
           change: stringArray(feedback.change, []).slice(0, 8),
           note: typeof feedback.note === "string" ? trimText(feedback.note, 800) : "",
+          remember: feedback.remember === true,
         }
         : null,
       visionObservation: vision && typeof vision === "object" && typeof vision.visualRead === "string"
@@ -292,6 +329,45 @@ function validateMemories(value: unknown): BriefAgentMemory[] {
   });
 }
 
+function validateIterationBrief(value: unknown): IterationBrief | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<IterationBrief>;
+  const projectId = Number(candidate.projectId);
+  if (!Number.isFinite(projectId)) return null;
+  const constraints = (items: unknown, kind: "keep" | "change" | "avoid"): IterationConstraint[] => Array.isArray(items)
+    ? items.slice(0, 12).flatMap((item, index) => {
+      if (!item || typeof item !== "object") return [];
+      const entry = item as Record<string, unknown>;
+      const text = typeof entry.text === "string" ? trimText(entry.text, 500) : "";
+      if (!text) return [];
+      return [{
+        id: typeof entry.id === "string" ? trimText(entry.id, 120) : `${kind}-${index + 1}`,
+        kind,
+        text,
+        source: (entry.source === "user" || entry.source === "comparison" || entry.source === "agent" ? entry.source : "feedback") as IterationConstraint["source"],
+        sourceGenerationIds: stringArray(entry.sourceGenerationIds, []).slice(0, 6),
+        confidence: entry.confidence === "inferred" ? "inferred" as const : "explicit" as const,
+        status: (entry.status === "superseded" || entry.status === "confirmed" ? entry.status : "active") as IterationConstraint["status"],
+        createdAt: typeof entry.createdAt === "string" ? entry.createdAt : new Date().toISOString(),
+      }];
+    })
+    : [];
+  return {
+    projectId,
+    anchorGenerationId: typeof candidate.anchorGenerationId === "string" ? trimText(candidate.anchorGenerationId, 160) : null,
+    parentGenerationId: typeof candidate.parentGenerationId === "string" ? trimText(candidate.parentGenerationId, 160) : null,
+    keep: constraints(candidate.keep, "keep"),
+    change: constraints(candidate.change, "change"),
+    avoid: constraints(candidate.avoid, "avoid"),
+    rejectedGenerationIds: stringArray(candidate.rejectedGenerationIds, []).slice(0, 20),
+    selectedDirection: typeof candidate.selectedDirection === "string" ? trimText(candidate.selectedDirection, 500) : null,
+    decisionAnswers: [],
+    referenceFingerprint: typeof candidate.referenceFingerprint === "string" ? trimText(candidate.referenceFingerprint, 200) : null,
+    version: Math.max(1, Number(candidate.version) || 1),
+    updatedAt: typeof candidate.updatedAt === "string" ? candidate.updatedAt : new Date().toISOString(),
+  };
+}
+
 function validateRequest(request: Request, value: unknown): BriefAgentRequest {
   const origin = request.headers.get("origin");
   if (process.env.NODE_ENV === "production" && !origin) {
@@ -317,19 +393,22 @@ function validateRequest(request: Request, value: unknown): BriefAgentRequest {
     generations: validateGenerationEvidence(input.generations),
     workspace: validateWorkspace(input.workspace),
     memories: validateMemories(input.memories),
+    iterationBrief: validateIterationBrief(input.iterationBrief),
   };
 }
 
 function formatAgentReply(draft: BriefDraft) {
-  const lines = draft.reply.trim() ? [draft.reply] : [];
-  if (draft.action === "ask" || draft.clarification.needed) {
-    draft.clarification.questions.forEach((question) => {
-      const normalizedQuestion = question.trim().toLowerCase();
-      const alreadyIncluded = lines.some((line) => line.trim().toLowerCase().includes(normalizedQuestion));
-      if (!alreadyIncluded) lines.push(question);
-    });
-  }
-  return lines.join("\n") || "Done.";
+  const structuredItems = draft.action === "plan"
+    ? draft.session.directions
+    : draft.action === "ask" || draft.clarification.needed
+      ? draft.decisionQuestions.map((question) => question.prompt)
+      : [];
+  return cleanReplyForDirections(draft.reply, structuredItems)
+    || (draft.action === "plan"
+      ? "Choose a direction to continue."
+      : draft.action === "ask"
+        ? "I need a little more detail."
+        : "Done.");
 }
 
 function latestUserText(messages: AgentMessage[]) {
@@ -457,6 +536,44 @@ function clarificationValue(value: unknown, fallback: BriefClarification): Brief
   };
 }
 
+function decisionQuestionsValue(value: unknown, fallbackQuestions: string[]): AgentDecisionQuestion[] {
+  const fallback = () => fallbackQuestions.map((prompt, index) => ({
+    id: `question-${index + 1}`,
+    prompt,
+    options: [],
+    allowCustom: true,
+  }));
+  if (!Array.isArray(value)) return fallback();
+  const parsed = value.slice(0, 3).flatMap((entry, index) => {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as Record<string, unknown>;
+    const prompt = typeof candidate.prompt === "string" ? trimText(candidate.prompt, 500) : "";
+    if (!prompt) return [];
+    const options = Array.isArray(candidate.options)
+      ? candidate.options.slice(0, 4).flatMap((option, optionIndex) => {
+        if (!option || typeof option !== "object") return [];
+        const item = option as Record<string, unknown>;
+        const label = typeof item.label === "string" ? trimText(item.label, 300) : "";
+        if (!label) return [];
+        return [{
+          id: typeof item.id === "string" && item.id.trim() ? trimText(item.id, 80) : `option-${optionIndex + 1}`,
+          label,
+          description: typeof item.description === "string" && item.description.trim() ? trimText(item.description, 300) : undefined,
+        }];
+      })
+      : [];
+    return [{
+      id: typeof candidate.id === "string" && candidate.id.trim() ? trimText(candidate.id, 80) : `question-${index + 1}`,
+      prompt,
+      options,
+      allowCustom: candidate.allowCustom !== false,
+      dependsOnQuestionId: typeof candidate.dependsOnQuestionId === "string" && candidate.dependsOnQuestionId.trim() ? trimText(candidate.dependsOnQuestionId, 80) : undefined,
+      dependsOnOptionId: typeof candidate.dependsOnOptionId === "string" && candidate.dependsOnOptionId.trim() ? trimText(candidate.dependsOnOptionId, 80) : undefined,
+    }];
+  });
+  return parsed.length ? parsed : fallback();
+}
+
 function createEmptySession(): BriefSessionState {
   return {
     projectIntent: "",
@@ -551,6 +668,7 @@ function draftFromModelJson(value: Record<string, unknown>, fallback: BriefDraft
     lastDraftPrompt: finalPrompt || session.lastDraftPrompt,
     unresolvedQuestions: action === "ask" ? clarification.questions : session.unresolvedQuestions,
   };
+  const decisionQuestions = decisionQuestionsValue(value.decisions, clarification.questions);
 
   return {
     ...fallback,
@@ -558,6 +676,7 @@ function draftFromModelJson(value: Record<string, unknown>, fallback: BriefDraft
     action: finalPrompt ? "draft" : action === "draft" ? "talk" : action,
     reply: stringValue(value.reply, fallback.reply),
     clarification,
+    decisionQuestions,
     plan: planValue(value.plan, fallback.plan),
     session: nextSession,
     finalPrompt,
@@ -588,6 +707,7 @@ function createBaselineDraft(input: BriefAgentRequest): BriefDraft {
       reason: null,
       questions: [],
     },
+    decisionQuestions: [],
     plan: {
       intent: session.projectIntent || latestUserText(input.messages),
       subjectPolicy: "",
@@ -619,6 +739,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
   const generations = input.generations || [];
   const workspace = input.workspace || null;
   const memories = input.memories || [];
+  const iterationBrief = input.iterationBrief || null;
 
   return [
     "You are CafeHTML Brief Agent, a prompt-planning agent for modular image generation.",
@@ -628,8 +749,9 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "Action behavior:",
     "- talk: reply in one or two short natural lines. No prompt draft language, no planning template.",
     "- inspect: explain what you can infer from the current references, model state, command state, or conversation. Be factual and compact.",
-    "- plan: give 2-4 concrete numbered options or steps. Each option should be usable in a follow-up like 'do option 2'. Store those options in session.directions.",
-    "- ask: ask the smallest number of blocking questions, ideally one. Store those questions in session.unresolvedQuestions.",
+    "- plan: put 2-4 concise unnumbered options in session.directions. Keep reply to one short introduction and do not repeat directions in reply.",
+    "- ask: put each materially blocking interactive question and its options in decisions. Keep reply to one short introduction and do not repeat questions in reply. Use an empty options array when a custom answer is required.",
+    "decisions is only for interactive questions. Ordinary rhetorical or inline questions in reply must not appear there. Return at most three questions and four unnumbered options each. Use dependencies only when a later question applies to one earlier option.",
     "- draft: produce one generation-ready prompt in finalPrompt and a short reply that says generation is starting. Store finalPrompt in session.lastDraftPrompt.",
     "For follow-ups like 'do option 2', 'use that', 'make it moodier', or 'continue', resolve the target from session, conversation, and the last plan before choosing action.",
     "Treat short follow-ups as edits to the active objective unless the user clearly starts a new subject. Carry forward established constraints, selected direction, and requested keeps; do not make the user restate them.",
@@ -653,7 +775,8 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "- folder.create accepts only MOOD, LOOKBOOK, or WORLD and only when that folder does not already exist.",
     "- Never claim an app change succeeded in reply; say what you are proposing for approval. The client reports actual execution results.",
     "- Image generation is automatically executed from a draft and is never an appAction. Editing, deletion of user-owned content, replacement, upload, publishing, and other destructive operations are not appActions.",
-    "Recent generation evidence is an on-demand inspection catalog. Recency 1 means the latest generation.",
+    "Recent generation evidence is an on-demand inspection catalog. Recency 1 means the latest generation, except an anchored generation may be included explicitly with anchored=true even when older.",
+    "Iteration brief is the authoritative continuity state for the current project. Keep/change/avoid are explicit constraints. The anchor is a semantic continuity source, not proof that its pixels are being passed to the image model. Never replace an anchor merely because a newer attempt exists.",
     "User feedback is authoritative evidence of preference. visualReview is an automatic quality review. visionObservation is the result of an explicit on-demand image inspection.",
     "When visionObservation is present, you may answer from its visible evidence and comparison, and you must identify the generation or generations used.",
     "When asked what the user liked, disliked, wants preserved, or wants changed, answer from userFeedback and identify the generation used.",
@@ -669,6 +792,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "Use influence only for private prompt composition. Never include influence labels, strength, control axis, slider, percentage, or other UI mechanics in finalPrompt.",
     "Do not invent subject features, wardrobe details, stage elements, camera view, lighting, palette, or style details that are not requested by the user or present in the visual scan.",
     "For a person, SUBJECT exclusively determines the main character's identity and visible gender presentation when the Subject scan is clear. People depicted in SCENE may contribute action, pose, staging, and spatial relationships but never replace the Subject's identity, gender presentation, or wardrobe. People depicted in STYLE contribute none of those traits.",
+    "When more than one SUBJECT reference is active, represent every one in finalPrompt with distinct visible evidence. Unless the user identifies them as alternate views of the same entity, treat them as separate subjects that must all appear in the composition.",
     "Example conflict: if SUBJECT shows a woman and SCENE shows a man tying his shoes, compose the woman performing the shoe-tying action; do not turn her into the Scene man.",
     "When the visual scan is incomplete, use safe general language or ask only if the missing detail blocks a useful draft.",
     "The finalPrompt should be one clean generation brief. Merge user intent, visual scans, roles, and influence into natural visual language; do not append checklist-like rule blocks.",
@@ -678,12 +802,13 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "Ask concise clarification questions only when the request lacks a necessary target or choosing one would likely betray the user's intent.",
     "If the latest message is an image direction and a reasonable image can be drafted, produce a concise finalPrompt instead of asking.",
     "Return JSON only with this shape:",
-    "{\"action\":\"talk|inspect|plan|ask|draft\",\"reply\":\"string\",\"clarification\":{\"needed\":boolean,\"reason\":string|null,\"questions\":[\"string\"]},\"plan\":{\"intent\":\"string\",\"subjectPolicy\":\"string\",\"scenePolicy\":\"string\",\"stylePolicy\":\"string\"},\"session\":{\"projectIntent\":\"string\",\"selectedDirection\":\"string\",\"directions\":[\"string\"],\"lastDraftPrompt\":\"string\",\"unresolvedQuestions\":[\"string\"],\"notes\":[\"string\"]},\"finalPrompt\":\"string\",\"warnings\":[\"string\"],\"readyToExecute\":false,\"appActions\":[{\"type\":\"project.rename|reference.rename|reference.set_role|reference.set_strength|reference.set_visibility|reference.move\",\"imageId\":\"exact id when required\"}]}",
+    "{\"action\":\"talk|inspect|plan|ask|draft\",\"reply\":\"string\",\"clarification\":{\"needed\":boolean,\"reason\":string|null,\"questions\":[\"string\"]},\"decisions\":[{\"id\":\"string\",\"prompt\":\"string\",\"options\":[{\"id\":\"string\",\"label\":\"string\",\"description\":\"string\"}],\"allowCustom\":true,\"dependsOnQuestionId\":null,\"dependsOnOptionId\":null}],\"plan\":{\"intent\":\"string\",\"subjectPolicy\":\"string\",\"scenePolicy\":\"string\",\"stylePolicy\":\"string\"},\"session\":{\"projectIntent\":\"string\",\"selectedDirection\":\"string\",\"directions\":[\"string\"],\"lastDraftPrompt\":\"string\",\"unresolvedQuestions\":[\"string\"],\"notes\":[\"string\"]},\"finalPrompt\":\"string\",\"warnings\":[\"string\"],\"readyToExecute\":false,\"appActions\":[]}",
     "",
     `Latest user instruction: ${JSON.stringify(latestInstruction)}`,
     `Creative-direction heuristic (advisory; use the instruction itself as authority): ${JSON.stringify(shouldDraft)}`,
     `Session state: ${JSON.stringify(session)}`,
     `Relevant memory: ${JSON.stringify(memories)}`,
+    `Iteration brief: ${JSON.stringify(iterationBrief)}`,
     `Compact visual understanding: ${JSON.stringify(visualUnderstanding)}`,
     `Compact reference reads: ${JSON.stringify(references)}`,
     `Recent generation evidence: ${JSON.stringify(generations)}`,
@@ -783,13 +908,20 @@ export async function POST(request: Request) {
       role: "agent",
       text: formatAgentReply(draft),
       action: draft.action,
-      options: draft.action === "plan"
-        ? draft.session.directions.map((direction, index) => ({
-          id: `direction-${index + 1}`,
-          label: direction,
-          submitText: `Use option ${index + 1}: ${direction}`,
-        }))
-        : undefined,
+      decisionFlow: draft.action === "plan"
+        ? createDirectionFlow({
+          id: `decision-${draft.id}`,
+          sourceFingerprint: input.referenceSnapshot.sourceFingerprint,
+          directions: draft.session.directions,
+        })
+        : draft.action === "ask"
+          ? createClarificationFlow({
+            id: `decision-${draft.id}`,
+            sourceFingerprint: input.referenceSnapshot.sourceFingerprint,
+            submitIntent: shouldProduceDraft(latestUserText(input.messages), draft.session) ? "draft" : "reply",
+            questions: draft.decisionQuestions,
+          })
+          : undefined,
       createdAt: new Date().toISOString(),
       promptArtifact: draft.action === "draft" && draft.finalPrompt
         ? {

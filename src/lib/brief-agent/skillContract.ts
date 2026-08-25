@@ -32,6 +32,7 @@ export const BRIEF_AGENT_SKILL_CONTRACT = {
     "Scene reference imports or invents a main subject.",
     "A person depicted in Scene or Style replaces the Subject's identity or gender presentation.",
     "Influence changes unrelated roles.",
+    "One of multiple active Subject references disappears from the composed prompt.",
   ],
 } as const;
 
@@ -62,6 +63,24 @@ function carriesEvidence(prompt: string, observation: ReferenceObservation) {
   return evidenceTerms(observation).some((term) => lower.includes(term));
 }
 
+function carriesDistinctSubjectEvidence(
+  prompt: string,
+  observation: ReferenceObservation,
+  subjects: ReferenceObservation[],
+) {
+  const lower = prompt.toLowerCase();
+  const normalizedLabel = observation.label.trim().toLowerCase();
+  if (normalizedLabel.length >= 3 && lower.includes(normalizedLabel)) return true;
+
+  const otherTerms = new Set(
+    subjects
+      .filter((subject) => subject.imageId !== observation.imageId)
+      .flatMap(evidenceTerms),
+  );
+  const uniqueTerms = evidenceTerms(observation).filter((term) => !otherTerms.has(term));
+  return uniqueTerms.some((term) => lower.includes(term));
+}
+
 type GenderCue = "female" | "male";
 
 function genderCues(text: string) {
@@ -86,6 +105,14 @@ function hasSubjectGenderConflict(prompt: string, observations: ReferenceObserva
   const promptGenders = genderCues(prompt);
   const oppositeGender: GenderCue = subjectGender === "female" ? "male" : "female";
   return promptGenders.has(oppositeGender) && !promptGenders.has(subjectGender);
+}
+
+function explicitlyTreatsSubjectsAsOne(draft: BriefDraft) {
+  const relationshipText = [
+    draft.finalPrompt,
+    ...(draft.messages || []).filter((message) => message.role === "user").map((message) => message.text),
+  ].join(" ");
+  return /\b(same (?:subject|person|character|model|entity)|alternate views?|multiple views?|different (?:views|angles) of (?:the )?same)\b/i.test(relationshipText);
 }
 
 export function runSkillChecks(draft: BriefDraft): BriefSkillCheck[] {
@@ -131,6 +158,17 @@ export function runSkillChecks(draft: BriefDraft): BriefSkillCheck[] {
     });
   }
 
+  const subjects = draft.observations.filter((observation) => observation.role === "SUBJECT");
+  if (subjects.length > 1 && !explicitlyTreatsSubjectsAsOne(draft)) {
+    checks.push({
+      id: "multi-subject-coverage",
+      status: subjects.every((observation) => carriesDistinctSubjectEvidence(prompt, observation, subjects))
+        ? "pass"
+        : "warning",
+      message: "Every active Subject contributes distinct evidence to the composed prompt.",
+    });
+  }
+
   if (roles.has("SUBJECT")) {
     checks.push({
       id: "subject-identity-consistency",
@@ -152,8 +190,11 @@ export function runSkillChecks(draft: BriefDraft): BriefSkillCheck[] {
 
 export function applySkillContract(draft: BriefDraft): BriefDraft {
   const skillChecks = runSkillChecks(draft);
-  const hasBlockingIdentityConflict = skillChecks.some(
-    (check) => check.id === "subject-identity-consistency" && check.status === "warning",
+  const blockingCheck = skillChecks.find(
+    (check) => (
+      check.id === "subject-identity-consistency"
+      || check.id === "multi-subject-coverage"
+    ) && check.status === "warning",
   );
   const repairWarnings = skillChecks
     .filter((check) => check.status === "warning")
@@ -165,13 +206,17 @@ export function applySkillContract(draft: BriefDraft): BriefDraft {
     skillChecks,
   };
 
-  if (!hasBlockingIdentityConflict) return checkedDraft;
+  if (!blockingCheck) return checkedDraft;
+
+  const reply = blockingCheck.id === "multi-subject-coverage"
+    ? "I stopped this draft because it did not represent every active SUBJECT reference. Clarify if the references are alternate views of one subject; otherwise retry so I can compose all of them."
+    : "I stopped this draft because its main subject conflicts with the active SUBJECT reference. Retry so I can rebuild it from the current reference scan.";
 
   return {
     ...checkedDraft,
     status: "empty",
     action: "inspect",
-    reply: "I stopped this draft because its main subject conflicts with the active SUBJECT reference. Retry so I can rebuild it from the current reference scan.",
+    reply,
     finalPrompt: "",
     readyToExecute: false,
     session: {

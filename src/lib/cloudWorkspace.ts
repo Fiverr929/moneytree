@@ -209,8 +209,10 @@ async function applyWorkspaceResponse(body: SyncResponse, localProjects: LocalPr
   for (const state of body.states) {
     const project = localByCloudId.get(state.projectId);
     if (!project) continue;
+    const localState = await DB.moduleState.get(project.id) as { iterationBrief?: unknown } | undefined;
     await DB.moduleState.put(project.id, {
       folders: state.folders,
+      ...(localState?.iterationBrief ? { iterationBrief: localState.iterationBrief } : {}),
       cloudUpdatedAt: state.updatedAt,
       cloudSyncedAt: syncedAt,
     }, true);

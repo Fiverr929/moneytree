@@ -75,6 +75,7 @@ export type AgentMessage = {
     label: string;
     submitText: string;
   }>;
+  decisionFlow?: AgentDecisionFlow;
   promptArtifact?: {
     id: string;
     title: string;
@@ -150,6 +151,38 @@ export type BriefSkillCheck = {
   message: string;
 };
 
+export type AgentDecisionOption = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
+export type AgentDecisionQuestion = {
+  id: string;
+  prompt: string;
+  options: AgentDecisionOption[];
+  allowCustom: boolean;
+  dependsOnQuestionId?: string;
+  dependsOnOptionId?: string;
+};
+
+export type AgentDecisionAnswer = {
+  questionId: string;
+  optionId: string | null;
+  value: string;
+  custom: boolean;
+};
+
+export type AgentDecisionFlow = {
+  id: string;
+  title: string;
+  sourceFingerprint: string;
+  submitIntent: "reply" | "draft" | "generate";
+  questions: AgentDecisionQuestion[];
+  answers?: AgentDecisionAnswer[];
+  status?: "active" | "submitted" | "stale";
+};
+
 export type BriefSessionState = {
   projectIntent: string;
   selectedDirection: string;
@@ -193,6 +226,7 @@ export type BriefDraft = {
   observations: ReferenceObservation[];
   visualUnderstanding: VisualUnderstanding;
   clarification: BriefClarification;
+  decisionQuestions: AgentDecisionQuestion[];
   plan: BriefPlan;
   session: BriefSessionState;
   finalPrompt: string;
@@ -209,11 +243,41 @@ export type BriefAgentRequest = {
   generations?: BriefGenerationEvidence[];
   workspace?: CafeWorkspaceSnapshot | null;
   memories?: BriefAgentMemory[];
+  iterationBrief?: IterationBrief | null;
+};
+
+export type IterationConstraintKind = "keep" | "change" | "avoid";
+
+export type IterationConstraint = {
+  id: string;
+  kind: IterationConstraintKind;
+  text: string;
+  source: "user" | "feedback" | "comparison" | "agent";
+  sourceGenerationIds: string[];
+  confidence: "explicit" | "inferred";
+  status: "active" | "superseded" | "confirmed";
+  createdAt: string;
+};
+
+export type IterationBrief = {
+  projectId: number;
+  anchorGenerationId: string | null;
+  parentGenerationId: string | null;
+  keep: IterationConstraint[];
+  change: IterationConstraint[];
+  avoid: IterationConstraint[];
+  rejectedGenerationIds: string[];
+  selectedDirection: string | null;
+  decisionAnswers: AgentDecisionAnswer[];
+  referenceFingerprint: string | null;
+  version: number;
+  updatedAt: string;
 };
 
 export type BriefGenerationEvidence = {
   generationId: string;
   recency: number;
+  anchored?: boolean;
   createdAt: string | null;
   prompt: string;
   model: string | null;
@@ -234,6 +298,7 @@ export type BriefGenerationEvidence = {
     keep: string[];
     change: string[];
     note: string;
+    remember?: boolean;
   } | null;
   visionObservation?: {
     visualRead: string;
