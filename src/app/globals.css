@@ -4530,6 +4530,7 @@
       align-items: center;
       justify-content: center;
       overflow: hidden;
+      touch-action: none;
     }
 
     #hud-slide-track {
@@ -4557,6 +4558,52 @@
       object-fit: contain;
       border-radius: 0;
       display: block;
+      transform-origin: center;
+      transition: transform 0.12s ease-out;
+      will-change: transform;
+      cursor: zoom-in;
+    }
+
+    #hud-image-area.zoomed .hud-slide[data-active="true"] .hud-slide-img {
+      cursor: grab;
+    }
+
+    #hud-image-area.panning .hud-slide[data-active="true"] .hud-slide-img {
+      cursor: grabbing;
+      transition: none;
+    }
+
+    .hud-zoom-indicator,
+    .hud-zoom-hint {
+      position: absolute;
+      left: 50%;
+      z-index: 9;
+      transform: translate(-50%, 5px);
+      padding: 4px 7px;
+      background: rgba(153, 153, 151, 0.78);
+      color: #e8e6e6;
+      font-family: "Times New Roman", Times, serif;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      line-height: 1;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+
+    .hud-zoom-indicator {
+      bottom: 16px;
+    }
+
+    .hud-zoom-hint {
+      bottom: 42px;
+      white-space: nowrap;
+    }
+
+    .hud-zoom-indicator.visible,
+    .hud-zoom-hint.visible {
+      transform: translate(-50%, 0);
+      opacity: 0.78;
     }
 
     .hud-slide-placeholder {
@@ -8797,6 +8844,22 @@ button.video-media-empty:focus-visible {
   grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
   min-height: 0;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #5271ff rgba(199, 199, 199, 0.18);
+}
+.evaluation-body::-webkit-scrollbar {
+  width: 7px;
+}
+.evaluation-body::-webkit-scrollbar-track {
+  background: rgba(199, 199, 199, 0.18);
+}
+.evaluation-body::-webkit-scrollbar-thumb {
+  background: #5271ff;
+}
+.evaluation-body::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 .evaluation-image {
   width: 100%;
@@ -9481,8 +9544,11 @@ button.video-media-empty:focus-visible {
 
   .mod-panel-wrap.collapsed .module-panel {
     width: 100%;
-    height: 104px;
-    max-height: 104px;
+    --module-header-size: 24px;
+    --module-thumb-size: 62px;
+    --module-rail-gap-y: 6px;
+    height: calc(var(--module-header-size) + var(--module-thumb-size) + (var(--module-rail-gap-y) * 2) + 4px);
+    max-height: none;
   }
 
   .mod-panel-wrap.collapsed .cmp-header {
@@ -9497,23 +9563,23 @@ button.video-media-empty:focus-visible {
   }
 
   .mod-panel-wrap.collapsed .cmp-scroll {
-    padding: 6px 10px;
+    padding: var(--module-rail-gap-y) 10px;
     gap: 10px;
   }
 
   .mod-panel-wrap.collapsed .cmp-image-row,
   .mod-panel-wrap.collapsed .cmp-folder {
-    width: 62px;
-    height: 62px;
-    min-width: 62px;
-    min-height: 62px;
-    flex-basis: 62px;
+    width: var(--module-thumb-size);
+    height: var(--module-thumb-size);
+    min-width: var(--module-thumb-size);
+    min-height: var(--module-thumb-size);
+    flex-basis: var(--module-thumb-size);
   }
 
   .mod-panel-wrap.collapsed .cmp-thumb {
-    width: 62px;
-    height: 62px;
-    flex-basis: 62px;
+    width: var(--module-thumb-size);
+    height: var(--module-thumb-size);
+    flex-basis: var(--module-thumb-size);
   }
 
   .mod-panel-wrap.collapsed .cmp-folder-icon {
@@ -9717,8 +9783,11 @@ button.video-media-empty:focus-visible {
 
   .mod-panel-wrap.collapsed .module-panel {
     width: 100%;
-    height: 88px;
-    max-height: 88px;
+    --module-header-size: 22px;
+    --module-thumb-size: 54px;
+    --module-rail-gap-y: 5px;
+    height: calc(var(--module-header-size) + var(--module-thumb-size) + (var(--module-rail-gap-y) * 2) + 4px);
+    max-height: none;
   }
 
   .mod-panel-wrap.collapsed .cmp-header {
@@ -9739,23 +9808,23 @@ button.video-media-empty:focus-visible {
   }
 
   .mod-panel-wrap.collapsed .cmp-scroll {
-    padding: 5px 8px;
+    padding: var(--module-rail-gap-y) 8px;
     gap: 8px;
   }
 
   .mod-panel-wrap.collapsed .cmp-image-row,
   .mod-panel-wrap.collapsed .cmp-folder {
-    width: 54px;
-    height: 54px;
-    min-width: 54px;
-    min-height: 54px;
-    flex-basis: 54px;
+    width: var(--module-thumb-size);
+    height: var(--module-thumb-size);
+    min-width: var(--module-thumb-size);
+    min-height: var(--module-thumb-size);
+    flex-basis: var(--module-thumb-size);
   }
 
   .mod-panel-wrap.collapsed .cmp-thumb {
-    width: 54px;
-    height: 54px;
-    flex-basis: 54px;
+    width: var(--module-thumb-size);
+    height: var(--module-thumb-size);
+    flex-basis: var(--module-thumb-size);
   }
 
   .mod-panel-wrap.collapsed .cmp-folder-icon {
@@ -10484,7 +10553,7 @@ button.video-media-empty:focus-visible {
   }
 
   #hud-image-area {
-    touch-action: pan-y;
+    touch-action: none;
   }
 }
 /* Workspace responsive layout: narrow phones */
@@ -10636,8 +10705,11 @@ button.video-media-empty:focus-visible {
   }
 
   .mod-panel-wrap.collapsed .module-panel {
-    height: 78px;
-    max-height: 78px;
+    --module-header-size: 24px;
+    --module-thumb-size: 48px;
+    --module-rail-gap-y: 4px;
+    height: calc(var(--module-header-size) + var(--module-thumb-size) + (var(--module-rail-gap-y) * 2) + 4px);
+    max-height: none;
   }
 
   .mod-panel-wrap.collapsed .cmp-header {
@@ -10651,17 +10723,17 @@ button.video-media-empty:focus-visible {
   }
 
   .mod-panel-wrap.collapsed .cmp-scroll {
-    padding: 4px 6px;
+    padding: var(--module-rail-gap-y) 6px;
   }
 
   .mod-panel-wrap.collapsed .cmp-image-row,
   .mod-panel-wrap.collapsed .cmp-folder,
   .mod-panel-wrap.collapsed .cmp-thumb {
-    width: 48px;
-    height: 48px;
-    min-width: 48px;
-    min-height: 48px;
-    flex-basis: 48px;
+    width: var(--module-thumb-size);
+    height: var(--module-thumb-size);
+    min-width: var(--module-thumb-size);
+    min-height: var(--module-thumb-size);
+    flex-basis: var(--module-thumb-size);
   }
 
   #gallery-controls {
@@ -10722,7 +10794,7 @@ button.video-media-empty:focus-visible {
 
   #hud-image-area {
     padding: 4px 0;
-    touch-action: pan-y;
+    touch-action: none;
     user-select: none;
     cursor: grab;
   }
