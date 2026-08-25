@@ -10,6 +10,15 @@ import DB from "@/lib/db";
 import { dimensionsToRatio, loadImageMetadata } from "@/lib/imageMeta";
 import { galleryCellForStorage, isHudImageCell } from "@/lib/galleryCells";
 
+type HudZoomState = {
+  scale: number;
+  x: number;
+  y: number;
+};
+
+const HUD_MIN_ZOOM = 1;
+const HUD_MAX_ZOOM = 4;
+
 export default function HUD() {
   const { 
     cells, setCells,
@@ -47,8 +56,36 @@ export default function HUD() {
   const [copyPromptTitle, setCopyPromptTitle] = useState("Copy prompt");
   const [dragOffset, setDragOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [zoom, setZoom] = useState<HudZoomState>({ scale: 1, x: 0, y: 0 });
+  const [zoomIndicatorVisible, setZoomIndicatorVisible] = useState(false);
+  const [zoomHintVisible, setZoomHintVisible] = useState(false);
   
   const threeDotRef = useRef<HTMLDivElement>(null);
+  const imageAreaRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef<HudZoomState>({ scale: 1, x: 0, y: 0 });
+  const zoomIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasShownZoomHintRef = useRef(false);
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const panRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  } | null>(null);
+  const pinchRef = useRef<{
+    pointerIds: [number, number];
+    startDistance: number;
+    startScale: number;
+    startX: number;
+    startY: number;
+    midpointX: number;
+    midpointY: number;
+  } | null>(null);
+  const lastTouchTapRef = useRef({ time: 0, x: 0, y: 0 });
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -186,15 +223,75 @@ export default function HUD() {
     void persistGalleryCell(updatedCell).catch((error) => console.error("Failed to persist image metadata", error));
   }, [persistGalleryCell, setCells]);
 
+  const clampZoomPan = useCallback((scale: number, x: number, y: number): HudZoomState => {
+    const image = imageAreaRef.current?.querySelector<HTMLImageElement>('.hud-slide[data-active="true"] .hud-slide-img');
+    if (!image || scale <= HUD_MIN_ZOOM) return { scale: HUD_MIN_ZOOM, x: 0, y: 0 };
+
+    const maxX = Math.max(0, (image.offsetWidth * (scale - 1)) / 2);
+    const maxY = Math.max(0, (image.offsetHeight * (scale - 1)) / 2);
+    return {
+      scale,
+      x: Math.max(-maxX, Math.min(maxX, x)),
+      y: Math.max(-maxY, Math.min(maxY, y)),
+    };
+  }, []);
+
+  const commitZoom = useCallback((next: HudZoomState, showIndicator = true) => {
+    const clamped = clampZoomPan(next.scale, next.x, next.y);
+    zoomRef.current = clamped;
+    setZoom(clamped);
+
+    if (!showIndicator) return;
+    setZoomIndicatorVisible(true);
+    if (zoomIndicatorTimerRef.current) clearTimeout(zoomIndicatorTimerRef.current);
+    zoomIndicatorTimerRef.current = setTimeout(() => setZoomIndicatorVisible(false), 700);
+  }, [clampZoomPan]);
+
+  const resetZoom = useCallback((showIndicator = false) => {
+    commitZoom({ scale: HUD_MIN_ZOOM, x: 0, y: 0 }, showIndicator);
+    setIsPanning(false);
+    panRef.current = null;
+    pinchRef.current = null;
+    pointersRef.current.clear();
+  }, [commitZoom]);
+
+  const zoomAt = useCallback((clientX: number, clientY: number, requestedScale: number) => {
+    const area = imageAreaRef.current;
+    if (!area) return;
+    const current = zoomRef.current;
+    const scale = Math.max(HUD_MIN_ZOOM, Math.min(HUD_MAX_ZOOM, requestedScale));
+    if (scale === HUD_MIN_ZOOM) {
+      resetZoom(true);
+      return;
+    }
+
+    const areaRect = area.getBoundingClientRect();
+    const focalX = clientX - (areaRect.left + areaRect.width / 2);
+    const focalY = clientY - (areaRect.top + areaRect.height / 2);
+    const ratio = scale / current.scale;
+    commitZoom({
+      scale,
+      x: focalX - (focalX - current.x) * ratio,
+      y: focalY - (focalY - current.y) * ratio,
+    });
+  }, [commitZoom, resetZoom]);
+
+  const toggleZoomAt = useCallback((clientX: number, clientY: number) => {
+    if (zoomRef.current.scale > HUD_MIN_ZOOM) resetZoom(true);
+    else zoomAt(clientX, clientY, 2);
+  }, [resetZoom, zoomAt]);
+
   const handleNext = useCallback(() => {
     if (!visibleCells.length) return;
+    resetZoom(false);
     setHudIndex((hudIndex + 1) % visibleCells.length);
-  }, [hudIndex, setHudIndex, visibleCells.length]);
+  }, [hudIndex, resetZoom, setHudIndex, visibleCells.length]);
 
   const handlePrev = useCallback(() => {
     if (!visibleCells.length) return;
+    resetZoom(false);
     setHudIndex((hudIndex - 1 + visibleCells.length) % visibleCells.length);
-  }, [hudIndex, setHudIndex, visibleCells.length]);
+  }, [hudIndex, resetZoom, setHudIndex, visibleCells.length]);
 
   const slidePosition = useCallback((index: number) => {
     if (visibleCells.length < 2) return 0;
@@ -208,6 +305,45 @@ export default function HUD() {
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     if ((event.target as HTMLElement).closest("button")) return;
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const pointers = [...pointersRef.current.entries()];
+    if (pointers.length >= 2) {
+      const [[firstId, first], [secondId, second]] = pointers;
+      const areaRect = imageAreaRef.current?.getBoundingClientRect();
+      const areaCenterX = areaRect ? areaRect.left + areaRect.width / 2 : 0;
+      const areaCenterY = areaRect ? areaRect.top + areaRect.height / 2 : 0;
+      pinchRef.current = {
+        pointerIds: [firstId, secondId],
+        startDistance: Math.max(Math.hypot(second.x - first.x, second.y - first.y), 1),
+        startScale: zoomRef.current.scale,
+        startX: zoomRef.current.x,
+        startY: zoomRef.current.y,
+        midpointX: (first.x + second.x) / 2 - areaCenterX,
+        midpointY: (first.y + second.y) / 2 - areaCenterY,
+      };
+      panRef.current = null;
+      dragRef.current.pointerId = -1;
+      setIsDragging(false);
+      setDragOffset(0);
+      setIsPanning(true);
+      return;
+    }
+
+    if (zoomRef.current.scale > HUD_MIN_ZOOM) {
+      panRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: zoomRef.current.x,
+        originY: zoomRef.current.y,
+        moved: false,
+      };
+      setIsPanning(true);
+      return;
+    }
+
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -216,12 +352,51 @@ export default function HUD() {
       startedAt: performance.now(),
       axis: null,
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
     setIsDragging(false);
     setDragOffset(0);
   }, []);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (pointersRef.current.has(event.pointerId)) {
+      pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+
+    const pinch = pinchRef.current;
+    if (pinch) {
+      const first = pointersRef.current.get(pinch.pointerIds[0]);
+      const second = pointersRef.current.get(pinch.pointerIds[1]);
+      if (!first || !second) return;
+      event.preventDefault();
+      const distance = Math.max(Math.hypot(second.x - first.x, second.y - first.y), 1);
+      const midpointX = (first.x + second.x) / 2;
+      const midpointY = (first.y + second.y) / 2;
+      const areaRect = imageAreaRef.current?.getBoundingClientRect();
+      const focalX = midpointX - (areaRect ? areaRect.left + areaRect.width / 2 : 0);
+      const focalY = midpointY - (areaRect ? areaRect.top + areaRect.height / 2 : 0);
+      const scale = Math.max(HUD_MIN_ZOOM, Math.min(HUD_MAX_ZOOM, pinch.startScale * (distance / pinch.startDistance)));
+      const ratio = scale / pinch.startScale;
+      commitZoom({
+        scale,
+        x: focalX - (pinch.midpointX - pinch.startX) * ratio,
+        y: focalY - (pinch.midpointY - pinch.startY) * ratio,
+      });
+      return;
+    }
+
+    const pan = panRef.current;
+    if (pan?.pointerId === event.pointerId) {
+      event.preventDefault();
+      const deltaX = event.clientX - pan.startX;
+      const deltaY = event.clientY - pan.startY;
+      if (Math.hypot(deltaX, deltaY) > 4) pan.moved = true;
+      commitZoom({
+        scale: zoomRef.current.scale,
+        x: pan.originX + deltaX,
+        y: pan.originY + deltaY,
+      }, false);
+      return;
+    }
+
     const drag = dragRef.current;
     if (drag.pointerId !== event.pointerId) return;
 
@@ -237,7 +412,7 @@ export default function HUD() {
     event.preventDefault();
     drag.lastX = event.clientX;
     setDragOffset(deltaX);
-  }, []);
+  }, [commitZoom]);
 
   const finishDrag = useCallback((event: React.PointerEvent<HTMLDivElement>, cancelled = false) => {
     if (dragRef.current.pointerId !== event.pointerId) return;
@@ -256,12 +431,76 @@ export default function HUD() {
     else if (distance >= threshold || velocity > 0.45) handlePrev();
   }, [handleNext, handlePrev, visibleCells.length]);
 
+  const handlePointerEnd = useCallback((event: React.PointerEvent<HTMLDivElement>, cancelled = false) => {
+    const pan = panRef.current;
+    const drag = dragRef.current;
+    const wasTouchTap = !cancelled && event.pointerType === "touch" && (
+      (pan?.pointerId === event.pointerId && !pan.moved) ||
+      (drag.pointerId === event.pointerId && !drag.axis && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 8)
+    );
+
+    pointersRef.current.delete(event.pointerId);
+    if (pinchRef.current) {
+      const remaining = [...pointersRef.current.entries()];
+      pinchRef.current = null;
+      if (remaining.length === 1 && zoomRef.current.scale > HUD_MIN_ZOOM) {
+        const [pointerId, point] = remaining[0];
+        panRef.current = {
+          pointerId,
+          startX: point.x,
+          startY: point.y,
+          originX: zoomRef.current.x,
+          originY: zoomRef.current.y,
+          moved: true,
+        };
+      } else {
+        panRef.current = null;
+        setIsPanning(false);
+      }
+      return;
+    }
+
+    if (pan?.pointerId === event.pointerId) {
+      panRef.current = null;
+      setIsPanning(false);
+    } else {
+      finishDrag(event, cancelled);
+    }
+
+    if (!wasTouchTap) return;
+    const now = performance.now();
+    const lastTap = lastTouchTapRef.current;
+    if (now - lastTap.time < 320 && Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) < 28) {
+      lastTouchTapRef.current.time = 0;
+      toggleZoomAt(event.clientX, event.clientY);
+    } else {
+      lastTouchTapRef.current = { time: now, x: event.clientX, y: event.clientY };
+    }
+  }, [finishDrag, toggleZoomAt]);
+
+  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button, #hud-info-panel")) return;
+    event.preventDefault();
+    const factor = Math.exp(-event.deltaY * 0.002);
+    zoomAt(event.clientX, event.clientY, zoomRef.current.scale * factor);
+  }, [zoomAt]);
+
   // Keyboard navigation
   useEffect(() => {
     if (!hudOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement | null)?.closest('input, textarea, select, [contenteditable="true"]')) return;
       if (e.key === "ArrowRight") handleNext();
       if (e.key === "ArrowLeft") handlePrev();
+      if (e.key === "+" || e.key === "=") {
+        const area = imageAreaRef.current?.getBoundingClientRect();
+        if (area) zoomAt(area.left + area.width / 2, area.top + area.height / 2, zoomRef.current.scale * 1.25);
+      }
+      if (e.key === "-" || e.key === "_") {
+        const area = imageAreaRef.current?.getBoundingClientRect();
+        if (area) zoomAt(area.left + area.width / 2, area.top + area.height / 2, zoomRef.current.scale / 1.25);
+      }
+      if (e.key === "0") resetZoom(true);
       if (e.key === "Escape") {
         if (infoPanelOpen) setInfoPanelOpen(false);
         else setHudOpen(false);
@@ -269,7 +508,24 @@ export default function HUD() {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [handleNext, handlePrev, hudOpen, infoPanelOpen, setHudOpen, setInfoPanelOpen]);
+  }, [handleNext, handlePrev, hudOpen, infoPanelOpen, resetZoom, setHudOpen, setInfoPanelOpen, zoomAt]);
+
+  useEffect(() => {
+    if (!hudOpen) {
+      resetZoom(false);
+      setZoomHintVisible(false);
+      return;
+    }
+    if (hasShownZoomHintRef.current) return;
+    hasShownZoomHintRef.current = true;
+    setZoomHintVisible(true);
+    zoomHintTimerRef.current = setTimeout(() => setZoomHintVisible(false), 2200);
+  }, [hudOpen, resetZoom]);
+
+  useEffect(() => () => {
+    if (zoomIndicatorTimerRef.current) clearTimeout(zoomIndicatorTimerRef.current);
+    if (zoomHintTimerRef.current) clearTimeout(zoomHintTimerRef.current);
+  }, []);
 
   // Click outside dropdowns
   useEffect(() => {
@@ -503,11 +759,17 @@ export default function HUD() {
       {/* Image viewport */}
       <div
         id="hud-image-area"
-        className={isDragging ? "dragging" : ""}
+        ref={imageAreaRef}
+        className={[isDragging ? "dragging" : "", zoom.scale > HUD_MIN_ZOOM ? "zoomed" : "", isPanning ? "panning" : ""].filter(Boolean).join(" ")}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        onPointerUp={(event) => finishDrag(event)}
-        onPointerCancel={(event) => finishDrag(event, true)}
+        onPointerUp={(event) => handlePointerEnd(event)}
+        onPointerCancel={(event) => handlePointerEnd(event, true)}
+        onWheel={handleWheel}
+        onDoubleClick={(event) => {
+          if ((event.target as HTMLElement).closest("button, #hud-info-panel")) return;
+          toggleZoomAt(event.clientX, event.clientY);
+        }}
       >
         <div id="hud-slide-track">
           {renderedSlides.map(({ cell, i }) => (
@@ -515,6 +777,7 @@ export default function HUD() {
               key={cell.id} 
               className="hud-slide" 
               data-slide-id={i}
+              data-active={i === hudIndex ? "true" : "false"}
               style={{ transform: `translateX(calc(${slidePosition(i) * 100}% + ${dragOffset}px))` }}
             >
               {cell.imgUrl ? (
@@ -523,6 +786,7 @@ export default function HUD() {
                   src={cell.imgUrl}
                   alt="Generated"
                   draggable={false}
+                  style={i === hudIndex ? { transform: `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})` } : undefined}
                   onLoad={(e) => syncGalleryImageMeta(cell, e.currentTarget)}
                 />
               ) : (
@@ -537,6 +801,13 @@ export default function HUD() {
               )}
             </div>
           ))}
+        </div>
+
+        <div className={`hud-zoom-indicator ${zoomIndicatorVisible ? "visible" : ""}`} aria-live="polite">
+          {Math.round(zoom.scale * 100)}%
+        </div>
+        <div className={`hud-zoom-hint ${zoomHintVisible ? "visible" : ""}`}>
+          SCROLL OR PINCH TO ZOOM
         </div>
 
         <button className="hud-nav-arrow" id="hud-prev" title="Previous" onClick={(e) => { e.stopPropagation(); handlePrev(); }}>
