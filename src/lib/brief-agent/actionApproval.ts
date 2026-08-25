@@ -30,7 +30,7 @@ export function recoverInterruptedActionProposal(proposal: AgentActionProposal) 
   return resolveAgentActionProposal(
     proposal,
     "stale",
-    "Execution was interrupted. Inspect /actions before asking the agent to propose it again.",
+    "Execution was interrupted. Inspect /memory activity before asking the agent to propose it again.",
   );
 }
 

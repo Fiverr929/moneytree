@@ -19,7 +19,7 @@ import {
 } from "@/lib/brief-agent/referenceFreshness";
 import { ReferenceReadRequestError, requestBriefAgent, requestGenerationInspection, requestReferenceRead } from "@/lib/brief-agent/client";
 import { requestGenerationEvaluation, type AiGenerationEvaluation } from "@/lib/evaluationReview";
-import type { AgentActionProposalStatus, AgentAppAction, AgentAppEvent, AgentMemoryScope, AgentMessage, BriefAgentAction, BriefDraft, BriefGenerationEvidence, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot, CafeWorkspaceSnapshot } from "@/lib/brief-agent/types";
+import type { AgentActionProposalStatus, AgentAppAction, AgentAppEvent, AgentDecisionAnswer, AgentMemoryItem, AgentMemoryScope, AgentMessage, BriefAgentAction, BriefDraft, BriefGenerationEvidence, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot, CafeWorkspaceSnapshot } from "@/lib/brief-agent/types";
 import { applyAgentAppAction, describeAgentAppAction } from "@/lib/brief-agent/appActions";
 import { canResolveAgentActionProposal, createAgentActionProposal, proposalStatusFromEvents, recoverInterruptedActionProposal, resolveAgentActionProposal } from "@/lib/brief-agent/actionApproval";
 import { moduleFileForStorage } from "@/lib/moduleFiles";
@@ -41,8 +41,16 @@ import {
   recallAgentMemories,
   rememberAgentMemory,
 } from "@/lib/brief-agent/memory";
+import { createConversationInsight } from "@/lib/brief-agent/insightPolicy";
+import type { AgentInsight, AgentInsightStatus } from "@/lib/brief-agent/insightPolicy";
+import { listAgentInsights, recordAgentInsight, updateAgentInsightStatus } from "@/lib/brief-agent/insights";
 import CloseIcon from "@/components/ui/CloseIcon";
+import AgentMemoryPanel, { type AgentMemoryPanelTab } from "@/components/AgentMemoryPanel";
+import AgentDecisionFlowCard from "@/components/AgentDecisionFlow";
+import { cleanDecisionLabel, cleanReplyForDirections } from "@/lib/brief-agent/decisionFlow";
 import { useProjectDraft } from "@/hooks/useProjectDraft";
+import { iterationPreflight } from "@/lib/brief-agent/iterationBrief";
+import { persistConversationMessages, prepareConversationContext } from "@/lib/brief-agent/conversationContext";
 
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
 const IMAGE_PROMPT_SETTINGS_KEY = "cafehtml-image-prompt-settings";
@@ -57,6 +65,7 @@ const CANVAS_COMMANDS = [
   { value: GENERATE_COMMAND, label: "/generate", description: "Generate a frame" },
   { value: "/undo", label: "/undo", description: "Undo the last change" },
   { value: "/status", label: "/status", description: "Show what is running" },
+  { value: "/memory", label: "/memory", description: "Open memory, insights, and activity" },
   { value: "/reload", label: "/reload", description: "Restart the reference scan" },
   { value: "/retry", label: "/retry", description: "Retry the failed message" },
   { value: "/stop", label: "/stop", description: "Stop the current task" },
@@ -97,7 +106,7 @@ type PersistedAgentWorkspace = {
   queuedInputs?: string[];
 };
 
-type CanvasLocalCommand = "/help" | "/clear" | "/undo" | "/actions" | "/approve" | "/reject" | "/pending" | "/status" | "/memory" | "/remember" | "/forget" | "/reload" | "/retry" | "/stop";
+type CanvasLocalCommand = "/help" | "/clear" | "/undo" | "/status" | "/memory" | "/remember" | "/forget" | "/reload" | "/retry" | "/stop" | "/retired-action";
 
 type AgentActivity = {
   kind: "thinking" | "reading" | "working" | "reviewing";
@@ -244,8 +253,10 @@ function promptLexicalDiff(previousPrompt: string, nextPrompt: string) {
 
 function parseCanvasLocalCommand(text: string) {
   const command = text.trim().toLowerCase().split(/\s+/, 1)[0];
-  return command === "/help" || command === "/clear" || command === "/undo" || command === "/actions"
-    || command === "/approve" || command === "/reject" || command === "/pending" || command === "/status"
+  if (command === "/actions" || command === "/approve" || command === "/reject" || command === "/pending") {
+    return "/retired-action" as CanvasLocalCommand;
+  }
+  return command === "/help" || command === "/clear" || command === "/undo" || command === "/status"
     || command === "/memory" || command === "/remember" || command === "/forget"
     || command === "/reload" || command === "/retry" || command === "/stop" ? command as CanvasLocalCommand : null;
 }
@@ -277,6 +288,13 @@ export default function PromptBar() {
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [agentConsoleOpen, setAgentConsoleOpen] = useState(false);
+  const [memoryPanelOpen, setMemoryPanelOpen] = useState(false);
+  const [memoryPanelTab, setMemoryPanelTab] = useState<AgentMemoryPanelTab>("memory");
+  const [memoryPanelLoading, setMemoryPanelLoading] = useState(false);
+  const [memoryPanelMemories, setMemoryPanelMemories] = useState<AgentMemoryItem[]>([]);
+  const [memoryPanelInsights, setMemoryPanelInsights] = useState<AgentInsight[]>([]);
+  const [memoryPanelEvents, setMemoryPanelEvents] = useState<AgentAppEvent[]>([]);
+  const [memoryPanelContext, setMemoryPanelContext] = useState({ transcriptMessages: 0, checkpoints: 0 });
   const [agentWorkspaceHydrating, setAgentWorkspaceHydrating] = useState(true);
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
   const [agentPending, setAgentPending] = useState(false);
@@ -326,6 +344,13 @@ export default function PromptBar() {
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    setMemoryPanelOpen(false);
+    setMemoryPanelMemories([]);
+    setMemoryPanelInsights([]);
+    setMemoryPanelEvents([]);
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -546,11 +571,18 @@ export default function PromptBar() {
         if (state && validPersistedAgentRun(state.run)) {
           const restoredRun = recoverInterruptedAgentRun(state.run);
           setAgentRun(restoredRun);
-          setAgentMessages(Array.isArray(state.messages) ? state.messages.map((message) => (
-            message.toolProposal
+          setAgentMessages(Array.isArray(state.messages) ? state.messages.map((message) => {
+            const recovered = message.toolProposal
               ? { ...message, toolProposal: recoverInterruptedActionProposal(message.toolProposal) }
-              : message
-          )) : []);
+              : message;
+            if (!recovered.options?.length) return recovered;
+            const labels = recovered.options.map((option) => option.label);
+            return {
+              ...recovered,
+              text: cleanReplyForDirections(recovered.text, labels),
+              options: recovered.options.map((option) => ({ ...option, label: cleanDecisionLabel(option.label) })),
+            };
+          }) : []);
           setAgentDraft(state.draft || null);
           setAgentBrain(state.brain === "model" ? "model" : "local");
           setAgentModel(typeof state.model === "string" ? state.model : null);
@@ -619,6 +651,12 @@ export default function PromptBar() {
   ]);
 
   useEffect(() => {
+    if (!activeProjectId || !agentRun?.id || !agentMessages.length) return;
+    void persistConversationMessages(activeProjectId, agentRun.id, agentMessages)
+      .catch((error) => console.error("Failed to preserve agent transcript", error));
+  }, [activeProjectId, agentMessages, agentRun?.id]);
+
+  useEffect(() => {
     if (!restoredReviewTargetKeys.length || !gallery.cells.length) return;
     const keys = new Set(restoredReviewTargetKeys);
     const targets = gallery.cells.filter((cell) => keys.has(galleryCellKey(cell)));
@@ -664,6 +702,17 @@ export default function PromptBar() {
       setGenerationError("References changed after this prompt was drafted. Ask the agent to update it before generating.");
       return;
     }
+    const iterationCheck = iterationPreflight({
+      brief: gallery.iterationBrief,
+      availableGenerationIds: gallery.cells
+        .filter((cell) => cell.origin === "generation" && !cell.loadingId && !cell.error && !cell.blocked)
+        .map((cell) => cell.uuid || String(cell.id)),
+      referenceFingerprint: referenceFingerprintRef.current,
+    });
+    if (!iterationCheck.ok) {
+      setGenerationError(iterationCheck.errors.join(" "));
+      return;
+    }
     const executionSource = stagedPromptArtifact
       ? "agent-final-prompt"
       : "generate-command";
@@ -692,6 +741,7 @@ export default function PromptBar() {
       ),
       executionSource,
       effectivePrompt: executionPrompt,
+      iterationBrief: gallery.iterationBrief,
       agentDraft: stagedPromptArtifact
         ? {
           id: stagedPromptArtifact.sourceDraftId || agentDraft?.id || null,
@@ -1043,11 +1093,16 @@ export default function PromptBar() {
     refCount: activeModuleCount,
   });
 
-  const currentGenerationEvidence = (): BriefGenerationEvidence[] => gallery.cells
-    .filter((cell) => cell.origin === "generation" && !cell.loadingId && !cell.error && !cell.blocked)
-    .sort((left, right) => String(right.createdAt || right.date || "").localeCompare(String(left.createdAt || left.date || "")))
-    .slice(0, 6)
-    .map((cell, index) => {
+  const currentGenerationEvidence = (): BriefGenerationEvidence[] => {
+    const sorted = gallery.cells
+      .filter((cell) => cell.origin === "generation" && !cell.loadingId && !cell.error && !cell.blocked)
+      .sort((left, right) => String(right.createdAt || right.date || "").localeCompare(String(left.createdAt || left.date || "")));
+    const anchorId = gallery.iterationBrief?.anchorGenerationId;
+    const anchor = anchorId ? sorted.find((cell) => (cell.uuid || String(cell.id)) === anchorId) : undefined;
+    const selectedCells = anchor
+      ? [anchor, ...sorted.filter((cell) => cell.id !== anchor.id).slice(0, 6)]
+      : sorted.slice(0, 6);
+    return selectedCells.map((cell, index) => {
       const generationId = cell.uuid || String(cell.id);
       const contentFingerprint = generationContentFingerprint(cell);
       const cached = contentFingerprint
@@ -1058,6 +1113,7 @@ export default function PromptBar() {
       return {
       generationId,
       recency: index + 1,
+      anchored: gallery.iterationBrief?.anchorGenerationId === generationId,
       createdAt: cell.createdAt || cell.date || null,
       prompt: cell.effectivePrompt || cell.prompt || "",
       model: cell.model || cell.modelId || null,
@@ -1081,6 +1137,7 @@ export default function PromptBar() {
       } : null,
     };
     });
+  };
 
   const inspectGenerationsForMessage = async (text: string, evidence: BriefGenerationEvidence[], signal?: AbortSignal) => {
     const requestedCount = generationInspectionCount(text);
@@ -1261,9 +1318,12 @@ export default function PromptBar() {
           query: userMessage.text,
         })
         : [];
+      const revisionContext = revisionProjectId
+        ? await prepareConversationContext({ projectId: revisionProjectId, sessionId: revisionRun.id, messages: nextMessages })
+        : { messages: nextMessages };
       const response = await requestBriefAgent({
         referenceSnapshot,
-        messages: nextMessages,
+        messages: revisionContext.messages,
         session: agentDraft?.session || null,
         run: revisionRun,
         generations: currentGenerationEvidence(),
@@ -1536,13 +1596,6 @@ export default function PromptBar() {
     addLocalAgentMessage(`REJECTED - ${proposalMessage.toolProposal.actions.length} proposed app action${proposalMessage.toolProposal.actions.length === 1 ? "" : "s"}.`, "inspect");
   };
 
-  const showPendingActionProposals = () => {
-    const pending = agentMessages.filter((message) => message.toolProposal?.status === "pending");
-    addLocalAgentMessage(pending.length
-      ? pending.map((message) => message.toolProposal!.actions.map((action) => `PENDING - ${describeAgentAppAction(action)}`).join("\n")).join("\n")
-      : "No app actions are waiting for approval.", "inspect");
-  };
-
   const undoLastAppAction = async () => {
     if (!activeProjectId) return;
     const events = await DB.agentEvents.getByProject(activeProjectId) as AgentAppEvent[];
@@ -1583,35 +1636,48 @@ export default function PromptBar() {
     addLocalAgentMessage(`UNDO OK · ${target.summary}`, "inspect");
   };
 
-  const showRecentAppActions = async () => {
+  const loadMemoryPanel = async (tab: AgentMemoryPanelTab = memoryPanelTab) => {
     if (!activeProjectId) return;
-    const events = await DB.agentEvents.getByProject(activeProjectId) as AgentAppEvent[];
-    const recent = events.slice(-8).reverse();
-    addLocalAgentMessage(recent.length
-      ? recent.map((event) => `${event.status.toUpperCase()} · ${event.summary}`).join("\n")
-      : "No agent app actions recorded for this project.", "inspect");
+    setMemoryPanelOpen(true);
+    setMemoryPanelTab(tab);
+    setAgentConsoleOpen(true);
+    setMemoryPanelLoading(true);
+    try {
+      const [memories, insights, events, transcript, checkpoints] = await Promise.all([
+        listAgentMemories(activeProjectId, agentRun?.id),
+        listAgentInsights(activeProjectId),
+        DB.agentEvents.getByProject(activeProjectId) as Promise<AgentAppEvent[]>,
+        agentRun?.id ? DB.agentMessages.getBySession(activeProjectId, agentRun.id) as Promise<unknown[]> : Promise.resolve([]),
+        agentRun?.id ? DB.agentCheckpoints.getBySession(activeProjectId, agentRun.id) as Promise<unknown[]> : Promise.resolve([]),
+      ]);
+      setMemoryPanelMemories([...memories].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+      setMemoryPanelInsights([...insights].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+      setMemoryPanelEvents(events);
+      setMemoryPanelContext({ transcriptMessages: transcript.length, checkpoints: checkpoints.length });
+    } finally {
+      setMemoryPanelLoading(false);
+    }
   };
 
-  const showAgentMemory = async () => {
+  const clearMemoryFromPanel = async (scope: AgentMemoryScope | "all") => {
     if (!activeProjectId) return;
-    const memories = await listAgentMemories(activeProjectId, agentRun?.id);
-    const ordered = memories
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-      .slice(0, 12);
-    addLocalAgentMessage(ordered.length
-      ? [
-        `MEMORY · ${memories.length} SAVED`,
-        ...ordered.map((memory) => `${memory.scope.toUpperCase()} · ${memory.kind.toUpperCase()} · ${memory.text}`),
-        memories.length > ordered.length ? `…and ${memories.length - ordered.length} more.` : "",
-      ].filter(Boolean).join("\n")
-      : "Memory is empty for this project and session.", "inspect");
+    const confirmed = window.confirm(`Clear ${scope} memory? This removes the matching saved facts.`);
+    if (!confirmed) return;
+    await clearAgentMemories(scope, activeProjectId, agentRun?.id);
+    await loadMemoryPanel("memory");
+  };
+
+  const changeInsightStatus = async (insightId: string, status: AgentInsightStatus) => {
+    const updated = await updateAgentInsightStatus(insightId, status);
+    setMemoryPanelInsights((insights) => insights.map((insight) => insight.id === insightId ? updated : insight));
   };
 
   const rememberFromCommand = async (rawInput: string) => {
     if (!activeProjectId) return;
-    const match = rawInput.trim().match(/^\/remember(?:\s+(user|project|session))?\s+([\s\S]+)$/i);
+    const match = rawInput.trim().match(/^\/memory\s+add(?:\s+(user|project|session))?\s+([\s\S]+)$/i)
+      || rawInput.trim().match(/^\/remember(?:\s+(user|project|session))?\s+([\s\S]+)$/i);
     if (!match) {
-      addLocalAgentMessage("Use /remember [user|project|session] <fact>. The default scope is project.", "inspect");
+      addLocalAgentMessage("Use /memory add [user|project|session] <fact>. The default scope is project.", "inspect");
       return;
     }
     const scope = (match[1]?.toLowerCase() || "project") as AgentMemoryScope;
@@ -1632,18 +1698,21 @@ export default function PromptBar() {
     addLocalAgentMessage(memory
       ? `MEMORY SAVED · ${scope.toUpperCase()} · ${memory.text}`
       : "Nothing was saved because the memory was empty.", "inspect");
+    await loadMemoryPanel("memory");
   };
 
   const forgetFromCommand = async (rawInput: string) => {
     if (!activeProjectId) return;
-    const match = rawInput.trim().match(/^\/forget\s+(user|project|session|all)$/i);
+    const match = rawInput.trim().match(/^\/memory\s+clear\s+(user|project|session|all)$/i)
+      || rawInput.trim().match(/^\/forget\s+(user|project|session|all)$/i);
     if (!match) {
-      addLocalAgentMessage("Use /forget user, /forget project, /forget session, or /forget all.", "inspect");
+      addLocalAgentMessage("Use /memory clear user, project, session, or all.", "inspect");
       return;
     }
     const scope = match[1].toLowerCase() as AgentMemoryScope | "all";
     const removed = await clearAgentMemories(scope, activeProjectId, agentRun?.id);
     addLocalAgentMessage(`MEMORY CLEARED · ${scope.toUpperCase()} · ${removed} item${removed === 1 ? "" : "s"} removed.`, "inspect");
+    await loadMemoryPanel("memory");
   };
 
   const runCanvasLocalCommand = (command: CanvasLocalCommand, rawInput = promptText) => {
@@ -1682,6 +1751,11 @@ export default function PromptBar() {
       ].join("\n"), "inspect");
       return;
     }
+    if (command === "/retired-action") {
+      setPromptText("");
+      addLocalAgentMessage("That command has been consolidated. Use the proposal card buttons to approve or reject changes, /status for pending counts, and /memory activity for the action log.", "inspect");
+      return;
+    }
     if (command === "/reload") {
       setPromptText("");
       const currentReferenceFingerprint = fingerprintModuleFiles(moduleFilesRef.current);
@@ -1694,7 +1768,14 @@ export default function PromptBar() {
     }
     if (command === "/memory") {
       setPromptText("");
-      void showAgentMemory().catch((error) => setAgentError(error instanceof Error ? error.message : "Could not read memory."));
+      if (/^\/memory\s+add\b/i.test(rawInput)) {
+        void rememberFromCommand(rawInput).catch((error) => setAgentError(error instanceof Error ? error.message : "Could not save memory."));
+      } else if (/^\/memory\s+clear\b/i.test(rawInput)) {
+        void forgetFromCommand(rawInput).catch((error) => setAgentError(error instanceof Error ? error.message : "Could not clear memory."));
+      } else {
+        const requestedTab = rawInput.trim().match(/^\/memory\s+(memory|insights|activity)$/i)?.[1]?.toLowerCase() as AgentMemoryPanelTab | undefined;
+        void loadMemoryPanel(requestedTab || "memory").catch((error) => setAgentError(error instanceof Error ? error.message : "Could not read memory."));
+      }
       return;
     }
     if (command === "/remember") {
@@ -1721,32 +1802,13 @@ export default function PromptBar() {
       void undoLastAppAction().catch((error) => setAgentError(error instanceof Error ? error.message : "Undo failed."));
       return;
     }
-    if (command === "/actions") {
-      setPromptText("");
-      void showRecentAppActions().catch((error) => setAgentError(error instanceof Error ? error.message : "Could not read actions."));
-      return;
-    }
-    if (command === "/approve") {
-      setPromptText("");
-      void approveActionProposal().catch((error) => setAgentError(error instanceof Error ? error.message : "Approval failed."));
-      return;
-    }
-    if (command === "/reject") {
-      setPromptText("");
-      rejectActionProposal();
-      return;
-    }
-    if (command === "/pending") {
-      setPromptText("");
-      showPendingActionProposals();
-      return;
-    }
     if (command === "/clear") {
       if (activeProjectId) {
         window.localStorage.setItem(agentRunClearedStorageKey(activeProjectId), new Date().toISOString());
         void DB.agentRuns.clearActive(activeProjectId).catch((error) => console.error("Failed to end agent run", error));
       }
       setAgentMessages([]);
+      setMemoryPanelOpen(false);
       agentMessagesRef.current = [];
       setAgentPending(false);
       agentPendingRef.current = false;
@@ -1779,6 +1841,9 @@ export default function PromptBar() {
       "/generate <prompt> creates an image.",
       "/undo reverses the last workspace change.",
       "/status shows what is currently running.",
+      "/memory opens memory, insights, and activity.",
+      "/memory add [scope] <fact> saves a fact; scope defaults to project.",
+      "/memory clear <scope> clears user, project, session, or all memory.",
       "/reload restarts the current reference scan.",
       "/retry repeats the latest failed message.",
       "/stop cancels the current agent task.",
@@ -1790,6 +1855,7 @@ export default function PromptBar() {
   const submitAgentMessage = async (inputOverride?: string, options?: { retry?: boolean }) => {
     const trimmed = (inputOverride ?? promptText).trim();
     if (!trimmed) return;
+    setMemoryPanelOpen(false);
     if (agentWorkspaceHydrating || agentPendingRef.current) {
       if (queuedAgentInputsRef.current.length >= MAX_AGENT_QUEUE_LENGTH) {
         setAgentError(`The agent queue is full (${MAX_AGENT_QUEUE_LENGTH} messages). Wait for a turn to finish or use /stop.`);
@@ -1877,14 +1943,18 @@ export default function PromptBar() {
         })
         : [];
       updateAgentActivity("thinking", "Planning the response", "Choosing the clearest next step for your request");
+      const preparedContext = requestProjectId
+        ? await prepareConversationContext({ projectId: requestProjectId, sessionId: agentRun?.id || userMessage.id, messages: nextUserMessages })
+        : { messages: nextUserMessages };
       const response = await requestBriefAgent({
         referenceSnapshot,
-        messages: nextUserMessages,
+        messages: preparedContext.messages,
         session: previousSession,
         run: continuingCurrentReferenceRun ? agentRun : null,
         generations,
         workspace,
         memories,
+        iterationBrief: gallery.iterationBrief,
       }, settings.geminiApiKey, controller.signal);
       if (controller.signal.aborted || requestId !== agentRequestIdRef.current) return;
       if (activeProjectIdRef.current !== requestProjectId) {
@@ -1918,6 +1988,15 @@ export default function PromptBar() {
         void Promise.all([
           captureUserMessageMemories(trimmed, requestProjectId, response.run.id, userMessage.id),
           captureSessionStateMemory(response.draft.session, requestProjectId, response.run.id),
+          recordAgentInsight(createConversationInsight({
+            projectId: requestProjectId,
+            runId: response.run.id,
+            sourceMessageId: userMessage.id,
+            userText: trimmed,
+            agentReply: response.message.text,
+            referenceSnapshot,
+            generations,
+          })),
         ]).catch((error) => console.error("Failed to persist agent memory", error));
       }
       setLastFailedAgentInput("");
@@ -2032,7 +2111,21 @@ export default function PromptBar() {
   };
 
   const placeholderText = "Describe an image, ask the agent, or type /help";
+  const submitDecisionFlow = (message: AgentMessage, answers: AgentDecisionAnswer[], text: string) => {
+    if (!message.decisionFlow || agentPendingRef.current) return;
+    const nextMessages = agentMessagesRef.current.map((entry) => entry.id === message.id
+      ? { ...entry, decisionFlow: { ...entry.decisionFlow!, answers, status: "submitted" as const } }
+      : entry);
+    agentMessagesRef.current = nextMessages;
+    setAgentMessages(nextMessages);
+    void gallery.recordIterationDecision(answers, referenceFingerprint)
+      .catch((error) => console.error("Failed to persist decision answers", error));
+    void submitAgentMessage(text);
+  };
   const newestMessages = [...agentMessages].reverse();
+  const activeAnchorCell = gallery.iterationBrief?.anchorGenerationId
+    ? gallery.cells.find((cell) => (cell.uuid || String(cell.id)) === gallery.iterationBrief?.anchorGenerationId)
+    : null;
   const newestPrompt = newestMessages.find((message) => message.promptArtifact)?.promptArtifact?.prompt || "";
   const pinnedPrompt = agentRun?.currentPrompt && agentRun.currentPrompt !== newestPrompt
     ? agentRun.currentPrompt
@@ -2293,10 +2386,33 @@ export default function PromptBar() {
           title="Retract chat"
           onClick={() => {
             inputRef.current?.blur();
+            setMemoryPanelOpen(false);
             setAgentConsoleOpen(false);
           }}
         ></button>
         <div className="agent-console-scroll" ref={agentConsoleScrollRef}>
+          {memoryPanelOpen ? (
+            <AgentMemoryPanel
+              tab={memoryPanelTab}
+              loading={memoryPanelLoading}
+              memories={memoryPanelMemories}
+              insights={memoryPanelInsights}
+              events={memoryPanelEvents}
+              contextStats={memoryPanelContext}
+              onTabChange={(tab) => void loadMemoryPanel(tab).catch((error) => setAgentError(error instanceof Error ? error.message : "Could not load memory."))}
+              onClose={() => setMemoryPanelOpen(false)}
+              onClearMemory={(scope) => void clearMemoryFromPanel(scope).catch((error) => setAgentError(error instanceof Error ? error.message : "Could not clear memory."))}
+              onInsightStatus={(insightId, status) => void changeInsightStatus(insightId, status).catch((error) => setAgentError(error instanceof Error ? error.message : "Could not update insight."))}
+            />
+          ) : (
+            <>
+          {gallery.iterationBrief?.anchorGenerationId && (
+            <div className={`agent-anchor-status${activeAnchorCell ? "" : " missing"}`}>
+              <span>ANCHOR · {activeAnchorCell ? `IMAGE ${activeAnchorCell.id}` : "UNAVAILABLE"}</span>
+              <small>KEEP {gallery.iterationBrief.keep.length} · CHANGE {gallery.iterationBrief.change.length} · AVOID {gallery.iterationBrief.avoid.length}</small>
+              <button type="button" onClick={() => void gallery.setGenerationAnchor(null)}>CLEAR</button>
+            </div>
+          )}
           {(agentWorkspaceHydrating || agentActivity || referenceReadPending || activeGenerationCount > 0) && (
             <div className="agent-activity-list" role="status" aria-live="polite">
               {agentWorkspaceHydrating && (
@@ -2480,6 +2596,14 @@ export default function PromptBar() {
                         ))}
                       </div>
                     )}
+                    {message.decisionFlow && (
+                      <AgentDecisionFlowCard
+                        flow={message.decisionFlow}
+                        currentReferenceFingerprint={referenceFingerprint}
+                        disabled={agentPending}
+                        onSubmit={(answers, text) => submitDecisionFlow(message, answers, text)}
+                      />
+                    )}
                   </div>
                 ))}
                 {queuedAgentInputs.length > 0 && (
@@ -2542,6 +2666,8 @@ export default function PromptBar() {
               {promptText.trim() && (
                 <div className="agent-current-draft">&gt; {promptText}</div>
               )}
+            </>
+          )}
             </>
           )}
         </div>

@@ -2,7 +2,31 @@
 
 CafeHTML's agent is a creative workspace operator, not only a prompt writer. The app runtime is the boundary between model suggestions and durable project changes.
 
-The default planner uses Gemini 3.6 Flash at medium thinking. Reference reading remains on Gemini 3.1 Flash-Lite so stronger planning does not make routine vision scans unnecessarily expensive.
+## Structured decisions and iteration continuity
+
+- Agent plans render their directions once as structured choices; reply prose is stripped of repeated direction lines and option labels are normalized without embedded numbering.
+- Interactive questions are explicit `decisionFlow` data. Inline questions remain prose. Up to three questions can be navigated locally, custom answers retain their question identity, and changing an earlier answer clears only dependent answers.
+- Choices are submitted once with an explicit next-step intent. Completing a decision never authorizes generation unless the original request required a draft after clarification.
+- Each project has a versioned iteration brief with an explicit generation anchor, parent lineage, Keep/Change/Avoid constraints, rejected attempts, decision answers, reference fingerprint, and version.
+- An anchor is semantic continuity evidence supplied to the brief agent; it is not represented as pixel-level image input to the generator. New attempts do not replace it automatically.
+- Preflight blocks unavailable or rejected anchors and exact Keep-versus-Change/Avoid conflicts. Reference changes mark structured decisions stale.
+- The existing Generation feedback panel is the single user surface. User feedback is authoritative; automated analysis stays separately labelled and collapsed. A feedback note enters project memory only when the user explicitly selects the remember option.
+- Iteration briefs save locally first and synchronize through the cloud project-state record. Version comparison prevents an older remote brief from replacing a newer local brief.
+
+The model registry uses Gemini 3.7 Flash for planning and Gemini 3.5 Flash-Lite for reference reading, generation inspection, and routine generation review.
+
+## Conversation continuity
+
+- Raw agent messages are stored separately from the active model context.
+- After 18 messages, the model receives a structured checkpoint plus the eight most recent messages; the visible transcript remains intact.
+- Checkpoints retain source message identifiers and synchronize through the authenticated single-user context endpoint.
+- Generation prompts are normalized without discarding unique instructions. A brief above 4,000 characters is blocked for revision rather than silently truncated.
+
+## Project deletion
+
+- Delete moves a project to Projects → Trash for 30 days and excludes it from generation, memory recall, and ordinary project lists.
+- Restore clears the deletion marker and synchronizes the recovered project.
+- Permanent deletion cascades through local project data and removes cloud metadata, project memory, transcripts, checkpoints, references, generations, and media while retaining a purge tombstone for other devices.
 
 ## Execution model
 
@@ -45,8 +69,10 @@ The reference library accepts multi-image uploads directly into MOOD, LOOKBOOK, 
 ## CLI commands
 
 - `/generate <prompt>` — generate an image immediately. Natural-language image briefs in chat also auto-generate after the agent composes the final prompt.
-- `/actions` — show the latest app-runtime events for the active project.
 - `/undo` — undo the latest eligible completed agent action.
+- `/memory` — open saved Memory, engineering Insights, and app-action Activity.
+- `/memory add [user|project|session] <fact>` — save an explicit memory; the default scope is project.
+- `/memory clear <user|project|session|all>` — clear a selected memory scope.
 - `/clear` — end the current agent run and clear the console.
 - `/help` — list commands.
 - `/status` — show live model, run, generation, reference, queue, and approval state.
@@ -55,7 +81,10 @@ The reference library accepts multi-image uploads directly into MOOD, LOOKBOOK, 
 
 `Ctrl/Cmd+K` focuses the agent input. `Escape` stops an active agent request before reverting to its normal input-clear behavior. Image generation runs independently, so the user can continue talking to the agent while frames render.
 
-Approval commands apply only to app-changing proposals: `/pending` shows waiting proposals, `/approve` executes the latest proposal, and `/reject` declines it. Image generation does not wait for approval.
+App-changing proposals render their own `APPROVE` and `REJECT` controls. The
+former `/pending`, `/approve`, `/reject`, and `/actions` commands are
+consolidated into proposal cards, `/status`, and `/memory activity`. Image
+generation does not wait for approval.
 
 ## Next runtime milestones
 

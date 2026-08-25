@@ -6,6 +6,7 @@ import {
 } from "../src/lib/brief-agent/referenceFreshness.ts";
 import {
   getGenerationModuleImages,
+  multiSubjectCompositionRule,
   resolveGenerationModuleImages,
 } from "../src/lib/pipeline/module-order.ts";
 import { galleryCellForStorage } from "../src/lib/galleryCells.ts";
@@ -35,6 +36,16 @@ const active = getGenerationModuleImages(files);
 assert.equal(active.length, 6);
 assert.deepEqual(active.map((file) => file.id), [5, 4, 3, 2, 1, 0]);
 assert.deepEqual(resolveGenerationModuleImages(undefined, files), active);
+
+const multiSubjectRule = multiSubjectCompositionRule([
+  { mode: "SUBJECT", label: "MODEL 1", strength: 50 },
+  { mode: "SUBJECT", label: "MODEL 2", strength: 50 },
+]);
+assert.match(
+  multiSubjectRule || "",
+  /Include every active Subject as a separately visible subject/,
+  "manual generation should preserve active Subject cardinality",
+);
 
 const stored = galleryCellForStorage({
   id: 1,

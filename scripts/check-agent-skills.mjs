@@ -20,6 +20,14 @@ const gallery = {
   visualRead: "A symmetrical cream gallery with a polished concrete floor and soft skylight.",
 };
 
+const secondSubject = {
+  imageId: "model-2",
+  role: "SUBJECT",
+  label: "MODEL 2",
+  strength: 50,
+  visualRead: "A tall man in a cobalt jacket with closely cropped hair.",
+};
+
 const clean = runSkillChecks(draft(
   "A brushed steel wristwatch with a circular black dial rests in a symmetrical cream gallery on polished concrete, lit by a soft skylight.",
   [watch, gallery],
@@ -36,6 +44,58 @@ assert.equal(leaked.find((check) => check.id === "prompt-coherence")?.status, "w
 const ungrounded = runSkillChecks(draft("A generic luxury product on a neutral surface.", [watch]));
 assert.equal(ungrounded.find((check) => check.id === "reference-grounding")?.status, "warning");
 assert.deepEqual(runSkillChecks(draft("", [watch])), []);
+
+const bothSubjects = runSkillChecks(draft(
+  "MODEL 1 wears a brushed steel wristwatch with a circular black dial beside MODEL 2, a tall man in a cobalt jacket.",
+  [{ ...watch, label: "MODEL 1" }, secondSubject],
+));
+assert.equal(
+  bothSubjects.find((check) => check.id === "multi-subject-coverage")?.status,
+  "pass",
+  "each active Subject should contribute distinct evidence",
+);
+
+const omittedSubjectDraft = {
+  ...draft(
+    "A tall man in a cobalt jacket poses alone in a studio.",
+    [{ ...watch, label: "MODEL 1" }, secondSubject],
+  ),
+  status: "draft",
+  action: "draft",
+  reply: "Starting generation.",
+  warnings: [],
+  skillChecks: [],
+  readyToExecute: false,
+  session: {
+    projectIntent: "Compose both models.",
+    selectedDirection: "",
+    directions: [],
+    lastDraftPrompt: "A tall man in a cobalt jacket poses alone in a studio.",
+    unresolvedQuestions: [],
+    notes: [],
+  },
+};
+const blockedOmission = applySkillContract(omittedSubjectDraft);
+assert.equal(
+  blockedOmission.skillChecks.find((check) => check.id === "multi-subject-coverage")?.status,
+  "warning",
+  "an omitted active Subject should be detected",
+);
+assert.equal(blockedOmission.action, "inspect", "multi-subject omissions should block generation");
+assert.equal(blockedOmission.finalPrompt, "", "the incomplete prompt should be removed");
+
+const alternateViews = runSkillChecks({
+  ...draft(
+    "Use these alternate views of the same subject to create a single portrait.",
+    [{ ...watch, label: "MODEL FRONT" }, secondSubject],
+  ),
+  messages: [{ role: "user", text: "These are alternate views of the same subject." }],
+});
+assert.equal(
+  alternateViews.some((check) => check.id === "multi-subject-coverage"),
+  false,
+  "an explicit same-entity relationship should not force duplicate subjects",
+);
 
 const womanSubject = {
   imageId: "paoul",

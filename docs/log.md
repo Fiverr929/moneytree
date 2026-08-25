@@ -60,6 +60,94 @@ documentation.
 ---
 
 ## Sessions
+### 2026-08-25 - Single-user brain continuity, safe prompts, and project Trash
+
+**Status:** COMPLETED
+**Product area:** Agent | Persistence | Projects
+
+**What changed:**
+- Replaced silent 4,000-character prompt slicing with normalization and a blocking revision path.
+- Added durable raw transcript records and versioned structured conversation checkpoints.
+- Added authenticated cloud synchronization for transcripts and checkpoints and cloud-backed iteration briefs.
+- Consolidated model defaults in one registry and moved routine review to Gemini 3.5 Flash-Lite.
+- Changed project deletion into a 30-day Projects → Trash lifecycle with restore and permanent purge.
+- Made ordinary localhost explicitly local-only when Worker endpoints are absent and added a local Cloudflare development command.
+
+**Verification:**
+- Prompt compiler, conversation-context, project-lifecycle, memory, and iteration checks.
+- TypeScript validation.
+- Focused lint and the Vinext production build.
+
+### 2026-08-24 - Consolidated Memory, Insights, and Activity interface
+
+**Status:** COMPLETED
+**Product area:** Agent | Gallery/Evaluation
+
+**Objective:**
+- Give memory and engineering insights one organized interface without adding a
+  permanent prompt-bar or navigation control.
+
+**What changed:**
+- Made `/memory` open an in-console panel with Memory, Insights, and Activity
+  tabs.
+- Added memory scope counts, stored-memory records, guarded clear controls, and
+  `/memory add` / `/memory clear` subcommands.
+- Added insight evidence details, reference and generation provenance, editable
+  lifecycle status, and append-only local status history.
+- Moved the action audit log into `/memory activity` while retaining proposal
+  cards, their explicit APPROVE/REJECT buttons, and `/undo`.
+- Retired `/actions`, `/pending`, `/approve`, and `/reject`; entering an old
+  command now explains the consolidated workflow locally without spending an
+  agent call.
+- Kept `/remember` and `/forget` as hidden compatibility aliases while the
+  documented command surface uses the `/memory` family.
+
+**Verification:**
+- Deterministic agent checks, focused lint, TypeScript, production build, and
+  responsive localhost UI verification.
+
+**Remaining follow-ups:**
+- Cloud insight synchronization remains a separate milestone; existing user
+  and project creative memory cloud sync is unchanged.
+
+**Related commits:**
+- None yet.
+
+### 2026-08-24 - Multi-subject enforcement and agent insight ledger
+
+**Status:** COMPLETED
+**Product area:** Agent | Gallery/Evaluation | Modules/References
+
+**Objective:**
+- Prevent an active Subject reference from silently disappearing and preserve
+  useful harness feedback as structured engineering evidence.
+
+**What changed:**
+- Made multiple active SUBJECT references distinct by default while respecting
+  explicit same-entity or alternate-view instructions.
+- Added a blocking prompt-skill check so an incomplete multi-subject draft is
+  stopped before image generation.
+- Added the same cardinality instruction to manual FRAME prompt construction.
+- Added a project-scoped IndexedDB insight ledger for defect candidates,
+  product ideas, and evidence-backed negative generation feedback.
+- Kept harness diagnoses marked as low-confidence inferences and excluded
+  ordinary creative requests and unsupported ratings from the ledger.
+- Mirrored localhost insights to an ignored JSONL/Markdown coding-agent inbox;
+  production export remains intentionally disabled.
+
+**Verification:**
+- `npm run test:agent-skills`
+- `npm run test:reference-pipeline`
+- `npm run test:agent-insights`
+- Focused ESLint and TypeScript checks pass without model or generation calls.
+
+**Remaining follow-ups:**
+- Cloud insight sync, user-visible triage, and verified fix feedback remain part
+  of the Later agent-memory/evaluation roadmap item.
+
+**Related commits:**
+- None yet.
+
 ### 2026-08-23 - Separate Current Architecture from Legacy History
 
 **Status:** COMPLETED
@@ -1442,3 +1530,10 @@ Implemented the new CafeHTML Module Panel design from the S-C handoff as a vanil
 - `docs/log.md`
 
 ---
+# 2026-08-24 - Structured decisions, anchoring, and generation continuity
+
+- Replaced duplicated plan prose plus immediate option buttons with structured, reversible decision flows.
+- Added multi-question navigation, dependent-answer invalidation, custom responses, stale-reference protection, and idempotent submission.
+- Added durable local iteration briefs with explicit generation anchors, lineage metadata, Keep/Change/Avoid constraints, rejected attempts, and deterministic preflight.
+- Expanded the existing feedback panel with aspect-level feedback, notes, an explicit anchor action, opt-in project-memory promotion, and collapsed automated analysis.
+- Preserved local iteration state during cloud workspace refresh while keeping the unsupported cloud-sync boundary explicit.

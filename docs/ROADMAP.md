@@ -75,6 +75,8 @@ share validation, persistence, undo, interruption handling, and result tests.
 
 ## Later
 
+- Evaluate true multi-user collaboration only after the single-user memory, compaction, and deletion lifecycle is stable; ownership fields remain migration-ready without exposing collaboration UI.
+
 ### Build the Timeline
 
 Assemble image, video, and audio assets with ordering, trimming, transitions,
@@ -110,6 +112,8 @@ without silently overriding current references or explicit user feedback.
 - Server-backed Brief Agent with reference reading, persistent runs and memory,
   typed safe actions, approval/rejection, undo, and deterministic checks.
 - Cross-role Subject/Scene/Style safeguards in the current prompt contracts.
+- Blocking multi-Subject prompt coverage and a local, evidence-linked agent
+  insight ledger with a development-only coding-agent inbox.
 - Cloud synchronization for projects, references, generations, and agent memory.
 
 ## Explicitly not scheduled

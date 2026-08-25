@@ -45,6 +45,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const initializeProject = async () => {
       try {
+        await DB.projects.purgeExpired();
         await syncWorkspaceProjects().catch((error) => console.warn("Cloud workspace sync deferred", error));
         const data = await DB.projects.getAll();
         if (data.length > 0) {

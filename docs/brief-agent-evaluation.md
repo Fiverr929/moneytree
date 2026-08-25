@@ -51,6 +51,19 @@ npm run test:agent-skills
 It verifies prompt hygiene, coherent composition, and grounding for close or
 locked references without spending model tokens.
 
+The local engineering-insight policy has a separate deterministic check:
+
+```text
+npm run test:agent-insights
+```
+
+It verifies that explicit defect/idea language and evidence-backed negative
+generation feedback create structured candidates, while ordinary creative
+direction and ratings without diagnostic evidence do not pollute the ledger.
+On localhost, candidates are also mirrored to
+`evaluation-exports/agent-insights/` as the coding-agent inbox. The mirror is
+disabled in production; IndexedDB remains the local source of truth.
+
 Set `CAFEHTML_EVAL_URL` to test another local or deployed
 same-origin-compatible instance. Each run writes a JSON report under
 `evaluation-exports/brief-agent/runs/`.

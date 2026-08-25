@@ -18,8 +18,9 @@ Supported product surfaces:
 - **VIDEO / SCENE** at `/video`
 - **Studio** as an image-editing overlay opened from Gallery or Module references
 - **Projects** with local persistence and cloud synchronization
-- **Brief Agent** with reference reading, persistent runs, memory, safe app
-  actions, approval/rejection, and undo
+- **Brief Agent** with reference reading, persistent runs, a `/memory` interface
+  for saved memory, engineering insights, and activity, plus safe app actions,
+  approval/rejection cards, and undo
 
 Prototype routes are not finished product surfaces:
 
@@ -62,6 +63,7 @@ IndexedDB is the local system of record. Important stores include:
 - `agent-runs`
 - `agent-events`
 - `agent-memories`
+- `agent-insights`
 - `sync-tombstones`
 
 `DB.images` owns image data URLs. Gallery, references, modules, and prompt
