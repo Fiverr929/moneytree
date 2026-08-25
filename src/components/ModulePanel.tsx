@@ -3,6 +3,7 @@
 import React, { useRef, ChangeEvent, useEffect, useLayoutEffect, useState, useCallback } from "react";
 import { useModule, ModuleFile, ModuleFolder } from "@/context/ModuleContext";
 import { useStudio } from "@/context/StudioContext";
+import { moduleStudioWorkspaceKey } from "@/lib/studioState";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
 import { deriveEditedName, loadImageMetadata } from "@/lib/imageMeta";
@@ -803,6 +804,7 @@ export default function ModulePanel() {
             e.stopPropagation();
             openStudio({
               uuid: f.uuid,
+              workspaceKey: moduleStudioWorkspaceKey(f.id),
               imgUrl: f.url,
               caller: 'module',
               onDone: (url) => {
@@ -1584,6 +1586,7 @@ export default function ModulePanel() {
               }}
               onOpenImage={() => openStudio({
                 uuid: f.uuid,
+                workspaceKey: moduleStudioWorkspaceKey(f.id),
                 imgUrl: f.url,
                 caller: 'module',
                 onDone: (url) => {

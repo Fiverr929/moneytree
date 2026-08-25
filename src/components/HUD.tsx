@@ -3,6 +3,7 @@
 import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { useGallery, type GalleryCell } from "@/context/GalleryContext";
 import { useStudio } from "@/context/StudioContext";
+import { galleryStudioWorkspaceKey } from "@/lib/studioState";
 import { useModule } from "@/context/ModuleContext";
 import { useApp } from "@/context/AppContext";
 import DB from "@/lib/db";
@@ -462,6 +463,7 @@ export default function HUD() {
           if (activeCell) {
             openStudio({
               uuid: activeCell.uuid,
+              workspaceKey: galleryStudioWorkspaceKey(activeCell.id),
               imgUrl: activeCell.imgUrl,
               caller: 'gallery',
               onDone: (url) => {
