@@ -762,15 +762,27 @@ const agentMemories = {
 };
 
 const agentInsights = {
+  getAll: () => ready.then(() => (
+    wrap(tx(S.AGENT_INSIGHTS).objectStore(S.AGENT_INSIGHTS).getAll())
+  )),
   get: (id: string) => ready.then(() => (
     wrap(tx(S.AGENT_INSIGHTS).objectStore(S.AGENT_INSIGHTS).get(id))
   )),
   getByProject: (projectId: number) => ready.then(() => (
     wrap(tx(S.AGENT_INSIGHTS).objectStore(S.AGENT_INSIGHTS).index('by_project').getAll(projectId))
   )),
-  put: (data: any) => ready.then(() => (
-    wrap(tx(S.AGENT_INSIGHTS, 'readwrite').objectStore(S.AGENT_INSIGHTS).put(data))
-  )),
+  put: (data: any, syncSilent = false) => ready.then(() => {
+    const now = new Date().toISOString();
+    const record = syncSilent ? data : {
+      ...data,
+      cloudUpdatedAt: now,
+      cloudSyncedAt: null,
+    };
+    return wrap(tx(S.AGENT_INSIGHTS, 'readwrite').objectStore(S.AGENT_INSIGHTS).put(record)).then((result) => {
+      if (!syncSilent) emitCloudChange(data.projectId, "insight");
+      return result;
+    });
+  }),
 };
 
 const agentMessages = {

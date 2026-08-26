@@ -210,7 +210,12 @@ supplied keys are not accepted by production generation routes.
 
 The application has a dedicated `/login` route and a single-user Sites-backed
 authentication flow. Cloud workspace synchronization uses the configured D1 and
-R2 bindings while IndexedDB supplies local-first behavior and recovery.
+R2 bindings while IndexedDB supplies local-first behavior and recovery. Project
+iteration briefs and engineering insights participate in that sync. Their
+structured evidence and histories merge deterministically across devices;
+reference fingerprints remain freshness guards and are never silently refreshed
+by synchronization. The exact supported boundary is documented in
+`docs/agent-app-runtime.md`.
 
 The Sites project is declared in `.openai/hosting.json` with logical `DB` and
 `MEDIA` bindings. Production builds use Vinext and emit the Cloudflare Worker-

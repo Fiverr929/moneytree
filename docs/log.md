@@ -60,6 +60,32 @@ documentation.
 ---
 
 ## Sessions
+### 2026-08-26 - Cross-device project knowledge synchronization
+
+**Status:** COMPLETED
+**Product area:** Agent | Projects/Cloud | Persistence
+
+**Objective:**
+- Synchronize project engineering insights and iteration continuity without
+  losing evidence or weakening stale-reference safety.
+
+**What changed:**
+- Added owner/project-scoped cloud storage and local dirty tracking for
+  engineering insights.
+- Added convergent, deterministic merges for insight status history and
+  provenance and for iteration anchors, lineage, decisions, rejections, and
+  Keep/Change/Avoid constraints.
+- Kept reference fingerprints immutable during sync so existing stale-reference
+  preflight warnings and anchor/constraint blockers still apply.
+- Added the D1 migration, compatibility boundary, and deterministic migration
+  and merge regression checks.
+
+**Verification:**
+- `npm run test:cloud-knowledge-sync`, TypeScript validation, and focused ESLint.
+
+**Remaining follow-ups:**
+- None.
+
 ### 2026-08-25 - Single-user brain continuity, safe prompts, and project Trash
 
 **Status:** COMPLETED
