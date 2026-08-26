@@ -17,6 +17,7 @@
     "test:agent-skills": "node --experimental-strip-types scripts/check-agent-skills.mjs",
     "test:agent-memory": "node --experimental-strip-types scripts/check-agent-memory.mjs",
     "test:agent-insights": "node --experimental-strip-types scripts/check-agent-insights.mjs",
+    "test:cloud-knowledge-sync": "node --experimental-strip-types scripts/check-cloud-knowledge-sync.mjs",
     "test:agent-decisions": "node --experimental-strip-types scripts/check-agent-decisions.mjs",
     "test:prompt-compiler": "node --experimental-strip-types scripts/check-prompt-compiler.mjs",
     "test:conversation-context": "node --experimental-strip-types scripts/check-conversation-context.mjs",

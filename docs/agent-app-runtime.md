@@ -11,7 +11,17 @@ CafeHTML's agent is a creative workspace operator, not only a prompt writer. The
 - An anchor is semantic continuity evidence supplied to the brief agent; it is not represented as pixel-level image input to the generator. New attempts do not replace it automatically.
 - Preflight blocks unavailable or rejected anchors and exact Keep-versus-Change/Avoid conflicts. Reference changes mark structured decisions stale.
 - The existing Generation feedback panel is the single user surface. User feedback is authoritative; automated analysis stays separately labelled and collapsed. A feedback note enters project memory only when the user explicitly selects the remember option.
-- Iteration briefs save locally first and synchronize through the cloud project-state record. Version comparison prevents an older remote brief from replacing a newer local brief.
+- Iteration briefs save locally first and synchronize through the cloud project-state record. Sync uses a convergent merge: version, timestamp, and canonical content order scalar conflicts deterministically, while Keep/Change/Avoid constraints, rejected generations, and distinct decision answers are unioned. Anchor, parent lineage, selected direction, and reference fingerprint stay together from the winning brief revision.
+- Project engineering insights synchronize as owner- and project-scoped records. The full evidence payload is retained, including conversation/evaluation provenance, generation identifiers, active-reference evidence, diagnosis labels, and the captured reference fingerprint. Status histories are append-only unions; the latest `(createdAt, event id)` event deterministically defines the current status.
+- A downloaded brief is rebound from its cloud project identity to the receiving device's local numeric project id. Local ids are never treated as cross-device identity.
+- Sync never recomputes, clears, or blesses a stored reference fingerprint. If the active reference fingerprint differs from the brief fingerprint, preflight continues to mark structured decisions stale; unavailable/rejected anchors and merged Keep-versus-Change/Avoid conflicts remain blocking errors.
+
+### Supported cloud-knowledge boundary
+
+- Supported: project-scoped iteration briefs and engineering insights for active projects owned by the authenticated workspace owner. Existing project, folder, reference, generation, transcript, checkpoint, and project-memory sync retain their separate storage contracts.
+- Compatibility: the insight fields in the sync request and response are optional, so clients remain able to exchange the older workspace payload. A new client talking to an older endpoint keeps local insights pending and retries instead of marking them synchronized. Legacy iteration briefs without sync metadata are accepted and normalized when downloaded.
+- Limits: at most 100 projects/states, 1,000 insights, and 100 KB per serialized insight are accepted in one sync request. Insight removal is represented by the lifecycle (normally `dismissed`), not by a standalone insight tombstone; permanent project deletion removes its cloud insights with the rest of the project cascade.
+- Not included: user-scoped or session-scoped engineering insights, arbitrary files embedded in insight evidence, cross-owner sharing, and automatic reconciliation of changed source images. Reference media continues through the existing reference/image sync path; fingerprints are evidence and freshness guards, not a media transport.
 
 The model registry uses Gemini 3.7 Flash for planning and Gemini 3.5 Flash-Lite for reference reading, generation inspection, and routine generation review.
 

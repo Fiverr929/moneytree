@@ -1,3 +1,6 @@
+import { mergeAgentInsight, mergeIterationBrief, stableStringify } from "../src/lib/cloudSyncMerge.ts";
+import { isAgentInsight } from "../src/lib/brief-agent/insightPolicy.ts";
+
 interface D1Result { meta?: { changes?: number } }
 interface D1Statement {
   bind(...values: unknown[]): D1Statement;
@@ -50,6 +53,12 @@ type GenerationInput = {
   projectId: string;
   metadata: Record<string, unknown>;
   createdAt: string;
+  updatedAt: string;
+};
+type InsightInput = {
+  id: string;
+  projectId: string;
+  insight: Record<string, unknown>;
   updatedAt: string;
 };
 
@@ -121,6 +130,21 @@ function validGeneration(value: unknown): value is GenerationInput {
   }
 }
 
+function validInsight(value: unknown): value is InsightInput {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  if (!validId(item.id) || !validId(item.projectId) || !validDate(item.updatedAt)) return false;
+  if (!item.insight || typeof item.insight !== "object" || Array.isArray(item.insight)) return false;
+  const insight = item.insight as Record<string, unknown>;
+  if (insight.id !== item.id || !isAgentInsight(insight)) return false;
+  if (typeof insight.referenceFingerprint !== "string" && insight.referenceFingerprint !== null) return false;
+  if ((insight.statusHistory !== undefined && !Array.isArray(insight.statusHistory))
+    || (Array.isArray(insight.statusHistory) && insight.statusHistory.length > 100)
+    || (insight.activeReferences as unknown[]).length > 50
+    || (insight.conversationEvidence as unknown[]).length > 50) return false;
+  try { return JSON.stringify(insight).length <= 100_000; } catch { return false; }
+}
+
 async function readSyncBody(request: Request) {
   try {
     const raw = await request.text();
@@ -130,21 +154,26 @@ async function readSyncBody(request: Request) {
     const states = Array.isArray(body.states) ? body.states : [];
     const references = Array.isArray(body.references) ? body.references : [];
     const generations = Array.isArray(body.generations) ? body.generations : [];
+    const insights = Array.isArray(body.insights) ? body.insights : [];
+    const insightProjectIds = Array.isArray(body.insightProjectIds) ? body.insightProjectIds : [];
     const referenceProjectId = body.referenceProjectId === null || body.referenceProjectId === undefined
       ? null
       : body.referenceProjectId;
     const generationProjectId = body.generationProjectId === null || body.generationProjectId === undefined
       ? null
       : body.generationProjectId;
-    if (projects.length > 100 || states.length > 100 || references.length > 500 || generations.length > 500) return null;
-    if (!projects.every(validProject) || !states.every(validState) || !references.every(validReference) || !generations.every(validGeneration)) return null;
+    if (projects.length > 100 || states.length > 100 || references.length > 500 || generations.length > 500 || insights.length > 1_000 || insightProjectIds.length > 100) return null;
+    if (!projects.every(validProject) || !states.every(validState) || !references.every(validReference) || !generations.every(validGeneration) || !insights.every(validInsight)) return null;
     if (referenceProjectId !== null && !validId(referenceProjectId)) return null;
     if (generationProjectId !== null && !validId(generationProjectId)) return null;
-    return { projects, states, references, generations, referenceProjectId, generationProjectId } as {
+    if (!insightProjectIds.every(validId)) return null;
+    return { projects, states, references, generations, insights, insightProjectIds, referenceProjectId, generationProjectId } as {
       projects: ProjectInput[];
       states: StateInput[];
       references: ReferenceInput[];
       generations: GenerationInput[];
+      insights: InsightInput[];
+      insightProjectIds: string[];
       referenceProjectId: string | null;
       generationProjectId: string | null;
     };
@@ -181,6 +210,12 @@ function ensureSchema(db: D1Database) {
       PRIMARY KEY (owner_key, id)
     )`),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_cloud_generation_owner_project_updated ON cloud_generation (owner_key, project_id, updated_at)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS cloud_agent_insight (
+      owner_key TEXT NOT NULL, id TEXT NOT NULL, project_id TEXT NOT NULL,
+      insight_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY (owner_key, id)
+    )`),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_cloud_agent_insight_owner_project_updated ON cloud_agent_insight (owner_key, project_id, updated_at)"),
     db.prepare("PRAGMA optimize"),
   ]).then(async () => {
     const columns = await db.prepare("PRAGMA table_info(cloud_project_state)").all<{ name: string }>();
@@ -212,6 +247,43 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
   const body = await readSyncBody(request);
   if (!body) return json({ error: "Invalid cloud workspace payload." }, 400);
 
+  const [existingStateRows, existingInsightRows] = await Promise.all([
+    env.DB.prepare("SELECT project_id, folders_json, iteration_json, updated_at FROM cloud_project_state WHERE owner_key = ? LIMIT 100")
+      .bind(ownerKey).all<Record<string, unknown>>(),
+    env.DB.prepare("SELECT id, project_id, insight_json, updated_at FROM cloud_agent_insight WHERE owner_key = ? LIMIT 1000")
+      .bind(ownerKey).all<Record<string, unknown>>(),
+  ]);
+  const existingStateByProject = new Map(existingStateRows.results.map((row) => [String(row.project_id), row]));
+  const states = body.states.map((state) => {
+    const existing = existingStateByProject.get(state.projectId);
+    if (!existing) return state;
+    let remoteFolders: unknown[] = [];
+    let remoteBrief: unknown = null;
+    try { remoteFolders = JSON.parse(String(existing.folders_json)); } catch { /* use safe empty folders */ }
+    try { remoteBrief = existing.iteration_json ? JSON.parse(String(existing.iteration_json)) : null; } catch { /* use safe empty brief */ }
+    const existingUpdatedAt = String(existing.updated_at || "");
+    const folders = state.updatedAt > existingUpdatedAt
+      ? state.folders
+      : state.updatedAt < existingUpdatedAt
+        ? remoteFolders
+        : stableStringify(state.folders) >= stableStringify(remoteFolders) ? state.folders : remoteFolders;
+    return {
+      ...state,
+      folders,
+      iterationBrief: mergeIterationBrief(remoteBrief, state.iterationBrief),
+      updatedAt: state.updatedAt >= existingUpdatedAt ? state.updatedAt : existingUpdatedAt,
+    };
+  });
+  const existingInsightById = new Map(existingInsightRows.results.map((row) => [String(row.id), row]));
+  const insights = body.insights.map((input) => {
+    const existing = existingInsightById.get(input.id);
+    let remoteInsight: unknown = null;
+    try { remoteInsight = existing ? JSON.parse(String(existing.insight_json)) : null; } catch { /* merge with incoming only */ }
+    const insight = mergeAgentInsight(remoteInsight, input.insight) || input.insight;
+    const existingUpdatedAt = String(existing?.updated_at || "");
+    return { ...input, insight, updatedAt: input.updatedAt >= existingUpdatedAt ? input.updatedAt : existingUpdatedAt };
+  });
+
   const statements: D1Statement[] = [];
   body.projects.forEach((project) => statements.push(env.DB.prepare(`INSERT INTO cloud_project
     (owner_key, id, name, mode, created_at, updated_at, deleted_at)
@@ -223,7 +295,7 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
       OR (cloud_project.deleted_at IS NOT NULL AND excluded.updated_at > cloud_project.deleted_at)
     )`)
     .bind(ownerKey, project.id, project.name, project.mode, project.createdAt, project.updatedAt, project.deletedAt)));
-  body.states.forEach((state) => statements.push(env.DB.prepare(`INSERT INTO cloud_project_state
+  states.forEach((state) => statements.push(env.DB.prepare(`INSERT INTO cloud_project_state
     (owner_key, project_id, folders_json, iteration_json, updated_at) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(owner_key, project_id) DO UPDATE SET
       folders_json = excluded.folders_json, iteration_json = excluded.iteration_json, updated_at = excluded.updated_at
@@ -261,6 +333,12 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
       ownerKey, generation.id, generation.projectId, JSON.stringify(generation.metadata),
       generation.createdAt, generation.updatedAt,
     )));
+  insights.forEach((input) => statements.push(env.DB.prepare(`INSERT INTO cloud_agent_insight
+    (owner_key, id, project_id, insight_json, updated_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(owner_key, id) DO UPDATE SET
+      project_id = excluded.project_id, insight_json = excluded.insight_json, updated_at = excluded.updated_at
+    WHERE excluded.updated_at >= cloud_agent_insight.updated_at`)
+    .bind(ownerKey, input.id, input.projectId, JSON.stringify(input.insight), input.updatedAt)));
   await runBatches(env.DB, statements);
 
   const [projectRows, stateRows, deletedProjectRows, purgedProjectRows] = await Promise.all([
@@ -300,6 +378,12 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
     generations = activeRows.results;
     deletedGenerations = deletedRows.results;
   }
+  const requestedInsightProjects = new Set(body.insightProjectIds);
+  const insightRows = requestedInsightProjects.size
+    ? (await env.DB.prepare("SELECT id, project_id, insight_json, updated_at FROM cloud_agent_insight WHERE owner_key = ? ORDER BY updated_at DESC LIMIT 1000")
+      .bind(ownerKey).all<Record<string, unknown>>()).results
+      .filter((row) => requestedInsightProjects.has(String(row.project_id)))
+    : [];
 
   return json({
     projects: projectRows.results.map((row) => ({
@@ -329,6 +413,12 @@ async function syncWorkspace(request: Request, env: CloudWorkspaceEnv, ownerKey:
       updatedAt: row.updated_at,
     })),
     deletedGenerations: deletedGenerations.map((row) => ({ id: row.id, projectId: row.project_id, deletedAt: row.deleted_at })),
+    insights: insightRows.map((row) => ({
+      id: row.id,
+      projectId: row.project_id,
+      insight: (() => { try { return JSON.parse(String(row.insight_json)); } catch { return {}; } })(),
+      updatedAt: row.updated_at,
+    })),
   });
 }
 
@@ -377,6 +467,7 @@ async function deleteProject(request: Request, env: CloudWorkspaceEnv, ownerKey:
     env.DB.prepare("DELETE FROM cloud_reference WHERE owner_key = ? AND project_id = ?").bind(ownerKey, projectId),
     env.DB.prepare("DELETE FROM cloud_generation WHERE owner_key = ? AND project_id = ?").bind(ownerKey, projectId),
     env.DB.prepare("DELETE FROM cloud_project_state WHERE owner_key = ? AND project_id = ?").bind(ownerKey, projectId),
+    env.DB.prepare("DELETE FROM cloud_agent_insight WHERE owner_key = ? AND project_id = ?").bind(ownerKey, projectId),
     env.DB.prepare("DELETE FROM agent_memory WHERE owner_key = ? AND scope = 'project' AND project_key = ?").bind(ownerKey, projectId),
     env.DB.prepare("DELETE FROM agent_message WHERE owner_key = ? AND project_key = ?").bind(ownerKey, projectId),
     env.DB.prepare("DELETE FROM agent_checkpoint WHERE owner_key = ? AND project_key = ?").bind(ownerKey, projectId),

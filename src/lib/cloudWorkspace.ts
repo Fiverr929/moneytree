@@ -1,6 +1,8 @@
 "use client";
 
 import DB from "@/lib/db";
+import { mergeAgentInsight, mergeIterationBrief, stableStringify } from "@/lib/cloudSyncMerge";
+import { isAgentInsight } from "@/lib/brief-agent/insightPolicy";
 
 type LocalProject = {
   id: number;
@@ -76,6 +78,19 @@ type CloudGeneration = {
   createdAt: string;
   updatedAt: string;
 };
+type LocalInsight = Record<string, unknown> & {
+  id: string;
+  projectId: number;
+  updatedAt: string;
+  cloudUpdatedAt?: string;
+  cloudSyncedAt?: string | null;
+};
+type CloudInsight = {
+  id: string;
+  projectId: string;
+  insight: Record<string, unknown>;
+  updatedAt: string;
+};
 
 type SyncResponse = {
   projects: CloudProject[];
@@ -86,6 +101,7 @@ type SyncResponse = {
   deletedReferences: Array<{ id: string; projectId: string; deletedAt: string }>;
   generations: CloudGeneration[];
   deletedGenerations: Array<{ id: string; projectId: string; deletedAt: string }>;
+  insights?: CloudInsight[];
 };
 
 type SyncTombstone = {
@@ -127,7 +143,14 @@ function validSyncResponse(value: unknown): value is SyncResponse {
     && Array.isArray(body.references)
     && Array.isArray(body.deletedReferences)
     && Array.isArray(body.generations)
-    && Array.isArray(body.deletedGenerations);
+    && Array.isArray(body.deletedGenerations)
+    && (body.insights === undefined || (Array.isArray(body.insights) && body.insights.every((entry) => (
+      Boolean(entry) && typeof entry === "object"
+      && typeof (entry as CloudInsight).id === "string"
+      && typeof (entry as CloudInsight).projectId === "string"
+      && typeof (entry as CloudInsight).updatedAt === "string"
+      && isAgentInsight((entry as CloudInsight).insight)
+    ))));
 }
 
 async function postSync(payload: Record<string, unknown>) {
@@ -243,15 +266,31 @@ async function applyWorkspaceResponse(body: SyncResponse, localProjects: LocalPr
     const project = localByCloudId.get(state.projectId);
     if (!project) continue;
     const localState = await DB.moduleState.get(project.id) as { iterationBrief?: unknown } | undefined;
-    const localBrief = localState?.iterationBrief as { version?: number } | undefined;
-    const remoteBrief = state.iterationBrief as { version?: number } | null | undefined;
-    const iterationBrief = remoteBrief && Number(remoteBrief.version || 0) >= Number(localBrief?.version || 0)
-      ? remoteBrief
-      : localBrief;
+    const iterationBrief = mergeIterationBrief(localState?.iterationBrief, state.iterationBrief);
+    const normalizedRemoteBrief = state.iterationBrief && typeof state.iterationBrief === "object"
+      ? { ...(state.iterationBrief as Record<string, unknown>), projectId: 0 }
+      : state.iterationBrief || null;
+    const normalizedMergedBrief = iterationBrief ? { ...iterationBrief, projectId: 0 } : null;
+    const serverHasMergedBrief = stableStringify(normalizedMergedBrief) === stableStringify(normalizedRemoteBrief);
     await DB.moduleState.put(project.id, {
       folders: state.folders,
-      ...(iterationBrief ? { iterationBrief } : {}),
+      ...(iterationBrief ? { iterationBrief: { ...iterationBrief, projectId: project.id } } : {}),
       cloudUpdatedAt: state.updatedAt,
+      cloudSyncedAt: serverHasMergedBrief ? syncedAt : null,
+    }, true);
+  }
+
+  for (const remote of body.insights || []) {
+    const project = localByCloudId.get(remote.projectId);
+    if (!project) continue;
+    const local = await DB.agentInsights.get(remote.id) as LocalInsight | undefined;
+    const merged = mergeAgentInsight(local, remote.insight);
+    if (!merged) continue;
+    await DB.agentInsights.put({
+      ...merged,
+      id: remote.id,
+      projectId: project.id,
+      cloudUpdatedAt: remote.updatedAt,
       cloudSyncedAt: syncedAt,
     }, true);
   }
@@ -264,6 +303,12 @@ async function syncWorkspaceProjectsNow() {
     project,
     state: await DB.moduleState.get(project.id) as { folders?: unknown[]; iterationBrief?: unknown; cloudUpdatedAt?: string; cloudSyncedAt?: string | null } | undefined,
   })));
+  const insights = await DB.agentInsights.getAll() as LocalInsight[];
+  const activeProjectById = new Map(projects.filter((project) => !project.deletedAt).map((project) => [project.id, project]));
+  const pendingInsights = insights.filter((insight) => {
+    const project = activeProjectById.get(insight.projectId);
+    return project && (!insight.cloudSyncedAt || (insight.cloudUpdatedAt || insight.updatedAt) > insight.cloudSyncedAt);
+  });
   const pendingProjects = projects.filter((project) => (
     !project.cloudSyncedAt || (project.cloudUpdatedAt || project.date_modified) > project.cloudSyncedAt
   ));
@@ -283,9 +328,24 @@ async function syncWorkspaceProjectsNow() {
     states: pendingStates.map(({ project, state }) => ({
       projectId: project.cloudId,
       folders: state?.folders || [],
-      iterationBrief: state?.iterationBrief,
+      iterationBrief: state?.iterationBrief && typeof state.iterationBrief === "object"
+        ? { ...(state.iterationBrief as Record<string, unknown>), projectId: 0 }
+        : state?.iterationBrief,
       updatedAt: state?.cloudUpdatedAt || project.cloudUpdatedAt || project.date_modified,
     })),
+    insights: pendingInsights.map((insight) => {
+      const project = activeProjectById.get(insight.projectId)!;
+      const payload = { ...insight, projectId: 0 };
+      delete payload.cloudUpdatedAt;
+      delete payload.cloudSyncedAt;
+      return {
+        id: insight.id,
+        projectId: project.cloudId,
+        insight: payload,
+        updatedAt: insight.cloudUpdatedAt || insight.updatedAt,
+      };
+    }),
+    insightProjectIds: [...new Set(projects.filter((project) => !project.deletedAt).map((project) => project.cloudId))],
     references: [],
     referenceProjectId: null,
     generations: [],
@@ -295,6 +355,7 @@ async function syncWorkspaceProjectsNow() {
   console.info("[cloud-sync]", {
     projectsUp: pendingProjects.length,
     statesUp: pendingStates.length,
+    insightsUp: pendingInsights.length,
     deletions: deletionCount,
     projectsDown: body.projects.length,
   });
@@ -484,6 +545,8 @@ async function syncCloudProjectNow(projectId: number) {
       };
     }),
     generationProjectId: identified.cloudId,
+    insights: [],
+    insightProjectIds: [],
   });
 
   for (const deletion of body.deletedReferences) {
