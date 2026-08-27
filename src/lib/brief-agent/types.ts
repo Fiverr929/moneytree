@@ -85,9 +85,36 @@ export type AgentMessage = {
     refCount?: number;
     previousPrompt?: string;
   };
+  scenePlan?: {
+    plan: ScenePlan;
+    model: string;
+    status: "pending" | "executing" | "completed" | "rejected" | "failed";
+  };
   toolProposal?: AgentActionProposal;
   context?: {
     refCount: number;
+  };
+  media?: Array<{
+    kind: "reference" | "generation";
+    imageId: string;
+    label: string;
+    event: "uploaded" | "mentioned" | "generated";
+  }>;
+  trace?: {
+    kind: "generation";
+    status: "completed" | "blocked" | "failed";
+    model: string;
+    aspectRatio: string;
+    resolution: string | null;
+    thinkingLevel: string | null;
+    durationMs: number;
+    prompt: string;
+    resultCount: number;
+    references: Array<{
+      imageId: string;
+      label: string;
+      role: string;
+    }>;
   };
 };
 
@@ -216,6 +243,98 @@ export type AgentMemoryItem = {
 
 export type BriefAgentMemory = Pick<AgentMemoryItem, "id" | "scope" | "kind" | "text" | "confidence" | "pinned">;
 
+export type BriefBoardType =
+  | "MOOD"
+  | "LOOKBOOK"
+  | "WORLD"
+  | "CUSTOM"
+  | "CHARACTER"
+  | "SETTING"
+  | "OBJECT"
+  | "CREATURE"
+  | "WARDROBE"
+  | "TREATMENT";
+
+export type VisualBibleRules = {
+  preserve: string[];
+  flexible: string[];
+  avoid: string[];
+  unknown: string[];
+};
+
+export type VisualBible = {
+  id: string;
+  version: number;
+  status: "draft" | "approved" | "stale";
+  sourceFingerprint: string;
+  summary: string;
+  rules: VisualBibleRules;
+  draftedAt: string;
+  approvedAt?: string;
+};
+
+export type BriefBoardContext = {
+  id: string;
+  type: BriefBoardType;
+  name: string;
+  purpose: string;
+  active: boolean;
+  sourceFingerprint: string;
+  images: Array<{
+    imageId: string;
+    label: string;
+    visualRead: string;
+  }>;
+  visualBible?: VisualBible;
+};
+
+export type VisualBibleDraftRequest = {
+  board: BriefBoardContext;
+  previous?: VisualBible | null;
+};
+
+export type VisualBibleDraftResponse = {
+  bible: VisualBible;
+  model: string;
+};
+
+export type ScenePlanShot = {
+  index: number;
+  title: string;
+  purpose: string;
+  action: string;
+  camera: string;
+  continuity: string[];
+  prompt: string;
+};
+
+export type ScenePlan = {
+  id: string;
+  title: string;
+  intent: string;
+  sourcePrompt: string;
+  shotCount: number;
+  continuity: {
+    subject: string[];
+    world: string[];
+    style: string[];
+    progression: string;
+  };
+  shots: ScenePlanShot[];
+};
+
+export type ScenePlanRequest = {
+  prompt: string;
+  shotCount: number;
+  referenceSnapshot: BriefReferenceSnapshot;
+  briefBoards?: BriefBoardContext[];
+};
+
+export type ScenePlanResponse = {
+  plan: ScenePlan;
+  model: string;
+};
+
 export type BriefDraft = {
   id: string;
   status: "empty" | "needs_clarification" | "draft";
@@ -237,6 +356,7 @@ export type BriefDraft = {
 
 export type BriefAgentRequest = {
   referenceSnapshot: BriefReferenceSnapshot;
+  briefBoards?: BriefBoardContext[];
   messages: AgentMessage[];
   session?: BriefSessionState | null;
   run?: AgentRun | null;

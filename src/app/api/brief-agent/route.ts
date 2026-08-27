@@ -21,6 +21,7 @@ import type {
   AgentDecisionQuestion,
   AgentMessage,
   BriefAgentMemory,
+  BriefBoardContext,
   BriefAgentAction,
   BriefAgentRequest,
   BriefAgentResponse,
@@ -51,6 +52,8 @@ const MAX_VISUAL_FACTS = 5;
 const MAX_GENERATION_EVIDENCE = 6;
 const MAX_MEMORY_COUNT = 10;
 const MAX_MEMORY_CHARS = 360;
+const MAX_BRIEF_BOARDS = 12;
+const MAX_BRIEF_IMAGES = 24;
 
 const BRIEF_AGENT_RESPONSE_SCHEMA = {
   type: "object",
@@ -331,6 +334,51 @@ function validateMemories(value: unknown): BriefAgentMemory[] {
   });
 }
 
+function validateBriefBoards(value: unknown): BriefBoardContext[] {
+  if (!Array.isArray(value)) return [];
+  const types = new Set(["MOOD", "LOOKBOOK", "WORLD", "CUSTOM", "CHARACTER", "SETTING", "OBJECT", "CREATURE", "WARDROBE", "TREATMENT"]);
+  return value.slice(0, MAX_BRIEF_BOARDS).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const candidate = item as Partial<BriefBoardContext>;
+    if (typeof candidate.id !== "string" || typeof candidate.name !== "string") return [];
+    const type = String(candidate.type || "CUSTOM").toUpperCase();
+    return [{
+      id: trimText(candidate.id, 160),
+      type: (types.has(type) ? type : "CUSTOM") as BriefBoardContext["type"],
+      name: trimText(candidate.name, 120),
+      purpose: typeof candidate.purpose === "string" ? trimText(candidate.purpose, 500) : "",
+      active: candidate.active !== false,
+      sourceFingerprint: typeof candidate.sourceFingerprint === "string" ? trimText(candidate.sourceFingerprint, 200) : "",
+      images: Array.isArray(candidate.images) ? candidate.images.slice(0, MAX_BRIEF_IMAGES).flatMap((image) => (
+        image && typeof image.imageId === "string"
+          ? [{
+            imageId: trimText(image.imageId, 160),
+            label: trimText(String(image.label || "UNLABELED"), 120),
+            visualRead: typeof image.visualRead === "string" ? trimText(image.visualRead, MAX_REFERENCE_READ_CHARS) : "",
+          }]
+          : []
+      )) : [],
+      ...(candidate.visualBible?.status === "approved" ? {
+        visualBible: {
+          id: trimText(String(candidate.visualBible.id || ""), 160),
+          version: Math.max(1, Math.round(Number(candidate.visualBible.version) || 1)),
+          status: "approved" as const,
+          sourceFingerprint: trimText(String(candidate.visualBible.sourceFingerprint || ""), 200),
+          summary: trimText(String(candidate.visualBible.summary || ""), 900),
+          rules: {
+            preserve: stringArray(candidate.visualBible.rules?.preserve, []).slice(0, 12),
+            flexible: stringArray(candidate.visualBible.rules?.flexible, []).slice(0, 12),
+            avoid: stringArray(candidate.visualBible.rules?.avoid, []).slice(0, 12),
+            unknown: stringArray(candidate.visualBible.rules?.unknown, []).slice(0, 12),
+          },
+          draftedAt: String(candidate.visualBible.draftedAt || ""),
+          approvedAt: String(candidate.visualBible.approvedAt || ""),
+        },
+      } : {}),
+    }];
+  });
+}
+
 function validateIterationBrief(value: unknown): IterationBrief | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Partial<IterationBrief>;
@@ -389,6 +437,7 @@ function validateRequest(request: Request, value: unknown): BriefAgentRequest {
 
   return {
     referenceSnapshot: validateReferenceSnapshot(input.referenceSnapshot),
+    briefBoards: validateBriefBoards(input.briefBoards),
     messages: input.messages.slice(-MAX_MESSAGE_COUNT).map(validateMessage),
     session: validateSession(input.session),
     run: validateRun(input.run),
@@ -750,6 +799,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     visualRead: trimText(observation.visualRead, MAX_REFERENCE_READ_CHARS),
     readSource: observation.readSource || null,
   }));
+  const briefBoards = input.briefBoards || [];
   const generations = input.generations || [];
   const workspace = input.workspace || null;
   const memories = input.memories || [];
@@ -783,6 +833,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     "- appActions are proposed commands for CafeHTML itself, separate from the conversational action. The user must approve them before execution.",
     "- Emit an app action only when the latest user message explicitly requests that change. Never infer extra cleanup or organization.",
     "- Resolve image targets only from Current workspace. Use the exact imageId. If a target is ambiguous, ask and return no appActions.",
+    "- Composer mentions use @{LABEL}. Resolve each mention against Current workspace reference or folder labels before interpreting the instruction. Mentions select context; do not repeat the @{...} syntax in finalPrompt.",
     "- Allowed actions: project.rename, reference.rename, reference.set_role, reference.set_strength, reference.set_visibility, reference.move, reference.duplicate, folder.create.",
     "- Action shapes: {type:'project.rename',name}; {type:'reference.rename',imageId,name}; {type:'reference.set_role',imageId,role}; {type:'reference.set_strength',imageId,strength}; {type:'reference.set_visibility',imageId,visible}; {type:'reference.move',imageId,folder}; {type:'reference.duplicate',imageId}; {type:'folder.create',folder}.",
     "- role is SUBJECT, SCENE, STYLE, or UNASSIGNED. strength is 0..100. visible is boolean. folder is an exact folder id or null for root.",
@@ -802,6 +853,11 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     `Reference influence skill:\n${REFERENCE_INFLUENCE_SKILL}`,
     "First build a visual understanding from the references, then draft from that understanding. The raw user text is an instruction, not the final prompt.",
     "Treat the latest user instruction as the creative brief. Use reference data to support that brief, not to automatically freeze the image.",
+    "Active Brief Boards are project-level visual guidance, not mandatory direct image references. Interpret each board only within its declared type and purpose.",
+    "MOOD owns atmosphere, palette, lighting, texture, tone, and emotion. LOOKBOOK owns wardrobe, silhouette, materials, styling, pose, and physical presentation. WORLD and SETTING own environment and spatial anchors. CHARACTER and CREATURE own recurring identity. OBJECT and WARDROBE own their named design. TREATMENT owns rendering and camera language. CUSTOM owns only its stated purpose.",
+    "Only an approved, fingerprint-current Visual Bible is durable project canon. Apply its Preserve and Avoid rules strongly, treat Flexible as permission rather than a requirement, and never guess answers for Unknown.",
+    "Do not import people from MOOD or WORLD as requested characters, do not import locations from LOOKBOOK unless explicitly requested, and do not claim an unread board image supplied visual evidence.",
+    "When Brief guidance conflicts with the latest user instruction or a direct active reference, follow the latest instruction and the scoped direct reference. Merge relevant Brief evidence naturally into finalPrompt without naming boards or exposing board mechanics.",
     "Use compact visual understanding as visual evidence. The visual scan tells you what is visible; the influence value tells you how much that evidence should shape the composed finalPrompt.",
     "Use influence only for private prompt composition. Never include influence labels, strength, control axis, slider, percentage, or other UI mechanics in finalPrompt.",
     "Do not invent subject features, wardrobe details, stage elements, camera view, lighting, palette, or style details that are not requested by the user or present in the visual scan.",
@@ -825,6 +881,7 @@ function buildModelInstruction(input: BriefAgentRequest, fallback: BriefDraft) {
     `Iteration brief: ${JSON.stringify(iterationBrief)}`,
     `Compact visual understanding: ${JSON.stringify(visualUnderstanding)}`,
     `Compact reference reads: ${JSON.stringify(references)}`,
+    `Active Brief Boards: ${JSON.stringify(briefBoards)}`,
     `Recent generation evidence: ${JSON.stringify(generations)}`,
     `Recent conversation: ${JSON.stringify(conversation)}`,
     `Current workspace: ${JSON.stringify(workspace)}`,

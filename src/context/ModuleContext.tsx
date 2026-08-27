@@ -7,6 +7,8 @@ import { moduleFileForStorage } from "@/lib/moduleFiles";
 import { pruneProjectImages } from "@/lib/projectImageGc";
 import { MODULE_FOLDER_PRESETS } from "@/lib/moduleFolderPresets";
 import { syncCloudProject } from "@/lib/cloudWorkspace";
+import { normalizeBriefBoard, type BriefBoardType } from "@/lib/brief-agent/briefBoards";
+import type { VisualBible } from "@/lib/brief-agent/types";
 export type ModuleFile = {
   id: number;
   uuid: string;
@@ -32,6 +34,10 @@ export type ModuleFolder = {
   name: string;
   accent: string;
   locked?: boolean;
+  briefType?: BriefBoardType;
+  purpose?: string;
+  active?: boolean;
+  visualBible?: VisualBible;
 };
 
 const DEFAULT_FOLDERS: ModuleFolder[] = [];
@@ -175,7 +181,7 @@ export function ModuleProvider({ children }: { children: ReactNode }) {
         const nextFolders = [
           ...storedFolders,
           ...inferredFolders.filter((preset) => !storedFolders.some((folder) => folder.id === preset.id)),
-        ];
+        ].map((folder) => normalizeBriefBoard(folder));
         foldersHydratedProjectRef.current = activeProjectId;
         setFolders(nextFolders);
         const storedFiles = references as ModuleFile[];

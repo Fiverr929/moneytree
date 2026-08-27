@@ -434,6 +434,8 @@ export async function generate(payload: GenerationPayload, settings: GenerationS
         model: model?.label || 'any',
         cost: settings.costPerImage || 0,
         generated: true,
+        mode: payload.mode || "FRAME",
+        scene: payload.scene || null,
         moduleSnapshot: payload.moduleSnapshot || null,
         usedImages: payload.usedImages || [],
         executionSource: payload.executionSource || 'prompt-bar',
