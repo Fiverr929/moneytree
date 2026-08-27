@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, KeyboardEvent } from "
 import { useApp } from "@/context/AppContext";
 import { MODELS, useSettings } from "@/context/SettingsContext";
 import { useGallery, GalleryCell } from "@/context/GalleryContext";
-import { useModule } from "@/context/ModuleContext";
+import { useModule, type ModuleFile } from "@/context/ModuleContext";
 import { generate, storeGenerationDebug } from "@/lib/pipeline/api";
 import { collectPayload } from "@/lib/pipeline/prompt-builder";
 import DB from "@/lib/db";
@@ -17,14 +17,13 @@ import {
   hasCurrentReferenceRead,
   REFERENCE_READER_CONTRACT_VERSION,
 } from "@/lib/brief-agent/referenceFreshness";
-import { ReferenceReadRequestError, requestBriefAgent, requestGenerationInspection, requestReferenceRead } from "@/lib/brief-agent/client";
+import { ReferenceReadRequestError, requestBriefAgent, requestGenerationInspection, requestReferenceRead, requestScenePlan } from "@/lib/brief-agent/client";
 import { requestGenerationEvaluation, type AiGenerationEvaluation } from "@/lib/evaluationReview";
-import type { AgentActionProposalStatus, AgentAppAction, AgentAppEvent, AgentDecisionAnswer, AgentMemoryItem, AgentMemoryScope, AgentMessage, BriefAgentAction, BriefDraft, BriefGenerationEvidence, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot, CafeWorkspaceSnapshot } from "@/lib/brief-agent/types";
+import type { AgentActionProposalStatus, AgentAppAction, AgentAppEvent, AgentDecisionAnswer, AgentMemoryItem, AgentMemoryScope, AgentMessage, BriefAgentAction, BriefDraft, BriefGenerationEvidence, BriefReferenceImageInput, BriefReferenceRole, BriefReferenceSnapshot, CafeWorkspaceSnapshot, ScenePlan } from "@/lib/brief-agent/types";
 import { applyAgentAppAction, describeAgentAppAction } from "@/lib/brief-agent/appActions";
 import { canResolveAgentActionProposal, createAgentActionProposal, proposalStatusFromEvents, recoverInterruptedActionProposal, resolveAgentActionProposal } from "@/lib/brief-agent/actionApproval";
 import { moduleFileForStorage } from "@/lib/moduleFiles";
 import { getGenerationModuleImages } from "@/lib/pipeline/module-order";
-import { fingerprintReferenceValues } from "@/lib/brief-agent/referenceFingerprint";
 import {
   observeAgentGeneration,
   observeAgentReview,
@@ -51,6 +50,10 @@ import { cleanDecisionLabel, cleanReplyForDirections } from "@/lib/brief-agent/d
 import { useProjectDraft } from "@/hooks/useProjectDraft";
 import { iterationPreflight } from "@/lib/brief-agent/iterationBrief";
 import { persistConversationMessages, prepareConversationContext } from "@/lib/brief-agent/conversationContext";
+import ComposerPalette, { type ComposerPaletteItem } from "@/components/ComposerPalette";
+import { briefBoardVisionQueue, compileBriefBoardContext } from "@/lib/brief-agent/briefBoards";
+import { fingerprintReferenceValues } from "@/lib/brief-agent/referenceFingerprint";
+import { MODULE_FOLDER_PRESETS } from "@/lib/moduleFolderPresets";
 
 const PROMPT_DRAFT_STORAGE_KEY = "cafehtml-prompt-draft";
 const IMAGE_PROMPT_SETTINGS_KEY = "cafehtml-image-prompt-settings";
@@ -58,11 +61,16 @@ const REFERENCE_SNAPSHOT_CACHE_KEY = "cafehtml-brief-reference-cache-v4";
 const REFERENCE_SNAPSHOT_CACHE_LIMIT = 20;
 const REFERENCE_SNAPSHOT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AGENT_RUN_CLEARED_KEY = "cafehtml-agent-run-cleared";
+const AGENT_CONSOLE_HEIGHT_KEY = "cafehtml-agent-console-height";
+type ModuleQuickDestination = "SUBJECT" | "SCENE" | "STYLE" | "MOOD";
+const MODULE_QUICK_DESTINATIONS: ModuleQuickDestination[] = ["SUBJECT", "SCENE", "STYLE", "MOOD"];
 const GENERATION_VISION_CACHE_KEY = "cafehtml-generation-vision-cache-v2";
 const GENERATION_VISION_CACHE_LIMIT = 30;
 const GENERATE_COMMAND = "/Generate";
+const GENERATE_SCENE_COMMAND = "/generate-scene";
 const CANVAS_COMMANDS = [
   { value: GENERATE_COMMAND, label: "/generate", description: "Generate a frame" },
+  { value: GENERATE_SCENE_COMMAND, label: "/generate-scene", description: "Generate connected shots" },
   { value: "/undo", label: "/undo", description: "Undo the last change" },
   { value: "/status", label: "/status", description: "Show what is running" },
   { value: "/memory", label: "/memory", description: "Open memory, insights, and activity" },
@@ -75,6 +83,51 @@ const CANVAS_COMMANDS = [
 const DEFAULT_FRAME_RATIO = "1:1";
 const DEFAULT_FRAME_VARIATIONS = 1;
 const MAX_AGENT_QUEUE_LENGTH = 20;
+const TRANSCRIPT_PAGE_SIZE = 24;
+const LONG_CHAT_TEXT_LENGTH = 420;
+
+type ComposerToken = {
+  trigger: "/" | "@";
+  query: string;
+  start: number;
+  end: number;
+};
+
+function composerTokenAt(text: string, caret: number): ComposerToken | null {
+  const safeCaret = Math.max(0, Math.min(caret, text.length));
+  const beforeCaret = text.slice(0, safeCaret);
+  const match = beforeCaret.match(/(?:^|\s)([/@])([^\s/@]*)$/);
+  if (!match) return null;
+  const trigger = match[1] as "/" | "@";
+  const query = match[2] || "";
+  return {
+    trigger,
+    query,
+    start: safeCaret - query.length - 1,
+    end: safeCaret,
+  };
+}
+
+function CollapsibleChatText({ text, prefix = "", className = "agent-line" }: {
+  text: string;
+  prefix?: string;
+  className?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > LONG_CHAT_TEXT_LENGTH || text.split("\n").length > 7;
+  if (!isLong) return <div className={className}>{prefix}{text}</div>;
+
+  const preview = text.slice(0, 280).trimEnd();
+  const lineCount = text.split("\n").length;
+  return (
+    <div className={`agent-folded-text ${expanded ? "expanded" : ""}`}>
+      <div className={className}>{prefix}{expanded ? text : `${preview}…`}</div>
+      <button type="button" onClick={() => setExpanded((value) => !value)}>
+        {expanded ? "FOLD" : "OPEN FULL TEXT"} · {text.length.toLocaleString()} CHARS{lineCount > 1 ? ` · ${lineCount} LINES` : ""}
+      </button>
+    </div>
+  );
+}
 
 type ReferenceSnapshotCacheEntry = {
   sourceFingerprint: string;
@@ -204,6 +257,13 @@ function parseGenerateCommand(text: string) {
   return trimmed.slice(commandMatch[0].length).trim();
 }
 
+function parseGenerateSceneCommand(text: string) {
+  const trimmed = text.trim();
+  const commandMatch = trimmed.match(/^\/generate-scene(?:\s+|$)/i);
+  if (!commandMatch) return null;
+  return trimmed.slice(commandMatch[0].length).trim();
+}
+
 function readGenerationVisionCache(): GenerationVisionCacheEntry[] {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(GENERATION_VISION_CACHE_KEY) || "[]");
@@ -275,6 +335,9 @@ export default function PromptBar() {
   
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [moduleQuickMenuOpen, setModuleQuickMenuOpen] = useState(false);
+  const [moduleQuickDestination, setModuleQuickDestination] = useState<ModuleQuickDestination>("SUBJECT");
+  const moduleQuickRef = useRef<HTMLDivElement>(null);
   const [activeGenerationCount, setActiveGenerationCount] = useState(0);
   const [generationError, setGenerationError] = useState("");
   
@@ -323,6 +386,10 @@ export default function PromptBar() {
   const [referenceSnapshot, setReferenceSnapshot] = useState(() => createReferenceSnapshot([]));
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
+  const [composerCaret, setComposerCaret] = useState(0);
+  const [transcriptLimit, setTranscriptLimit] = useState(TRANSCRIPT_PAGE_SIZE);
+  const [agentConsoleHeight, setAgentConsoleHeight] = useState<number | null>(null);
+  const [mediaMenuKey, setMediaMenuKey] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const promptBarRef = useRef<HTMLDivElement>(null);
   const agentConsoleScrollRef = useRef<HTMLDivElement>(null);
@@ -340,7 +407,9 @@ export default function PromptBar() {
   const moduleFilesRef = useRef(moduleContext.files);
   const moduleFoldersRef = useRef(moduleContext.folders);
   const referenceFingerprint = fingerprintModuleFiles(moduleContext.files);
+  const briefBoards = compileBriefBoardContext(moduleContext.folders, moduleContext.files);
   const referenceFingerprintRef = useRef(referenceFingerprint);
+  const consoleResizeRef = useRef<{ startY: number; startHeight: number; currentHeight: number } | null>(null);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
@@ -351,6 +420,7 @@ export default function PromptBar() {
     setMemoryPanelMemories([]);
     setMemoryPanelInsights([]);
     setMemoryPanelEvents([]);
+    setTranscriptLimit(TRANSCRIPT_PAGE_SIZE);
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -361,6 +431,40 @@ export default function PromptBar() {
   useEffect(() => {
     moduleFoldersRef.current = moduleContext.folders;
   }, [moduleContext.folders]);
+
+  useEffect(() => {
+    const savedHeight = Number(window.localStorage.getItem(AGENT_CONSOLE_HEIGHT_KEY));
+    if (Number.isFinite(savedHeight) && savedHeight >= 220) setAgentConsoleHeight(savedHeight);
+  }, []);
+
+  useEffect(() => {
+    const handleTimelineEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        projectId?: number | null;
+        type?: string;
+        imageId?: string;
+        label?: string;
+        createdAt?: string;
+      }>).detail;
+      if (detail?.type !== "reference.uploaded" || !detail.imageId || detail.projectId !== activeProjectIdRef.current) return;
+      const messageId = `timeline:upload:${detail.imageId}`;
+      setAgentMessages((messages) => messages.some((message) => message.id === messageId) ? messages : [...messages, {
+        id: messageId,
+        role: "system",
+        text: "Reference added",
+        createdAt: detail.createdAt || new Date().toISOString(),
+        media: [{
+          kind: "reference",
+          imageId: detail.imageId!,
+          label: detail.label || "UNLABELED",
+          event: "uploaded",
+        }],
+      }]);
+      setAgentConsoleOpen(true);
+    };
+    window.addEventListener("cafehtml:timeline-event", handleTimelineEvent);
+    return () => window.removeEventListener("cafehtml:timeline-event", handleTimelineEvent);
+  }, []);
 
   useEffect(() => {
     agentMessagesRef.current = agentMessages;
@@ -410,9 +514,13 @@ export default function PromptBar() {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setDropdownOpen(false);
       }
+      if (moduleQuickRef.current && !moduleQuickRef.current.contains(e.target as Node)) {
+        setModuleQuickMenuOpen(false);
+      }
       if (promptBarRef.current && !promptBarRef.current.contains(e.target as Node)) {
         setAgentConsoleOpen(false);
       }
+      if (!(e.target as HTMLElement).closest(".agent-media-chip")) setMediaMenuKey(null);
     };
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
@@ -420,8 +528,16 @@ export default function PromptBar() {
 
   useEffect(() => {
     document.body.classList.toggle("agent-console-open", agentConsoleOpen);
-    return () => document.body.classList.remove("agent-console-open");
-  }, [agentConsoleOpen]);
+    if (agentConsoleHeight) {
+      document.body.style.setProperty("--agent-console-user-height", `${agentConsoleHeight}px`);
+    } else {
+      document.body.style.removeProperty("--agent-console-user-height");
+    }
+    return () => {
+      document.body.classList.remove("agent-console-open");
+      document.body.style.removeProperty("--agent-console-user-height");
+    };
+  }, [agentConsoleHeight, agentConsoleOpen]);
 
   useEffect(() => {
     if (!agentConsoleOpen) return;
@@ -490,33 +606,106 @@ export default function PromptBar() {
     }
   }, []);
 
-  const commandQuery = promptText.startsWith("/") ? promptText.split(/\s/, 1)[0].toLowerCase() : "";
-  const filteredCommands = commandQuery
-    ? CANVAS_COMMANDS.filter((command) => command.value.toLowerCase().startsWith(commandQuery))
-    : CANVAS_COMMANDS;
+  const composerToken = composerTokenAt(promptText, composerCaret);
+  const commandItems: ComposerPaletteItem[] = CANVAS_COMMANDS.map((command) => ({
+    id: `command:${command.value.toLowerCase()}`,
+    value: command.value,
+    label: command.label,
+    description: command.description,
+    group: "COMMANDS",
+    meta: "CLI",
+  }));
+  const mentionItems: ComposerPaletteItem[] = [
+    ...moduleContext.files.map((file) => ({
+      id: `reference:${file.uuid || file.id}`,
+      value: `@{${file.label || file.name || "UNLABELED"}}`,
+      label: file.label || file.name || "UNLABELED",
+      description: file.folder ? `IMAGE IN ${file.folder}` : "ROOT MODULE IMAGE",
+      group: "MODULE IMAGES" as const,
+      thumbnail: file.url || undefined,
+      meta: `${String(file.mode || "REF").toUpperCase()} · ${file.eye === false ? "HIDDEN" : "ACTIVE"}`,
+    })),
+    ...moduleContext.folders.map((folder) => ({
+      id: `folder:${folder.id}`,
+      value: `@{${folder.name}}`,
+      label: folder.name,
+      description: "MODULE IMAGE COLLECTION",
+      group: "MODULE FOLDERS" as const,
+      meta: `${moduleContext.files.filter((file) => file.folder === folder.id).length} IMAGES`,
+    })),
+  ];
+  const paletteItems = (composerToken?.trigger === "/" ? commandItems : mentionItems)
+    .filter((item) => !composerToken?.query || `${item.label} ${item.description}`.toLowerCase().includes(composerToken.query.toLowerCase()))
+    .slice(0, 18);
 
   useEffect(() => {
-    const isLeadingCommand = promptText.startsWith("/") && !promptText.includes(" ");
-    const nextCommandMenuOpen = isLeadingCommand && filteredCommands.length > 0;
+    const nextCommandMenuOpen = Boolean(composerToken?.trigger && paletteItems.length > 0);
     setCommandMenuOpen(nextCommandMenuOpen);
-    if (nextCommandMenuOpen) setAgentConsoleOpen(false);
-    setCommandIndex((index) => Math.min(index, Math.max(0, filteredCommands.length - 1)));
-  }, [filteredCommands.length, promptText]);
+    setCommandIndex((index) => Math.min(index, Math.max(0, paletteItems.length - 1)));
+  }, [composerToken?.end, composerToken?.query, composerToken?.trigger, paletteItems.length]);
 
-  const setPromptTextAndFocus = (nextPrompt: string) => {
+  const insertPaletteItem = (item: ComposerPaletteItem) => {
+    if (!composerToken) return;
+    const nextPrompt = `${promptText.slice(0, composerToken.start)}${item.value} ${promptText.slice(composerToken.end)}`;
+    const nextCaret = composerToken.start + item.value.length + 1;
     setPromptText(nextPrompt);
+    setComposerCaret(nextCaret);
+    setCommandMenuOpen(false);
     window.requestAnimationFrame(() => {
-      const input = inputRef.current;
-      if (!input) return;
-      input.focus();
-      input.setSelectionRange(nextPrompt.length, nextPrompt.length);
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(nextCaret, nextCaret);
     });
   };
 
-  const insertCanvasCommand = (command: string) => {
-    setPromptTextAndFocus(`${command} `);
-    setCommandMenuOpen(false);
-    setAgentConsoleOpen(false);
+  const mentionedMediaForText = (text: string): NonNullable<AgentMessage["media"]> => {
+    const labels = [...text.matchAll(/@\{([^}]+)\}/g)].map((match) => match[1].trim().toLowerCase());
+    const seen = new Set<string>();
+    return labels.flatMap((label) => {
+      const file = moduleFilesRef.current.find((candidate) => (
+        (candidate.label || candidate.name || "").trim().toLowerCase() === label
+      ));
+      if (!file?.uuid || seen.has(file.uuid)) return [];
+      seen.add(file.uuid);
+      return [{
+        kind: "reference" as const,
+        imageId: file.uuid,
+        label: file.label || file.name || "UNLABELED",
+        event: "mentioned" as const,
+      }];
+    });
+  };
+
+  const handleConsoleResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    consoleResizeRef.current = {
+      startY: event.clientY,
+      startHeight: agentConsoleScrollRef.current?.parentElement?.getBoundingClientRect().height || 320,
+      currentHeight: agentConsoleScrollRef.current?.parentElement?.getBoundingClientRect().height || 320,
+    };
+  };
+
+  const handleConsoleResizeMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!consoleResizeRef.current) return;
+    const maximum = Math.max(240, Math.min(620, window.innerHeight - 190));
+    const nextHeight = Math.round(Math.min(maximum, Math.max(220,
+      consoleResizeRef.current.startHeight + event.clientY - consoleResizeRef.current.startY,
+    )));
+    consoleResizeRef.current.currentHeight = nextHeight;
+    setAgentConsoleHeight(nextHeight);
+  };
+
+  const handleConsoleResizeEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!consoleResizeRef.current) return;
+    const finalHeight = consoleResizeRef.current.currentHeight;
+    consoleResizeRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    window.localStorage.setItem(AGENT_CONSOLE_HEIGHT_KEY, String(finalHeight));
+  };
+
+  const resetConsoleHeight = () => {
+    setAgentConsoleHeight(null);
+    window.localStorage.removeItem(AGENT_CONSOLE_HEIGHT_KEY);
   };
 
   useEffect(() => {
@@ -873,6 +1062,31 @@ export default function PromptBar() {
           setGenerationError(err.message || "Image generation failed.");
         }
       }, moduleContext.files);
+      const generatedMedia: NonNullable<AgentMessage["media"]> = Array.from(readyCells.values()).flatMap((cell) => {
+        const imageId = cell.uuid || String(cell.id || "");
+        return imageId ? [{
+          kind: "generation" as const,
+          imageId,
+          label: `Generation ${cell.id || readyCells.size}`,
+          event: "generated" as const,
+        }] : [];
+      });
+      const generationTrace: NonNullable<AgentMessage["trace"]> = {
+        kind: "generation",
+        status: generatedMedia.length ? "completed" : blockedIds.size > 0 && failedIds.size === 0 ? "blocked" : "failed",
+        model: fullSettings.activeModel.label,
+        aspectRatio: String(fullSettings.aspectRatio || "1:1"),
+        resolution: fullSettings.activeResolution || null,
+        thinkingLevel: fullSettings.activeThinkingLevel || null,
+        durationMs: Math.max(0, Date.now() - Date.parse(debugStartedAt)),
+        prompt: executionPrompt,
+        resultCount: generatedMedia.length,
+        references: (payload.usedImages || []).map((reference) => ({
+          imageId: reference.uuid,
+          label: reference.label || "UNLABELED",
+          role: reference.role || "REFERENCE",
+        })),
+      };
       if (stagedPromptArtifact && approvedRun) {
         const outcome = readyIds.size > 0
           ? "succeeded"
@@ -898,6 +1112,17 @@ export default function PromptBar() {
           role: "system",
           text: message,
           createdAt: new Date().toISOString(),
+          media: generatedMedia,
+          trace: generationTrace,
+        }]);
+      } else if (generatedMedia.length) {
+        setAgentMessages((messages) => [...messages, {
+          id: crypto.randomUUID(),
+          role: "system",
+          text: `Generated ${generatedMedia.length} image${generatedMedia.length === 1 ? "" : "s"}`,
+          createdAt: new Date().toISOString(),
+          media: generatedMedia,
+          trace: generationTrace,
         }]);
       }
     } catch (error) {
@@ -958,6 +1183,36 @@ export default function PromptBar() {
       return changed ? next : current;
     });
   }, [activeProjectId, setModuleFiles]);
+
+  useEffect(() => {
+    const unreadBoardFiles = briefBoardVisionQueue(moduleContext.folders, moduleContext.files).slice(0, 6);
+    if (!unreadBoardFiles.length) return;
+    const controller = new AbortController();
+    const sourceFingerprint = fingerprintReferenceValues(unreadBoardFiles.map((file) => [
+      file.uuid || file.id,
+      file.url,
+      file.label || file.name,
+      file.folder || "",
+    ]));
+
+    void requestReferenceRead({
+      sourceFingerprint,
+      images: unreadBoardFiles.map((file) => ({
+        imageId: file.uuid || String(file.id),
+        role: "UNASSIGNED",
+        label: file.label || file.name || "UNLABELED",
+        strength: 50,
+        dataUrl: file.url,
+      })),
+    }, settings.geminiApiKey, controller.signal).then((response) => {
+      applyReferenceSnapshotToModules(response.snapshot);
+    }).catch((error) => {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      console.warn("Brief Board vision reading deferred", error);
+    });
+
+    return () => controller.abort();
+  }, [applyReferenceSnapshotToModules, moduleContext.files, moduleContext.folders, settings.geminiApiKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1137,6 +1392,102 @@ export default function PromptBar() {
       } : null,
     };
     });
+  };
+
+  const executeScenePlan = async (messageId: string, plan: ScenePlan, model: string) => {
+    if (!activeProjectId) return;
+    const fullSettings = { ...settings, aspectRatio: frameRatio, variation: 1, projectId: activeProjectId };
+    const readyCells: GalleryCell[] = [];
+    let completed = 0;
+    setAgentMessages((messages) => messages.map((message) => message.id === messageId && message.scenePlan
+      ? { ...message, scenePlan: { ...message.scenePlan, status: "executing" } }
+      : message));
+    setActiveGenerationCount((count) => count + 1);
+    setGenerationActivity({ completed: 0, total: plan.shotCount, stage: "Starting approved scene" });
+    try {
+      for (const shot of plan.shots) {
+        setGenerationActivity({ completed, total: plan.shotCount, stage: `Generating shot ${shot.index}: ${shot.title}` });
+        const payload = {
+          ...collectPayload(shot.prompt, moduleContext.files, fullSettings),
+          mode: "SCENE",
+          executionSource: "approved-scene-plan",
+          effectivePrompt: shot.prompt,
+          scene: {
+            sceneId: plan.id, sceneTitle: plan.title, sourcePrompt: plan.sourcePrompt,
+            shotIndex: shot.index, shotCount: plan.shotCount, shotTitle: shot.title,
+            purpose: shot.purpose, action: shot.action, camera: shot.camera,
+            continuity: shot.continuity, sceneContinuity: plan.continuity, plannerModel: model,
+          },
+        };
+        await generate(payload, fullSettings, {
+          onStart: () => {},
+          onLoadingIds: (ids) => ids.forEach((id) => gallery.addLoading(id, String(payload.settings.aspectRatio || "1:1"), "SCENE", activeProjectId)),
+          onVariationReady: (_dataUrl, loadingId, cellData) => {
+            const cell = { ...cellData, project_id: activeProjectId } as GalleryCell;
+            readyCells.push(cell);
+            gallery.resolveLoading(loadingId, cell);
+          },
+          onVariationBlocked: (loadingId, statusLabel) => gallery.blockLoading(loadingId, statusLabel),
+          onVariationFailed: (loadingId, retryFn, statusLabel) => gallery.failLoading(loadingId, retryFn, statusLabel),
+          onGenerationError: (ids, statusLabel) => ids.forEach((id) => gallery.failLoading(id, undefined, statusLabel)),
+          onComplete: () => {},
+          onError: (error) => console.error(`Scene shot ${shot.index} failed`, error),
+        }, moduleContext.files);
+        completed += 1;
+        setGenerationActivity({ completed, total: plan.shotCount, stage: "Building sequence" });
+      }
+      const media: NonNullable<AgentMessage["media"]> = readyCells.map((cell, index) => ({
+        kind: "generation", imageId: cell.uuid || String(cell.id), label: `Shot ${index + 1}`, event: "generated",
+      }));
+      setAgentMessages((messages) => messages.map((message) => message.id === messageId && message.scenePlan
+        ? { ...message, scenePlan: { ...message.scenePlan, status: "completed" }, media, text: `SCENE COMPLETE · ${readyCells.length}/${plan.shotCount} SHOTS` }
+        : message));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Scene generation failed.";
+      setGenerationError(message);
+      setAgentMessages((messages) => messages.map((entry) => entry.id === messageId && entry.scenePlan
+        ? { ...entry, scenePlan: { ...entry.scenePlan, status: "failed" }, text: `SCENE ERROR · ${message}` }
+        : entry));
+    } finally {
+      setActiveGenerationCount((count) => Math.max(0, count - 1));
+      setGenerationActivity(null);
+    }
+  };
+
+  const handleGenerateScene = async () => {
+    if (!activeProjectId) return;
+    const trimmed = promptText.trim();
+    const scenePrompt = parseGenerateSceneCommand(trimmed);
+    if (scenePrompt === null || !scenePrompt) {
+      setGenerationError(scenePrompt === null ? "Use /generate-scene followed by a scene instruction." : "Add a scene instruction after /generate-scene.");
+      return;
+    }
+    if (agentPending) {
+      setGenerationError("Wait for the agent response before planning a scene.");
+      return;
+    }
+    const shotCount = normalizeFrameVariations(frameVar);
+    setGenerationError("");
+    if (promptHistory[0] !== trimmed) setPromptHistory([trimmed, ...promptHistory]);
+    setHistoryIndex(-1);
+    setActiveGenerationCount((count) => count + 1);
+    setGenerationActivity({ completed: 0, total: shotCount, stage: "Planning scene" });
+    try {
+      const { plan, model } = await requestScenePlan({ prompt: scenePrompt, shotCount, referenceSnapshot, briefBoards }, settings.geminiApiKey);
+      setAgentConsoleOpen(true);
+      setAgentMessages((messages) => [...messages, {
+        id: crypto.randomUUID(), role: "system",
+        text: `SCENE PLAN READY · Review ${plan.shotCount} shot${plan.shotCount === 1 ? "" : "s"} before generation.`,
+        createdAt: new Date().toISOString(), scenePlan: { plan, model, status: "pending" },
+      }]);
+      setPromptText("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Scene planning failed.";
+      setGenerationError(message);
+    } finally {
+      setActiveGenerationCount((count) => Math.max(0, count - 1));
+      setGenerationActivity(null);
+    }
   };
 
   const inspectGenerationsForMessage = async (text: string, evidence: BriefGenerationEvidence[], signal?: AbortSignal) => {
@@ -1323,6 +1674,7 @@ export default function PromptBar() {
         : { messages: nextMessages };
       const response = await requestBriefAgent({
         referenceSnapshot,
+        briefBoards,
         messages: revisionContext.messages,
         session: agentDraft?.session || null,
         run: revisionRun,
@@ -1848,6 +2200,8 @@ export default function PromptBar() {
       "/retry repeats the latest failed message.",
       "/stop cancels the current agent task.",
       "/clear starts a fresh chat.",
+      "Type @ anywhere to mention a module image or folder by its exact workspace label.",
+      "Use Arrow keys and Enter or Tab to operate either palette like a CLI.",
     ].join("\n"), "inspect");
     setPromptText("");
   };
@@ -1898,6 +2252,7 @@ export default function PromptBar() {
       role: "user",
       text: trimmed,
       createdAt,
+      media: mentionedMediaForText(trimmed),
     };
     const latestMessage = agentMessagesRef.current.at(-1);
     const messagesWithoutFailedTurn = options?.retry
@@ -1948,6 +2303,7 @@ export default function PromptBar() {
         : { messages: nextUserMessages };
       const response = await requestBriefAgent({
         referenceSnapshot,
+        briefBoards,
         messages: preparedContext.messages,
         session: previousSession,
         run: continuingCurrentReferenceRun ? agentRun : null,
@@ -2047,19 +2403,19 @@ export default function PromptBar() {
   }, [agentPending, agentWorkspaceHydrating, queuedAgentInputs]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (commandMenuOpen && filteredCommands.length > 0) {
+    if (commandMenuOpen && paletteItems.length > 0) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         setCommandIndex((index) => (
           e.key === "ArrowDown"
-            ? (index + 1) % filteredCommands.length
-            : (index - 1 + filteredCommands.length) % filteredCommands.length
+            ? (index + 1) % paletteItems.length
+            : (index - 1 + paletteItems.length) % paletteItems.length
         ));
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        insertCanvasCommand(filteredCommands[commandIndex]?.value || filteredCommands[0].value);
+        insertPaletteItem(paletteItems[commandIndex] || paletteItems[0]);
         return;
       }
       if (e.key === "Escape") {
@@ -2073,6 +2429,7 @@ export default function PromptBar() {
       e.preventDefault();
       const localCommand = parseCanvasLocalCommand(promptText);
       if (localCommand) runCanvasLocalCommand(localCommand, promptText);
+      else if (parseGenerateSceneCommand(promptText) !== null) void handleGenerateScene();
       else if (parseGenerateCommand(promptText) !== null) void handleGenerate();
       else if (agentConsoleOpen) void submitAgentMessage();
       else {
@@ -2123,6 +2480,89 @@ export default function PromptBar() {
     void submitAgentMessage(text);
   };
   const newestMessages = [...agentMessages].reverse();
+  const displayedMessages = newestMessages.slice(0, transcriptLimit);
+  const resolveMessageMedia = (media: NonNullable<AgentMessage["media"]>[number]) => {
+    if (media.kind === "reference") {
+      const file = moduleContext.files.find((candidate) => candidate.uuid === media.imageId);
+      return file?.url ? {
+        url: file.url,
+        label: file.label || media.label,
+        onOpen: () => {
+          moduleContext.setActiveFileId(file.id);
+          moduleContext.setView("file");
+          moduleContext.setCollapsed(false);
+        },
+      } : null;
+    }
+    const index = gallery.cells.findIndex((cell) => (cell.uuid || String(cell.id)) === media.imageId);
+    const cell = index >= 0 ? gallery.cells[index] : null;
+    return cell?.imgUrl ? {
+      url: cell.imgUrl,
+      label: media.label,
+      onOpen: () => {
+        gallery.setHudIndex(index);
+        gallery.setHudOpen(true);
+      },
+    } : null;
+  };
+  const galleryCellForMedia = (media: NonNullable<AgentMessage["media"]>[number]) => (
+    gallery.cells.find((cell) => (cell.uuid || String(cell.id)) === media.imageId) || null
+  );
+  const downloadGenerationMedia = (media: NonNullable<AgentMessage["media"]>[number]) => {
+    const cell = galleryCellForMedia(media);
+    if (!cell?.imgUrl) return;
+    const extension = cell.imgUrl.startsWith("data:image/jpeg") ? "jpg" : cell.imgUrl.startsWith("data:image/webp") ? "webp" : "png";
+    const link = document.createElement("a");
+    link.href = cell.imgUrl;
+    link.download = `cafehtml-generation-${cell.id}.${extension}`;
+    link.click();
+    setMediaMenuKey(null);
+  };
+  const addGenerationToModule = async (
+    media: NonNullable<AgentMessage["media"]>[number],
+    destination: "SUBJECT" | "SCENE" | "STYLE" | "MOOD",
+  ) => {
+    const cell = galleryCellForMedia(media);
+    if (!activeProjectId || !cell?.imgUrl) return;
+    const uuid = crypto.randomUUID();
+    const id = parseInt(uuid.replace(/-/g, "").slice(0, 12), 16);
+    const label = `GENERATION ${cell.id}`;
+    const folder = destination === "MOOD" ? "MOOD" : null;
+    const newFile: ModuleFile = {
+      id,
+      uuid,
+      folder,
+      kind: "IMG",
+      label,
+      name: label,
+      size: "GENERATED",
+      dims: cell.dims || cell.ratio || "IMAGE",
+      modified: new Date().toLocaleTimeString(),
+      eye: true,
+      strength: 50,
+      mode: destination === "MOOD" ? "REFERENCE" : destination,
+      url: cell.imgUrl,
+    };
+    if (folder && !moduleContext.folders.some((candidate) => candidate.id === folder)) {
+      const preset = MODULE_FOLDER_PRESETS.find((candidate) => candidate.id === folder);
+      if (preset) moduleContext.setFolders((folders) => [...folders, { ...preset }]);
+    }
+    await Promise.all([
+      DB.images.put(uuid, cell.imgUrl, activeProjectId),
+      DB.references.put({ ...moduleFileForStorage(newFile), project_id: activeProjectId }),
+    ]);
+    moduleContext.setFiles((files) => [newFile, ...files]);
+    window.dispatchEvent(new CustomEvent("cafehtml:timeline-event", {
+      detail: {
+        projectId: activeProjectId,
+        type: "reference.uploaded",
+        imageId: uuid,
+        label,
+        createdAt: new Date().toISOString(),
+      },
+    }));
+    setMediaMenuKey(null);
+  };
   const activeAnchorCell = gallery.iterationBrief?.anchorGenerationId
     ? gallery.cells.find((cell) => (cell.uuid || String(cell.id)) === gallery.iterationBrief?.anchorGenerationId)
     : null;
@@ -2141,9 +2581,10 @@ export default function PromptBar() {
   const agentErrorInTranscript = Boolean(agentError) && agentMessages.some((message) => (
     message.role === "system" && message.text.includes(agentError)
   ));
-  const hasGenerateCommand = parseGenerateCommand(promptText) !== null;
+  const hasSceneCommand = parseGenerateSceneCommand(promptText) !== null;
+  const hasGenerateCommand = hasSceneCommand || parseGenerateCommand(promptText) !== null;
   const submitButtonLabel = hasGenerateCommand
-    ? activeGenerationCount > 0 ? "Image generation running" : "Generate image"
+    ? activeGenerationCount > 0 ? "Image generation running" : hasSceneCommand ? "Generate scene" : "Generate image"
     : agentPending ? "Queue message" : "Send to agent";
   const consoleStatusLabel = agentWorkspaceHydrating
     ? "RESTORING"
@@ -2160,17 +2601,62 @@ export default function PromptBar() {
       ? "error"
       : "busy";
 
+  const sendModuleQuickIntent = (
+    action: "upload" | "paste",
+    destination = moduleQuickDestination,
+  ) => {
+    window.dispatchEvent(new CustomEvent("cafehtml:module-quick-add", {
+      detail: { action, destination },
+    }));
+    setModuleQuickMenuOpen(false);
+  };
+
   return (
-    <div className="prompt-bar" id="promptBar" data-state="FRAME" ref={promptBarRef}>
+    <div className="prompt-bar" id="promptBar" data-state={hasSceneCommand ? "SCENE" : "FRAME"} ref={promptBarRef}>
       <div className="prompt-bar-row">
-        <button
-          className="btn-upload-ref"
-          id="moduleQuickUpload"
-          type="button"
-          title="Add module image"
-          aria-label="Add module image"
-          onClick={() => document.getElementById("mp-file-input")?.click()}
-        ></button>
+        <div className="module-quick-add" ref={moduleQuickRef}>
+          <button
+            className={`btn-upload-ref ${moduleQuickMenuOpen ? "open" : ""}`}
+            id="moduleQuickUpload"
+            type="button"
+            title="Add image to brief"
+            aria-label="Add image to brief"
+            aria-haspopup="menu"
+            aria-expanded={moduleQuickMenuOpen}
+            onClick={() => {
+              setDropdownOpen(false);
+              setModuleQuickMenuOpen((open) => !open);
+            }}
+          ></button>
+          {moduleQuickMenuOpen && (
+            <div className="module-quick-menu" role="menu" aria-label="Add image to brief">
+              <div className="module-quick-menu-label">
+                <span>ADD IMAGE</span>
+                <b>{moduleQuickDestination}</b>
+              </div>
+              <button type="button" role="menuitem" className="module-quick-action" onClick={() => sendModuleQuickIntent("upload")}>
+                <span>UPLOAD IMAGE</span><small>FILES</small>
+              </button>
+              <button type="button" role="menuitem" className="module-quick-action" onClick={() => sendModuleQuickIntent("paste")}>
+                <span>PASTE SCREENSHOT</span><small>CTRL+V</small>
+              </button>
+              <div className="module-quick-menu-label destination"><span>DESTINATION</span></div>
+              <div className="module-quick-destinations" role="group" aria-label="Brief destination">
+                {MODULE_QUICK_DESTINATIONS.map((destination) => (
+                  <button
+                    key={destination}
+                    type="button"
+                    className={moduleQuickDestination === destination ? "active" : ""}
+                    aria-pressed={moduleQuickDestination === destination}
+                    onClick={() => setModuleQuickDestination(destination)}
+                  >
+                    <i></i><span>{destination === "MOOD" ? "MOOD BOARD" : destination}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         
         <div className="settings-anchor" ref={dropdownRef}>
           <button
@@ -2257,11 +2743,11 @@ export default function PromptBar() {
               </>
             )}
 
-            <div className="cmp-menu-title">VARIATIONS</div>
+            <div className="cmp-menu-title">{hasSceneCommand ? "SHOTS" : "VARIATIONS"}</div>
             <div className="image-settings-stepper">
               <button
                 type="button"
-                title="Decrease variations"
+                title={hasSceneCommand ? "Decrease shots" : "Decrease variations"}
                 disabled={parseInt(frameVar.toString(), 10) <= 1}
                 onClick={() => {
                   const value = parseInt(frameVar.toString(), 10);
@@ -2271,11 +2757,11 @@ export default function PromptBar() {
                 -
               </button>
               <span>
-                {frameVar} IMAGE{parseInt(frameVar.toString(), 10) === 1 ? "" : "S"}
+                {frameVar} {hasSceneCommand ? `SHOT${parseInt(frameVar.toString(), 10) === 1 ? "" : "S"}` : `IMAGE${parseInt(frameVar.toString(), 10) === 1 ? "" : "S"}`}
               </span>
               <button
                 type="button"
-                title="Increase variations"
+                title={hasSceneCommand ? "Increase shots" : "Increase variations"}
                 disabled={parseInt(frameVar.toString(), 10) >= 10}
                 onClick={() => {
                   const value = parseInt(frameVar.toString(), 10);
@@ -2310,9 +2796,19 @@ export default function PromptBar() {
             autoComplete="off"
             spellCheck="true"
             ref={inputRef}
-            onFocus={() => setAgentConsoleOpen(true)}
-            onClick={() => setAgentConsoleOpen(true)}
-            onChange={(e) => setPromptText(e.currentTarget.value)}
+            onFocus={(event) => {
+              setComposerCaret(event.currentTarget.selectionStart);
+              setAgentConsoleOpen(true);
+            }}
+            onClick={(event) => {
+              setComposerCaret(event.currentTarget.selectionStart);
+              setAgentConsoleOpen(true);
+            }}
+            onSelect={(event) => setComposerCaret(event.currentTarget.selectionStart)}
+            onChange={(event) => {
+              setPromptText(event.currentTarget.value);
+              setComposerCaret(event.currentTarget.selectionStart);
+            }}
             onKeyDown={handleKeyDown}
           />
           <button
@@ -2345,52 +2841,52 @@ export default function PromptBar() {
           onClick={() => {
             const localCommand = parseCanvasLocalCommand(promptText);
             if (localCommand) runCanvasLocalCommand(localCommand, promptText);
+            else if (parseGenerateSceneCommand(promptText) !== null) void handleGenerateScene();
             else if (parseGenerateCommand(promptText) !== null) void handleGenerate();
             else void submitAgentMessage();
           }}
         >
           <span className="generate-icon" aria-hidden="true"></span>
         </button>
-        {commandMenuOpen && filteredCommands.length > 0 && (
-          <div className="canvas-command-menu" role="listbox" aria-label="Canvas commands">
-            <div className="canvas-command-head">
-              <span>COMMAND</span>
-              <span>{filteredCommands.length}</span>
-            </div>
-            {filteredCommands.map((command, index) => (
-              <button
-                key={command.value}
-                type="button"
-                className={`canvas-command-option ${index === commandIndex ? "active" : ""}`}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  insertCanvasCommand(command.value);
-                }}
-              >
-                <span className="canvas-command-label">{command.label}</span>
-                <span className="canvas-command-description">{command.description}</span>
-              </button>
-            ))}
-          </div>
+        {commandMenuOpen && composerToken && paletteItems.length > 0 && (
+          <ComposerPalette
+            trigger={composerToken.trigger}
+            items={paletteItems}
+            activeIndex={commandIndex}
+            onSelect={insertPaletteItem}
+          />
         )}
       </div>
-      <div id="agentConsole" className={`agent-console ${agentConsoleOpen ? "open" : ""}`} aria-hidden={!agentConsoleOpen}>
-        <div className="agent-console-header" aria-hidden="true">
-          <span>CAFEHTML AGENT</span>
+      <div
+        id="agentConsole"
+        className={`agent-console ${agentConsoleOpen ? "open" : "collapsed"}`}
+        role="region"
+        aria-label="CafeHTML chat"
+        style={agentConsoleHeight ? { "--agent-console-user-height": `${agentConsoleHeight}px` } as React.CSSProperties : undefined}
+      >
+        <div className="agent-console-header">
+          <span>CAFEHTML</span>
+          <span className="agent-console-summary">{newestMessages.length} MSG · / COMMAND · @ MENTION</span>
           <span className={consoleStatusClass}>{consoleStatusLabel}</span>
         </div>
         <button
           className="agent-console-collapse"
           type="button"
-          aria-label="Retract chat"
-          title="Retract chat"
+          aria-label={agentConsoleOpen ? "Collapse chat" : "Open chat"}
+          title={agentConsoleOpen ? "Collapse chat" : "Open chat"}
+          aria-expanded={agentConsoleOpen}
+          aria-controls="agentConsoleTranscript"
           onClick={() => {
+            if (!agentConsoleOpen) {
+              setAgentConsoleOpen(true);
+              return;
+            }
             inputRef.current?.blur();
             setMemoryPanelOpen(false);
             setAgentConsoleOpen(false);
           }}
         ></button>
-        <div className="agent-console-scroll" ref={agentConsoleScrollRef}>
+        <div id="agentConsoleTranscript" className="agent-console-scroll" ref={agentConsoleScrollRef} aria-hidden={!agentConsoleOpen}>
           {memoryPanelOpen ? (
             <AgentMemoryPanel
               tab={memoryPanelTab}
@@ -2471,7 +2967,7 @@ export default function PromptBar() {
           {agentIdle ? (
             <div className="agent-idle">
               {promptText.trim() && (
-                <div className="agent-current-draft">&gt; {promptText}</div>
+                <CollapsibleChatText text={promptText} prefix="&gt; " className="agent-current-draft" />
               )}
               <div className="agent-empty-copy">
                 <strong>What should we make?</strong>
@@ -2484,7 +2980,7 @@ export default function PromptBar() {
               {pinnedPrompt && (
                 <div className="agent-section agent-current-prompt">
                   <div className="agent-speaker">CURRENT PROMPT</div>
-                  <div className="agent-prompt-box">{pinnedPrompt}</div>
+                  <CollapsibleChatText text={pinnedPrompt} className="agent-prompt-box" />
                 </div>
               )}
               <div
@@ -2494,16 +2990,110 @@ export default function PromptBar() {
                 aria-relevant="additions text"
                 aria-busy={agentPending || agentWorkspaceHydrating}
               >
-                {newestMessages.map((message) => (
+                {displayedMessages.map((message) => (
                   <div className={`agent-turn ${message.role}`} key={message.id}>
                     {message.role !== "user" && (
                       <div className="agent-speaker">CAFEHTML</div>
                     )}
-                    {message.text.split("\n").map((line, index) => (
-                      <div className="agent-line" key={`${message.id}-${index}`}>
-                        {message.role === "user" ? `> ${line}` : line}
+                    <CollapsibleChatText text={message.text} prefix={message.role === "user" ? "> " : ""} />
+                    {message.media && message.media.length > 0 && (
+                      <div className="agent-media-event">
+                        <div className="agent-media-event-meta">
+                          <span>{message.media[0].event.toUpperCase()}</span>
+                          <time>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+                        </div>
+                        <div className="agent-media-thumbnails">
+                          {message.media.map((media) => {
+                            const resolved = resolveMessageMedia(media);
+                            const menuKey = `${message.id}:${media.kind}:${media.imageId}`;
+                            return resolved ? (
+                              <div className={`agent-media-chip ${media.kind}`} key={menuKey}>
+                                <button
+                                  className="agent-media-chip-preview"
+                                  type="button"
+                                  title={`Open ${resolved.label}`}
+                                  onClick={resolved.onOpen}
+                                >
+                                  <img src={resolved.url} alt="" loading="lazy" decoding="async" />
+                                  <span>
+                                    <b>{resolved.label}</b>
+                                    <small>{media.kind === "generation" ? "GENERATED IMAGE" : "MODULE IMAGE"}</small>
+                                  </span>
+                                </button>
+                                {media.kind === "generation" && (
+                                  <>
+                                    <button
+                                      className="agent-media-chip-more"
+                                      type="button"
+                                      aria-label={`Actions for ${resolved.label}`}
+                                      aria-expanded={mediaMenuKey === menuKey}
+                                      onClick={() => setMediaMenuKey((open) => open === menuKey ? null : menuKey)}
+                                    >
+                                      ···
+                                    </button>
+                                    {mediaMenuKey === menuKey && (
+                                      <div className="agent-media-chip-menu" role="menu" aria-label={`Actions for ${resolved.label}`}>
+                                        <div className="agent-media-chip-menu-head">
+                                          <span>IMAGE ACTIONS</span><b>GENERATED</b>
+                                        </div>
+                                        <button className="agent-media-menu-wide" type="button" role="menuitem" onClick={resolved.onOpen}>
+                                          <span>OPEN IMAGE</span><small>VIEW</small>
+                                        </button>
+                                        <div className="agent-media-menu-label">USE AS</div>
+                                        <div className="agent-media-menu-roles" role="group" aria-label="Use generated image as">
+                                          <button type="button" onClick={() => void addGenerationToModule(media, "SUBJECT")}><i></i>SUBJECT</button>
+                                          <button type="button" onClick={() => void addGenerationToModule(media, "SCENE")}><i></i>SCENE</button>
+                                          <button type="button" onClick={() => void addGenerationToModule(media, "STYLE")}><i></i>STYLE</button>
+                                          <button type="button" onClick={() => void addGenerationToModule(media, "MOOD")}><i></i>MOOD BOARD</button>
+                                        </div>
+                                        <button className="agent-media-menu-wide download" type="button" role="menuitem" onClick={() => downloadGenerationMedia(media)}>
+                                          <span>DOWNLOAD</span><small>FILE</small>
+                                        </button>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            ) : null;
+                          })}
+                        </div>
                       </div>
-                    ))}
+                    )}
+                    {message.trace?.kind === "generation" && (
+                      <details className="agent-causal-trace">
+                        <summary>
+                          <span>USED</span>
+                          <strong>{message.trace.references.length} REF{message.trace.references.length === 1 ? "" : "S"}</strong>
+                          <strong>{message.trace.model}</strong>
+                          <strong>{message.trace.aspectRatio}</strong>
+                          <time>{(message.trace.durationMs / 1000).toFixed(1)}s</time>
+                        </summary>
+                        <div className="agent-causal-trace-body">
+                          <div className="agent-causal-settings">
+                            <span>STATUS <b>{message.trace.status.toUpperCase()}</b></span>
+                            <span>RESULTS <b>{message.trace.resultCount}</b></span>
+                            {message.trace.resolution && <span>SIZE <b>{message.trace.resolution}</b></span>}
+                            {message.trace.thinkingLevel && <span>THINKING <b>{message.trace.thinkingLevel.toUpperCase()}</b></span>}
+                          </div>
+                          {message.trace.references.length > 0 && (
+                            <div className="agent-causal-references">
+                              {message.trace.references.map((reference) => {
+                                const file = moduleContext.files.find((candidate) => candidate.uuid === reference.imageId);
+                                return (
+                                  <div key={`${message.id}:trace:${reference.imageId}`}>
+                                    {file?.url && <img src={file.url} alt="" loading="lazy" decoding="async" />}
+                                    <span>{reference.label}</span>
+                                    <small>{reference.role}</small>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div className="agent-causal-prompt-label">EFFECTIVE PROMPT</div>
+                          <CollapsibleChatText text={message.trace.prompt} className="agent-line agent-causal-prompt" />
+                        </div>
+                      </details>
+                    )}
                     {message.id === newestMessages[0]?.id
                       && message.role === "system"
                       && message.text.startsWith("AGENT ERROR:")
@@ -2530,9 +3120,7 @@ export default function PromptBar() {
                                 : canApprovePromptArtifact(message.promptArtifact!) ? "AUTO-RUN READY" : "DRAFT"}
                           </span>
                         </div>
-                        <div className="agent-prompt-box">
-                          {message.promptArtifact.prompt}
-                        </div>
+                        <CollapsibleChatText text={message.promptArtifact.prompt} className="agent-prompt-box" />
                         {message.promptArtifact.previousPrompt && (() => {
                           const changes = promptLexicalDiff(message.promptArtifact.previousPrompt!, message.promptArtifact!.prompt);
                           return (
@@ -2606,6 +3194,15 @@ export default function PromptBar() {
                     )}
                   </div>
                 ))}
+                {newestMessages.length > displayedMessages.length && (
+                  <button
+                    className="agent-show-older"
+                    type="button"
+                    onClick={() => setTranscriptLimit((count) => count + TRANSCRIPT_PAGE_SIZE)}
+                  >
+                    SHOW {Math.min(TRANSCRIPT_PAGE_SIZE, newestMessages.length - displayedMessages.length)} OLDER · {newestMessages.length - displayedMessages.length} HIDDEN
+                  </button>
+                )}
                 {queuedAgentInputs.length > 0 && (
                   <div className="agent-turn system agent-queue" aria-live="polite">
                     <div className="agent-speaker">UP NEXT</div>
@@ -2664,13 +3261,25 @@ export default function PromptBar() {
                 </div>
               )}
               {promptText.trim() && (
-                <div className="agent-current-draft">&gt; {promptText}</div>
+                <CollapsibleChatText text={promptText} prefix="&gt; " className="agent-current-draft" />
               )}
             </>
           )}
             </>
           )}
         </div>
+        <div
+          className="agent-console-resize"
+          role="separator"
+          aria-label="Resize chat"
+          aria-orientation="horizontal"
+          title="Drag to resize · double-click to reset"
+          onPointerDown={handleConsoleResizeStart}
+          onPointerMove={handleConsoleResizeMove}
+          onPointerUp={handleConsoleResizeEnd}
+          onPointerCancel={handleConsoleResizeEnd}
+          onDoubleClick={resetConsoleHeight}
+        ></div>
       </div>
     </div>
   );

@@ -5,6 +5,10 @@ import type {
   BriefReferenceReadResponse,
   GenerationInspectionRequest,
   GenerationInspectionResponse,
+  ScenePlanRequest,
+  ScenePlanResponse,
+  VisualBibleDraftRequest,
+  VisualBibleDraftResponse,
 } from "./types";
 import { localGeminiHeaders } from "@/lib/localGeminiAuth";
 
@@ -168,4 +172,38 @@ export async function requestReferenceRead(
   }
 
   return data as BriefReferenceReadResponse;
+}
+
+export async function requestScenePlan(
+  input: ScenePlanRequest,
+  apiKey?: string | null,
+  signal?: AbortSignal,
+): Promise<ScenePlanResponse> {
+  const response = await fetch("/api/brief-agent/plan-scene", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...localGeminiHeaders(apiKey) },
+    body: JSON.stringify(input),
+    signal,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(apiErrorMessage(data, "Scene planning failed."));
+  }
+  return data as ScenePlanResponse;
+}
+
+export async function requestVisualBibleDraft(
+  input: VisualBibleDraftRequest,
+  apiKey?: string | null,
+  signal?: AbortSignal,
+): Promise<VisualBibleDraftResponse> {
+  const response = await fetch("/api/brief-agent/compile-bible", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...localGeminiHeaders(apiKey) },
+    body: JSON.stringify(input),
+    signal,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(apiErrorMessage(data, "Visual Bible drafting failed."));
+  return data as VisualBibleDraftResponse;
 }

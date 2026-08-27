@@ -12,6 +12,11 @@ import { getGenerationModuleImages, MAX_ACTIVE_GENERATION_REFERENCES, sortModule
 import { describeReferenceStrength, normalizeStrength, type ReferenceRole } from "@/lib/pipeline/strength";
 import ModuleReferenceCard from "./ModuleReferenceCard";
 import { MODULE_FOLDER_PRESETS } from "@/lib/moduleFolderPresets";
+import { inferBriefBoardType, type BriefBoardType } from "@/lib/brief-agent/briefBoards";
+import { compileBriefBoardContext, fingerprintBriefBoard } from "@/lib/brief-agent/briefBoards";
+import { requestVisualBibleDraft } from "@/lib/brief-agent/client";
+import type { VisualBible, VisualBibleRules } from "@/lib/brief-agent/types";
+import { useSettings } from "@/context/SettingsContext";
 
 const ACCENTS = [
   "#ea3a8a",
@@ -22,7 +27,39 @@ const ACCENTS = [
   "#3a8a7a",
 ];
 const MODES = ["SUBJECT", "SCENE", "STYLE"];
+type QuickUploadDestination = "SUBJECT" | "SCENE" | "STYLE" | "MOOD";
 const MODULE_PRESETS = MODULE_FOLDER_PRESETS;
+const BRIEF_TYPES: Array<{ id: BriefBoardType; name: string; accent: string }> = [
+  ...MODULE_FOLDER_PRESETS,
+  { id: "CUSTOM", name: "CUSTOM", accent: "#7a4a8a" },
+  { id: "CHARACTER", name: "CHARACTER", accent: "#e94f37" },
+  { id: "SETTING", name: "SETTING", accent: "#3a8a7a" },
+  { id: "OBJECT", name: "OBJECT", accent: "#c79a2a" },
+  { id: "CREATURE", name: "CREATURE", accent: "#5a8a3a" },
+  { id: "WARDROBE", name: "WARDROBE", accent: "#ea3a8a" },
+  { id: "TREATMENT", name: "TREATMENT", accent: "#5267c9" },
+];
+
+const BIBLE_RULE_LABELS: Array<{ key: keyof VisualBibleRules; label: string }> = [
+  { key: "preserve", label: "PRESERVE" },
+  { key: "flexible", label: "FLEXIBLE" },
+  { key: "avoid", label: "AVOID" },
+  { key: "unknown", label: "UNKNOWN" },
+];
+
+type UploadCandidate = {
+  url: string;
+  file: File;
+};
+
+const readUploadCandidates = (files: File[]) => Promise.all(
+  files.map((file) => new Promise<UploadCandidate>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => resolve({ url: event.target?.result as string, file });
+    reader.onerror = () => reject(reader.error || new Error(`Could not read ${file.name || "clipboard image"}.`));
+    reader.readAsDataURL(file);
+  })),
+);
 
 const moduleRole = (mode: string) => {
   const role = String(mode || "").trim().toUpperCase();
@@ -82,6 +119,7 @@ export default function ModulePanel() {
 
   const { openStudio } = useStudio();
   const { activeProjectId } = useApp();
+  const settings = useSettings();
 
   const persistReference = useCallback((file: ModuleFile) => {
     if (!activeProjectId) return;
@@ -113,6 +151,7 @@ export default function ModulePanel() {
     active: boolean;
   } | null>(null);
   const suppressNextRowClickRef = useRef(false);
+  const quickUploadIntentRef = useRef<QuickUploadDestination | null>(null);
 
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [draggedFileId, setDraggedFileId] = useState<number | null>(null);
@@ -120,7 +159,11 @@ export default function ModulePanel() {
   const [roleDrawerFileId, setRoleDrawerFileId] = useState<number | null>(null);
   const [pendingReplaceFileId, setPendingReplaceFileId] = useState<number | null>(null);
   const [uploadRole, setUploadRole] = useState(MODES[0]);
+  const [quickPasteDestination, setQuickPasteDestination] = useState<QuickUploadDestination | null>(null);
+  const [panelQuickMenuOpen, setPanelQuickMenuOpen] = useState(false);
+  const [panelQuickDestination, setPanelQuickDestination] = useState<QuickUploadDestination>("SUBJECT");
   const [menuOpensUp, setMenuOpensUp] = useState(false);
+  const [folderMenuOpensUp, setFolderMenuOpensUp] = useState(false);
 
   useLayoutEffect(() => {
     const openFileId = moveFileId ?? menuFileId;
@@ -158,14 +201,196 @@ export default function ModulePanel() {
       resizeObserver.disconnect();
     };
   }, [folders.length, menuFileId, moveFileId]);
+
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!folderMenuId || !panel) {
+      setFolderMenuOpensUp(false);
+      return;
+    }
+
+    const folder = Array.from(panel.querySelectorAll<HTMLElement>(".cmp-folder[data-folder-id]"))
+      .find((candidate) => candidate.dataset.folderId === folderMenuId);
+    const menu = folder?.querySelector<HTMLElement>(".cmp-folder-menu");
+    const scroll = folder?.closest<HTMLElement>(".cmp-scroll");
+    if (!folder || !menu || !scroll) return;
+
+    const updatePlacement = () => {
+      const folderRect = folder.getBoundingClientRect();
+      const scrollRect = scroll.getBoundingClientRect();
+      const spaceAbove = folderRect.top - scrollRect.top;
+      const spaceBelow = scrollRect.bottom - folderRect.bottom;
+      setFolderMenuOpensUp(spaceBelow < menu.offsetHeight + 8 && spaceAbove > spaceBelow);
+    };
+
+    updatePlacement();
+    const frame = window.requestAnimationFrame(updatePlacement);
+    scroll.addEventListener("scroll", updatePlacement, { passive: true });
+    window.addEventListener("resize", updatePlacement);
+    const resizeObserver = new ResizeObserver(updatePlacement);
+    resizeObserver.observe(menu);
+    resizeObserver.observe(scroll);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      scroll.removeEventListener("scroll", updatePlacement);
+      window.removeEventListener("resize", updatePlacement);
+      resizeObserver.disconnect();
+    };
+  }, [folderMenuId]);
   const [uploadRoleOpen, setUploadRoleOpen] = useState(false);
 
   const [folderFormName, setFolderFormName] = useState("");
+  const [folderFormType, setFolderFormType] = useState<BriefBoardType>("MOOD");
+  const [folderFormPurpose, setFolderFormPurpose] = useState("");
   const [folderFormAccent, setFolderFormAccent] = useState(
     () => ACCENTS[Math.floor(Math.random() * ACCENTS.length)],
   );
   const [folderPresetOpen, setFolderPresetOpen] = useState(false);
   const [uploadTargetFolderId, setUploadTargetFolderId] = useState<string | null>(null);
+  const [bibleEditorId, setBibleEditorId] = useState<string | null>(null);
+  const [bibleWorkingId, setBibleWorkingId] = useState<string | null>(null);
+  const [bibleError, setBibleError] = useState<{ folderId: string; message: string } | null>(null);
+
+  const updateFolderBible = (folderId: string, bible: VisualBible) => {
+    setFolders((current) => current.map((folder) => folder.id === folderId ? { ...folder, visualBible: bible } : folder));
+  };
+
+  const draftVisualBible = async (folder: ModuleFolder) => {
+    const board = compileBriefBoardContext([{ ...folder, active: true }], files)[0];
+    if (!board) return;
+    setBibleWorkingId(folder.id);
+    setBibleError(null);
+    try {
+      const response = await requestVisualBibleDraft({ board, previous: folder.visualBible || null }, settings.geminiApiKey);
+      updateFolderBible(folder.id, response.bible);
+      setBibleEditorId(folder.id);
+    } catch (error) {
+      setBibleError({ folderId: folder.id, message: error instanceof Error ? error.message : "Visual Bible drafting failed." });
+    } finally {
+      setBibleWorkingId(null);
+    }
+  };
+
+  const beginBibleEdit = (folder: ModuleFolder) => {
+    if (folder.visualBible?.status === "approved") {
+      updateFolderBible(folder.id, {
+        ...folder.visualBible,
+        version: folder.visualBible.version + 1,
+        status: "draft",
+        draftedAt: new Date().toISOString(),
+        approvedAt: undefined,
+      });
+    }
+    setBibleEditorId(folder.id);
+  };
+
+  const approveVisualBible = (folder: ModuleFolder) => {
+    if (!folder.visualBible) return;
+    updateFolderBible(folder.id, {
+      ...folder.visualBible,
+      status: "approved",
+      sourceFingerprint: fingerprintBriefBoard(folder, files),
+      approvedAt: new Date().toISOString(),
+    });
+    setBibleEditorId(null);
+    setBibleError(null);
+  };
+
+  const prepareQuickDestination = useCallback((destination: QuickUploadDestination) => {
+    if (destination === "MOOD") {
+      const moodPreset = MODULE_PRESETS.find((preset) => preset.id === "MOOD");
+      if (moodPreset) {
+        setFolders((current) => current.some((folder) => folder.id === moodPreset.id)
+          ? current
+          : [...current, { ...moodPreset }]);
+      }
+      setUploadTargetFolderId("MOOD");
+      setUploadRole(MODES[0]);
+    } else {
+      setUploadTargetFolderId(null);
+      setUploadRole(destination);
+    }
+    setPendingReplaceFileId(null);
+    setView("root");
+    setActiveFileId(null);
+    setCollapsed(false);
+  }, [setActiveFileId, setCollapsed, setFolders, setView]);
+
+  const openNewUploads = useCallback((uploadedFiles: File[]) => {
+    if (!uploadedFiles.length) return;
+
+    void readUploadCandidates(uploadedFiles).then((uploads) => {
+      const queue = [...uploads];
+      const next = queue.shift() || null;
+      setPendingUploadQueue(queue);
+      setPendingUpload(next);
+      setView("root");
+      setActiveFileId(null);
+      setCollapsed(false);
+      setShowUpload(!!next);
+      setMenuFileId(null);
+      setMoveFileId(null);
+      setFolderMenuId(null);
+      setUploadRoleOpen(false);
+    }).catch((error) => console.error("Failed to read module image", error));
+  }, [
+    setActiveFileId,
+    setCollapsed,
+    setFolderMenuId,
+    setMenuFileId,
+    setMoveFileId,
+    setPendingUpload,
+    setPendingUploadQueue,
+    setShowUpload,
+    setView,
+  ]);
+
+  useEffect(() => {
+    const handleQuickAdd = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        action?: "upload" | "paste";
+        destination?: QuickUploadDestination;
+      }>).detail;
+      if (!detail?.action || !detail.destination) return;
+
+      quickUploadIntentRef.current = detail.destination;
+      prepareQuickDestination(detail.destination);
+      setQuickPasteDestination(detail.action === "paste" ? detail.destination : null);
+
+      if (detail.action === "upload") {
+        window.requestAnimationFrame(() => fileInputRef.current?.click());
+      }
+    };
+
+    window.addEventListener("cafehtml:module-quick-add", handleQuickAdd);
+    return () => window.removeEventListener("cafehtml:module-quick-add", handleQuickAdd);
+  }, [prepareQuickDestination]);
+
+  useEffect(() => {
+    const handlePaste = (event: ClipboardEvent) => {
+      const imageFiles = Array.from(event.clipboardData?.items || [])
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => file !== null);
+
+      if (!imageFiles.length) return;
+
+      event.preventDefault();
+      const quickDestination = quickUploadIntentRef.current;
+      if (quickDestination) prepareQuickDestination(quickDestination);
+      else {
+        setUploadTargetFolderId(null);
+        setUploadRole(MODES[0]);
+        setPendingReplaceFileId(null);
+      }
+      openNewUploads(imageFiles);
+      quickUploadIntentRef.current = null;
+      setQuickPasteDestination(null);
+    };
+
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  }, [openNewUploads, prepareQuickDestination]);
 
   // Sync collapsed state to body for gallery expansion
   useEffect(() => {
@@ -194,6 +419,7 @@ export default function ModulePanel() {
       if (roleDrawerFileId && !target.closest(".mrc-card")) {
         setRoleDrawerFileId(null);
       }
+      if (!target.closest(".cmp-quick-add")) setPanelQuickMenuOpen(false);
     };
     document.addEventListener("mousedown", handleDocClick);
     return () => document.removeEventListener("mousedown", handleDocClick);
@@ -209,13 +435,17 @@ export default function ModulePanel() {
 
   useEffect(() => {
     if (addingFolder) {
-      setFolderFormName("");
+      setFolderFormName("MOOD");
+      setFolderFormType("MOOD");
+      setFolderFormPurpose("");
       setFolderFormAccent(ACCENTS[Math.floor(Math.random() * ACCENTS.length)]);
       setFolderPresetOpen(false);
     } else if (editingFolder) {
       const folder = folders.find((f) => f.id === editingFolder);
       if (folder) {
-        setFolderFormName(folder.id);
+        setFolderFormName(folder.name);
+        setFolderFormType(inferBriefBoardType(folder));
+        setFolderFormPurpose(folder.purpose || "");
         setFolderFormAccent(folder.accent);
       }
       setFolderPresetOpen(false);
@@ -330,6 +560,7 @@ export default function ModulePanel() {
     if (!uploadedFiles.length) {
       setPendingReplaceFileId(null);
       setUploadRoleOpen(false);
+      quickUploadIntentRef.current = null;
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -339,46 +570,29 @@ export default function ModulePanel() {
     let filesToProcess = uploadedFiles;
     if (replaceMode) filesToProcess = filesToProcess.slice(0, 1);
 
-    Promise.all(
-      filesToProcess.map((file) => {
-        return new Promise<{ url: string; file: File }>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (evt) =>
-            resolve({ url: evt.target?.result as string, file });
-          reader.readAsDataURL(file);
-        });
-      }),
-    ).then((uploads) => {
-      if (replaceMode && replaceTargetId !== null) {
-        const upload = uploads[0];
-        updateFile(replaceTargetId, {
-          url: upload.url,
-          name: upload.file.name,
-          size: Math.round(upload.file.size / 1024) + " KB",
-          uuid: crypto.randomUUID(),
-          visualRead: "",
-          visualReadSource: "local",
-          visualReadFingerprint: undefined,
-          visualReadVersion: undefined,
-        });
-        setPendingReplaceFileId(null);
-      } else {
-        const queue = [...uploads];
-        const next = queue.shift() || null;
-        setPendingUploadQueue(queue);
-        setPendingUpload(next);
-        setView("root");
-        setActiveFileId(null);
-        setCollapsed(false);
-        setShowUpload(!!next);
-        setMenuFileId(null);
-        setMoveFileId(null);
-        setFolderMenuId(null);
-        setUploadRole(MODES[0]);
-        setUploadRoleOpen(false);
-      }
+    if (!replaceMode || replaceTargetId === null) {
+      openNewUploads(filesToProcess);
+      quickUploadIntentRef.current = null;
+      setQuickPasteDestination(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
-    });
+      return;
+    }
+
+    readUploadCandidates(filesToProcess).then((uploads) => {
+      const upload = uploads[0];
+      updateFile(replaceTargetId, {
+        url: upload.url,
+        name: upload.file.name,
+        size: Math.round(upload.file.size / 1024) + " KB",
+        uuid: crypto.randomUUID(),
+        visualRead: "",
+        visualReadSource: "local",
+        visualReadFingerprint: undefined,
+        visualReadVersion: undefined,
+      });
+      setPendingReplaceFileId(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }).catch((error) => console.error("Failed to read module image", error));
   };
 
   const showNextPendingUpload = () => {
@@ -388,7 +602,6 @@ export default function ModulePanel() {
     setPendingUpload(next);
     setShowUpload(!!next);
     if (!next) setUploadTargetFolderId(null);
-    setUploadRole(MODES[0]);
     setUploadRoleOpen(false);
   };
 
@@ -427,6 +640,15 @@ export default function ModulePanel() {
     }
 
     setFiles((prev) => [newFile, ...prev]);
+    window.dispatchEvent(new CustomEvent("cafehtml:timeline-event", {
+      detail: {
+        projectId: activeProjectId,
+        type: "reference.uploaded",
+        imageId: newFile.uuid,
+        label: newFile.label,
+        createdAt: new Date().toISOString(),
+      },
+    }));
     if (collapseAfter) {
       setPendingUpload(null);
       setPendingUploadQueue([]);
@@ -548,13 +770,23 @@ export default function ModulePanel() {
 
   const handleFolderDragOver = (e: React.DragEvent, folderId: string) => {
     e.preventDefault();
-    setMoveDragEffect(e);
+    e.dataTransfer.dropEffect = e.dataTransfer.files.length ? "copy" : "move";
     setDragOver(folderId);
   };
 
   const handleFolderDrop = (e: React.DragEvent, targetFolderId: string) => {
     e.preventDefault();
     e.stopPropagation();
+
+    const droppedImages = Array.from(e.dataTransfer.files || []).filter((file) => file.type.startsWith("image/"));
+    if (droppedImages.length) {
+      setUploadTargetFolderId(targetFolderId);
+      setPendingReplaceFileId(null);
+      setOpenFolders((current) => new Set(current).add(targetFolderId));
+      openNewUploads(droppedImages);
+      clearDragState();
+      return;
+    }
 
     if (draggedFolderId) {
       if (draggedFolderId !== targetFolderId) {
@@ -1021,23 +1253,11 @@ export default function ModulePanel() {
 
   const renderFolderForm = (folder: ModuleFolder | null) => {
     const isNew = !folder;
-    const activePresetIds = folders
-      .filter((f) => f.id !== folder?.id)
-      .map((f) => f.id);
-    const options = MODULE_PRESETS.filter(
-      (p) => !activePresetIds.includes(p.id),
-    );
-
-    const lockName =
-      !isNew && options.length === 1 && options[0].id === folder?.id;
-
-    const q = folderFormName.trim().toUpperCase();
-    const list = options.filter((p) => !q || p.name.includes(q));
+    const list = BRIEF_TYPES;
 
     const handleSave = () => {
-      const preset = MODULE_PRESETS.find((p) => p.id === folderFormName);
-      const allowed = preset && options.some((p) => p.id === preset.id);
-      if (!allowed) return;
+      const name = folderFormName.trim().replace(/\s+/g, " ").toUpperCase();
+      if (!name) return;
 
       if (folder) {
         setFolders(
@@ -1045,35 +1265,31 @@ export default function ModulePanel() {
             f.id === folder.id
               ? {
                   ...f,
-                  id: preset.id,
-                  name: preset.name,
+                  name,
                   accent: folderFormAccent,
+                  briefType: folderFormType,
+                  purpose: folderFormPurpose.trim(),
+                  active: f.active !== false,
                 }
               : f,
           ),
         );
-        if (preset.id !== folder.id) {
-          const nextFiles = files.map((f) =>
-            f.folder === folder.id
-              ? { ...f, folder: preset.id }
-              : f,
-          );
-          setFiles(nextFiles);
-          nextFiles.filter((f) => f.folder === preset.id).forEach(persistReference);
-          setOpenFolders((prev) => {
-            const next = new Set(prev);
-            next.delete(folder.id);
-            next.add(preset.id);
-            return next;
-          });
-        }
         setEditingFolder(null);
       } else {
+        const canUseLegacyId = !folders.some((candidate) => candidate.id === folderFormType);
+        const id = canUseLegacyId ? folderFormType : `BRIEF-${crypto.randomUUID()}`;
         setFolders([
           ...folders,
-          { id: preset.id, name: preset.name, accent: folderFormAccent },
+          {
+            id,
+            name,
+            accent: folderFormAccent,
+            briefType: folderFormType,
+            purpose: folderFormPurpose.trim(),
+            active: true,
+          },
         ]);
-        setOpenFolders((prev) => new Set(prev).add(preset.id));
+        setOpenFolders((prev) => new Set(prev).add(id));
         setAddingFolder(false);
       }
     };
@@ -1084,55 +1300,62 @@ export default function ModulePanel() {
         className="cmp-folder-form"
       >
         <div className="cmp-folder-form-head">
-              <span>{isNew ? "NEW BRIEF SLOT" : "BRIEF SLOT"}</span>
-          <b>MOOD BOARD</b>
+          <span>{isNew ? "NEW BRIEF SLOT" : "BRIEF SLOT"}</span>
+          <b>{folderFormType} BOARD</b>
         </div>
         <div className="cmp-field-block">
           <label>CANVAS SLOT</label>
           <div className="cmp-preset-input">
             <input
-              value={folderFormName}
-              onChange={(e) => {
-                const val = e.target.value.toUpperCase().replace(/[^A-Z]/g, "");
-                setFolderFormName(val);
-                setFolderPresetOpen(true);
-              }}
+              value={folderFormType}
+              readOnly
               placeholder="MOOD"
-              readOnly={lockName}
             />
             <button
               type="button"
-              onClick={() => {
-                if (!lockName) {
-                  setFolderFormName("");
-                  setFolderPresetOpen(!folderPresetOpen);
-                }
-              }}
+              onClick={() => setFolderPresetOpen(!folderPresetOpen)}
             >
               &#9662;
             </button>
           </div>
-          {(folderPresetOpen || isNew) && (
+          {folderPresetOpen && (
             <div className="cmp-preset-list">
-              {list.length > 0 ? (
-                list.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => {
-                      setFolderFormName(p.id);
-                      setFolderFormAccent(p.accent);
-                      setFolderPresetOpen(false);
-                    }}
-                  >
-                    <i style={{ background: p.accent }}></i>
-                    <span>{p.name}</span>
-                  </button>
-                ))
-              ) : (
-                <span>NO SLOTS</span>
-              )}
+              {list.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setFolderFormType(p.id);
+                    if (isNew && (!folderFormName || BRIEF_TYPES.some((type) => type.name === folderFormName))) {
+                      setFolderFormName(p.name);
+                    }
+                    setFolderFormAccent(p.accent);
+                    setFolderPresetOpen(false);
+                  }}
+                >
+                  <i style={{ background: p.accent }}></i>
+                  <span>{p.name}</span>
+                </button>
+              ))}
             </div>
           )}
+        </div>
+        <div className="cmp-field-block">
+          <label>NAME</label>
+          <input
+            value={folderFormName}
+            onChange={(event) => setFolderFormName(event.target.value.toUpperCase())}
+            placeholder="WINTER EDITORIAL"
+            maxLength={48}
+          />
+        </div>
+        <div className="cmp-field-block">
+          <label>PURPOSE — OPTIONAL</label>
+          <input
+            value={folderFormPurpose}
+            onChange={(event) => setFolderFormPurpose(event.target.value)}
+            placeholder="WHAT SHOULD CAFEHTML LEARN?"
+            maxLength={240}
+          />
         </div>
         <div className="cmp-field-block">
           <label>ACCENT</label>
@@ -1172,6 +1395,10 @@ export default function ModulePanel() {
     const list = files
       .filter((f) => f.folder === folder.id)
       .sort((a, b) => b.modified.localeCompare(a.modified));
+    const bibleFingerprint = fingerprintBriefBoard(folder, files);
+    const bibleIsStale = Boolean(folder.visualBible && folder.visualBible.sourceFingerprint !== bibleFingerprint);
+    const bibleStatus = bibleIsStale ? "stale" : folder.visualBible?.status;
+    const bibleEditing = bibleEditorId === folder.id && Boolean(folder.visualBible);
     const preview = list[0] ? (
       <span className="cmp-folder-preview">{renderThumb(list[0])}</span>
     ) : null;
@@ -1183,7 +1410,8 @@ export default function ModulePanel() {
     return (
       <div
         key={folder.id}
-        className={`cmp-folder ${dragOver === folder.id ? "drag-over" : ""} ${list.length === 0 ? "empty" : ""} ${list.length > 1 ? "stacked" : ""}`}
+        data-folder-id={folder.id}
+        className={`cmp-folder ${dragOver === folder.id ? "drag-over" : ""} ${list.length === 0 ? "empty" : ""} ${list.length > 1 ? "stacked" : ""} ${menuOpen ? "menu-open" : ""} ${menuOpen && folderMenuOpensUp ? "menu-opens-up" : ""}`}
         style={{ "--folder-accent": folder.accent } as React.CSSProperties}
         draggable={true}
         onDragStart={(e) => handleFolderDragStart(e, folder.id)}
@@ -1215,11 +1443,23 @@ export default function ModulePanel() {
                 : folder.name}
             </span>
             <span className="cmp-count">{list.length}</span>
+            {folder.active === false && <span className="cmp-sys">OFF</span>}
           </button>
           <button
             className={`cmp-folder-dot ${menuOpen ? "open" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
+              if (!menuOpen) {
+                const folderElement = e.currentTarget.closest<HTMLElement>(".cmp-folder");
+                const scrollElement = folderElement?.closest<HTMLElement>(".cmp-scroll");
+                if (folderElement && scrollElement) {
+                  const folderRect = folderElement.getBoundingClientRect();
+                  const scrollRect = scrollElement.getBoundingClientRect();
+                  const spaceAbove = folderRect.top - scrollRect.top;
+                  const spaceBelow = scrollRect.bottom - folderRect.bottom;
+                  setFolderMenuOpensUp(spaceBelow < 124 && spaceAbove > spaceBelow);
+                }
+              }
               setFolderMenuId(menuOpen ? null : folder.id);
             }}
           >
@@ -1254,6 +1494,17 @@ export default function ModulePanel() {
                 EDIT
               </button>
               <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFolders(folders.map((candidate) => candidate.id === folder.id
+                    ? { ...candidate, active: candidate.active === false }
+                    : candidate));
+                  setFolderMenuId(null);
+                }}
+              >
+                {folder.active === false ? "ACTIVATE" : "PAUSE"}
+              </button>
+              <button
                 className="danger"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1274,6 +1525,81 @@ export default function ModulePanel() {
         </div>
         {open && (
           <div className="cmp-folder-body">
+            <button
+              type="button"
+              className={`cmp-brief-drop ${dragOver === folder.id ? "active" : ""}`}
+              onClick={() => {
+                setUploadTargetFolderId(folder.id);
+                setPendingReplaceFileId(null);
+                setView("root");
+                setActiveFileId(null);
+                fileInputRef.current?.click();
+              }}
+              onDragOver={(event) => handleFolderDragOver(event, folder.id)}
+              onDrop={(event) => handleFolderDrop(event, folder.id)}
+            >
+              <strong>+ ADD / DROP IMAGES</strong>
+              {!list.length && <span>MULTI-UPLOAD DIRECTLY INTO {folder.name}</span>}
+            </button>
+            <div className={`cmp-bible ${bibleStatus ? `status-${bibleStatus}` : ""}`}>
+              <div className="cmp-bible-head">
+                <span>VISUAL BIBLE</span>
+                <b>{bibleStatus ? bibleStatus.toUpperCase() : "NOT BUILT"}{folder.visualBible ? ` · V${folder.visualBible.version}` : ""}</b>
+              </div>
+              {folder.visualBible && !bibleEditing && (
+                <>
+                  <p>{folder.visualBible.summary || "No summary yet."}</p>
+                  <div className="cmp-bible-counts">
+                    {BIBLE_RULE_LABELS.map(({ key, label }) => (
+                      <span key={key}>{label} {folder.visualBible!.rules[key].length}</span>
+                    ))}
+                  </div>
+                </>
+              )}
+              {bibleEditing && folder.visualBible && (
+                <div className="cmp-bible-editor">
+                  <label>
+                    <span>SUMMARY</span>
+                    <textarea
+                      value={folder.visualBible.summary}
+                      onChange={(event) => updateFolderBible(folder.id, { ...folder.visualBible!, summary: event.currentTarget.value })}
+                    />
+                  </label>
+                  {BIBLE_RULE_LABELS.map(({ key, label }) => (
+                    <label key={key}>
+                      <span>{label} · ONE RULE PER LINE</span>
+                      <textarea
+                        value={folder.visualBible!.rules[key].join("\n")}
+                        onChange={(event) => updateFolderBible(folder.id, {
+                          ...folder.visualBible!,
+                          rules: {
+                            ...folder.visualBible!.rules,
+                            [key]: event.currentTarget.value.split("\n").map((line) => line.trim()).filter(Boolean),
+                          },
+                        })}
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+              {bibleError?.folderId === folder.id && <div className="cmp-bible-error">{bibleError.message}</div>}
+              <div className="cmp-bible-actions">
+                {!folder.visualBible || bibleIsStale ? (
+                  <button type="button" onClick={() => void draftVisualBible(folder)} disabled={bibleWorkingId === folder.id || !list.length}>
+                    {bibleWorkingId === folder.id ? "DRAFTING…" : bibleIsStale ? "REBUILD" : "BUILD BIBLE"}
+                  </button>
+                ) : null}
+                {folder.visualBible && !bibleEditing && !bibleIsStale && (
+                  <button type="button" onClick={() => beginBibleEdit(folder)}>EDIT</button>
+                )}
+                {bibleEditing && (
+                  <>
+                    <button type="button" onClick={() => setBibleEditorId(null)}>DONE EDITING</button>
+                    <button type="button" className="primary" onClick={() => approveVisualBible(folder)}>APPROVE BOARD</button>
+                  </>
+                )}
+              </div>
+            </div>
             {list.map((f) => renderImageRow(f, false))}
           </div>
         )}
@@ -1331,6 +1657,20 @@ export default function ModulePanel() {
         </div>
 
         {showUpload ? renderUploadForm() : null}
+        {quickPasteDestination && !showUpload && (
+          <div className="cmp-paste-ready" role="status">
+            <span>PASTE SCREENSHOT</span>
+            <b>CTRL+V · {quickPasteDestination === "MOOD" ? "MOOD BOARD" : quickPasteDestination}</b>
+            <button
+              type="button"
+              aria-label="Cancel screenshot paste"
+              onClick={() => {
+                quickUploadIntentRef.current = null;
+                setQuickPasteDestination(null);
+              }}
+            >×</button>
+          </div>
+        )}
 
         <div
           className="cmp-scroll"
@@ -1417,17 +1757,63 @@ export default function ModulePanel() {
 
         <div className="cmp-actions">
           <div className="cmp-actions-left">
-            <button
-              className="cmp-icon-btn"
-              onClick={() => {
-                setUploadTargetFolderId(null);
-                setPendingReplaceFileId(null);
-                fileInputRef.current?.click();
-              }}
-              title="Load brief image"
-            >
-              <span className="cmp-plus-icon"></span>
-            </button>
+            <div className="cmp-quick-add">
+              <button
+                className={`cmp-icon-btn ${panelQuickMenuOpen ? "open" : ""}`}
+                type="button"
+                title="Add image to brief"
+                aria-label="Add image to brief from module panel"
+                aria-haspopup="menu"
+                aria-expanded={panelQuickMenuOpen}
+                aria-keyshortcuts="Control+V Meta+V"
+                onClick={() => setPanelQuickMenuOpen((open) => !open)}
+              >
+                <span className="cmp-plus-icon"></span>
+              </button>
+              {panelQuickMenuOpen && (
+                <div className="cmp-quick-add-menu" role="menu" aria-label="Choose image role">
+                  <div className="cmp-quick-add-head">
+                    <span>ADD IMAGE</span><b>{panelQuickDestination}</b>
+                  </div>
+                  <div className="cmp-quick-role-grid" role="group" aria-label="Image role">
+                    {(["SUBJECT", "SCENE", "STYLE", "MOOD"] as QuickUploadDestination[]).map((destination) => (
+                      <button
+                        key={destination}
+                        type="button"
+                        className={panelQuickDestination === destination ? "active" : ""}
+                        aria-pressed={panelQuickDestination === destination}
+                        onClick={() => setPanelQuickDestination(destination)}
+                      >
+                        <i></i>{destination === "MOOD" ? "MOOD BOARD" : destination}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="cmp-quick-add-actions">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        quickUploadIntentRef.current = panelQuickDestination;
+                        prepareQuickDestination(panelQuickDestination);
+                        setQuickPasteDestination(null);
+                        setPanelQuickMenuOpen(false);
+                        fileInputRef.current?.click();
+                      }}
+                    >UPLOAD <small>FILES</small></button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        quickUploadIntentRef.current = panelQuickDestination;
+                        prepareQuickDestination(panelQuickDestination);
+                        setQuickPasteDestination(panelQuickDestination);
+                        setPanelQuickMenuOpen(false);
+                      }}
+                    >PASTE <small>CTRL+V</small></button>
+                  </div>
+                </div>
+              )}
+            </div>
             <button
               className="cmp-icon-btn"
               onClick={() => setAddingFolder(true)}

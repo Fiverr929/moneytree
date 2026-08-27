@@ -83,6 +83,20 @@ export type GalleryCell = {
   dims?: string;
   generated?: boolean;
   mode?: string;
+  scene?: {
+    sceneId: string;
+    sceneTitle: string;
+    sourcePrompt: string;
+    shotIndex: number;
+    shotCount: number;
+    shotTitle: string;
+    purpose: string;
+    action: string;
+    camera: string;
+    continuity: string[];
+    sceneContinuity: unknown;
+    plannerModel: string;
+  } | null;
   moduleSnapshot?: { files: ModuleFile[] };
   usedImages?: GalleryImageUse[];
   pipelineVersion?: string;
