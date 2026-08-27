@@ -88,6 +88,7 @@ export type AgentMessage = {
   scenePlan?: {
     plan: ScenePlan;
     model: string;
+    referenceFingerprint: string;
     status: "pending" | "executing" | "completed" | "rejected" | "failed";
   };
   toolProposal?: AgentActionProposal;

@@ -3065,6 +3065,92 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
+    .cmp-bible {
+      margin: 5px 8px 7px;
+      border: 1px solid var(--border, #b8b8b8);
+      background: color-mix(in srgb, var(--panel, #efefef) 92%, white);
+      font-family: var(--font-mono, monospace);
+    }
+
+    .cmp-bible.status-approved { border-left: 3px solid #368a66; }
+    .cmp-bible.status-draft { border-left: 3px solid #c79a2a; }
+    .cmp-bible.status-stale { border-left: 3px solid #d6533f; }
+
+    .cmp-bible-head,
+    .cmp-bible-actions,
+    .cmp-bible-counts {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .cmp-bible-head {
+      justify-content: space-between;
+      padding: 6px 7px;
+      border-bottom: 1px solid var(--border, #b8b8b8);
+      font-size: 9px;
+      letter-spacing: .08em;
+    }
+
+    .cmp-bible-head b { font-weight: 500; opacity: .65; }
+    .cmp-bible p { margin: 7px; font-size: 10px; line-height: 1.45; }
+    .cmp-bible-counts { padding: 0 7px 7px; font-size: 8px; opacity: .65; }
+
+    .cmp-bible-actions {
+      padding: 6px 7px;
+      border-top: 1px solid var(--border, #b8b8b8);
+    }
+
+    .cmp-bible-actions button {
+      min-height: 24px;
+      border: 1px solid currentColor;
+      background: transparent;
+      padding: 3px 7px;
+      font: inherit;
+      font-size: 8px;
+      letter-spacing: .07em;
+    }
+
+    .cmp-bible-actions button.primary { background: var(--ink, #191919); color: white; }
+    .cmp-bible-actions button:disabled { opacity: .35; }
+    .cmp-bible-error { padding: 6px 7px; color: #b63228; font-size: 9px; line-height: 1.35; }
+
+    .cmp-bible-editor { display: grid; gap: 6px; padding: 7px; }
+    .cmp-bible-editor label { display: grid; gap: 3px; font-size: 8px; letter-spacing: .07em; }
+    .cmp-bible-editor textarea {
+      width: 100%;
+      min-height: 48px;
+      resize: vertical;
+      border: 1px solid var(--border, #aaa);
+      background: white;
+      padding: 5px;
+      font: 10px/1.35 var(--font-mono, monospace);
+    }
+
+    .agent-scene-plan {
+      margin-top: 8px;
+      border: 1px solid currentColor;
+      background: rgba(255,255,255,.45);
+    }
+
+    .agent-scene-intent { padding: 8px; font-size: 11px; line-height: 1.45; }
+    .agent-scene-shots { display: grid; gap: 1px; background: currentColor; border-top: 1px solid currentColor; border-bottom: 1px solid currentColor; }
+    .agent-scene-shot { background: var(--paper, #ececec); padding: 7px; }
+    .agent-scene-shot-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .agent-scene-shot-head span { display: flex; gap: 3px; }
+    .agent-scene-shot-head button { min-width: 23px; padding: 1px 4px; }
+    .agent-scene-shot small { display: block; margin: 3px 0 6px; opacity: .62; line-height: 1.35; }
+    .agent-scene-shot textarea {
+      width: 100%;
+      min-height: 70px;
+      resize: vertical;
+      border: 1px solid currentColor;
+      background: rgba(255,255,255,.7);
+      padding: 6px;
+      font: 10px/1.4 var(--font-mono, monospace);
+    }
     .cmp-mini-strength {
       width: 36px;
       height: 3px;

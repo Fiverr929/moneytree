@@ -152,9 +152,11 @@ The prompt bar and CAFEHTML conversation form one reusable AI operation unit.
 The prompt row retains its image-add, settings, input, clear, and submit
 controls while the transcript can collapse to zero height or open to a
 user-resizable height. The chosen height persists as a device-local preference;
-double-clicking the resize grip restores the default. Long messages fold inside
-the transcript, older messages load in bounded pages, and active work remains
-visible through compact status rows.
+double-clicking the resize grip restores the default. On tablet and phone
+layouts, the open transcript clamps to the space above the collapsed Module
+panel and reflows when the viewport or sidebar changes, keeping Module controls
+reachable. Long messages fold inside the transcript, older messages load in
+bounded pages, and active work remains visible through compact status rows.
 
 Composer completion is keyboard-oriented and shared across the site:
 
@@ -198,18 +200,31 @@ Implemented foundation as of 2026-08-27:
   Their fresh observations, board type, purpose, and source fingerprint are
   supplied to the Director as structured context. Board media is not silently
   treated as direct generation input.
-- `/generate-scene` invokes the versioned Scene Builder contract, creates an
-  exact-count structured Scene Plan, and executes one independent image request
-  per ordered shot. The existing quantity control displays SHOTS for this
-  command and remains VARIATIONS for `/generate`.
+- `/generate-scene` invokes the versioned Scene Builder contract and creates an
+  exact-count structured Scene Plan. It stops at a visible approval card where
+  shot prompts can be edited and reordered. Only `APPROVE & GENERATE` begins
+  the independent ordered image requests. The existing quantity control
+  displays SHOTS for this command and remains VARIATIONS for `/generate`.
 - Every generated shot stores its scene ID, position, purpose, action, camera,
   continuity contract, source instruction, and planner model with the Gallery
   result.
+- Each Brief Board can compile its vision observations into an editable Visual
+  Bible draft containing Preserve, Flexible, Avoid, and Unknown rules. The user
+  approves the whole board after editing; only an approved, fingerprint-current
+  version enters Director and Scene planning context. Source changes surface a
+  stale state and require rebuilding.
+- The same Brief Slot UI supports CHARACTER, SETTING, OBJECT, CREATURE,
+  WARDROBE, and TREATMENT entity slots. These are the user-facing form of the
+  internal Canon Card concept and use the same Bible approval contract.
+- A provider-neutral inspiration boundary and Pinterest configuration-status
+  endpoint define required read scopes and provenance fields without scraping
+  or exposing credentials. OAuth connection and selectable board/Pin import UI
+  remain pending secure token storage and Pinterest app configuration.
 
-Still planned: non-destructive many-to-many board membership, editable and
-approved Visual Bible versions, explicit board-image pinning, scene strip UI and
-shot-only retry, portable profiles/checkpoints, external inspiration providers,
-and the reviewed skill registry/promotion workflow.
+Still planned: non-destructive many-to-many board membership, explicit
+board-image pinning, shot-only retry and richer scene-strip management,
+portable profiles/checkpoints, completed Pinterest OAuth/import UI, and the
+reviewed skill registry/promotion workflow.
 
 The design has four durable layers:
 
@@ -602,7 +617,7 @@ full target contract described above is not yet complete.
    migrate existing MOOD, LOOKBOOK, and WORLD folders.
 3. **FOUNDATION** — Add per-image visual observations, optional notes, source fingerprints, and
    stale-state handling.
-4. Add editable, versioned Brief synthesis and Project Bible provenance.
+4. **FOUNDATION** — Add editable, versioned Brief synthesis and Project Bible provenance.
 5. **FOUNDATION** — Compile active Bible entries into the existing FRAME prompt while preserving
    direct-reference limits and current role safeguards.
 6. **FOUNDATION** — Add `/generate-scene`, structured Scene Plans, SHOTS quantity semantics,

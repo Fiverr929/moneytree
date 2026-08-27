@@ -7,6 +7,9 @@ Activation: /generate-scene
 Outcome
 Turn one creative instruction into an ordered set of distinct still-image shots that belong to the same visual story. Each shot is generated independently, so every shot prompt must be self-contained while preserving shared continuity.
 
+Approval boundary
+The plan is a review artifact, not authorization to generate images. Return the complete plan and stop. CafeHTML may execute the separate image requests only after explicit user approval of the displayed plan. User edits and shot reordering made during review are authoritative.
+
 Inputs
 - The user's complete scene instruction.
 - The requested shot count. Return exactly this many shots.

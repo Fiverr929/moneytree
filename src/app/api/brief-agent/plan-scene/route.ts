@@ -72,14 +72,20 @@ function safeReferences(value: unknown): BriefReferenceSnapshot {
 
 function safeBoards(value: unknown): BriefBoardContext[] {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 12).map((item) => ({
-    id: text(item?.id, 120),
-    type: item?.type === "MOOD" || item?.type === "LOOKBOOK" || item?.type === "WORLD" ? item.type : "CUSTOM" as const,
-    name: text(item?.name, 160),
-    purpose: text(item?.purpose, 500),
-    active: item?.active !== false,
-    sourceFingerprint: text(item?.sourceFingerprint, 200),
-    images: Array.isArray(item?.images) ? item.images.slice(0, 24).map((image: unknown) => {
+  const types = new Set(["MOOD", "LOOKBOOK", "WORLD", "CUSTOM", "CHARACTER", "SETTING", "OBJECT", "CREATURE", "WARDROBE", "TREATMENT"]);
+  return value.slice(0, 12).map((item) => {
+    const source = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    const rawType = String(source.type || "CUSTOM").toUpperCase();
+    const rawBible = source.visualBible && typeof source.visualBible === "object" ? source.visualBible as Record<string, unknown> : null;
+    const rawRules = rawBible?.rules && typeof rawBible.rules === "object" ? rawBible.rules as Record<string, unknown> : {};
+    return {
+    id: text(source.id, 120),
+    type: (types.has(rawType) ? rawType : "CUSTOM") as BriefBoardContext["type"],
+    name: text(source.name, 160),
+    purpose: text(source.purpose, 500),
+    active: source.active !== false,
+    sourceFingerprint: text(source.sourceFingerprint, 200),
+    images: Array.isArray(source.images) ? source.images.slice(0, 24).map((image: unknown) => {
       const sourceImage = image && typeof image === "object" ? image as Record<string, unknown> : {};
       return {
         imageId: text(sourceImage.imageId, 120),
@@ -87,7 +93,20 @@ function safeBoards(value: unknown): BriefBoardContext[] {
         visualRead: text(sourceImage.visualRead, 700),
       };
     }).filter((image: { imageId: string }) => image.imageId) : [],
-  })).filter((item) => item.id && item.active);
+    ...(rawBible?.status === "approved" ? { visualBible: {
+      id: text(rawBible.id, 120),
+      version: Math.max(1, Math.round(Number(rawBible.version) || 1)),
+      status: "approved" as const,
+      sourceFingerprint: text(rawBible.sourceFingerprint, 200),
+      summary: text(rawBible.summary, 900),
+      rules: {
+        preserve: stringList(rawRules.preserve), flexible: stringList(rawRules.flexible),
+        avoid: stringList(rawRules.avoid), unknown: stringList(rawRules.unknown),
+      },
+      draftedAt: text(rawBible.draftedAt, 100),
+      approvedAt: text(rawBible.approvedAt, 100) || undefined,
+    } } : {}),
+  };}).filter((item) => item.id && item.active);
 }
 
 function parseJson(value: string) {

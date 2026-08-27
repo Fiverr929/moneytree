@@ -23,7 +23,8 @@
     "test:conversation-context": "node --experimental-strip-types scripts/check-conversation-context.mjs",
     "test:project-lifecycle": "node --experimental-strip-types scripts/check-project-lifecycle.mjs",
     "test:reference-pipeline": "node --experimental-strip-types scripts/check-reference-pipeline.mjs",
-    "test:studio-skills": "node --experimental-strip-types scripts/check-studio-skills.mjs"
+    "test:studio-skills": "node --experimental-strip-types scripts/check-studio-skills.mjs",
+    "test:creative-intelligence": "node --experimental-strip-types scripts/check-creative-intelligence.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",

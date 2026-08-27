@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback, KeyboardEvent } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, KeyboardEvent } from "react";
 import { useApp } from "@/context/AppContext";
 import { MODELS, useSettings } from "@/context/SettingsContext";
 import { useGallery, GalleryCell } from "@/context/GalleryContext";
@@ -52,6 +52,7 @@ import { iterationPreflight } from "@/lib/brief-agent/iterationBrief";
 import { persistConversationMessages, prepareConversationContext } from "@/lib/brief-agent/conversationContext";
 import ComposerPalette, { type ComposerPaletteItem } from "@/components/ComposerPalette";
 import { briefBoardVisionQueue, compileBriefBoardContext } from "@/lib/brief-agent/briefBoards";
+import { moveScenePlanShot, replaceSceneShotPrompt, scenePlanCanExecute } from "@/lib/brief-agent/scenePlanState";
 import { fingerprintReferenceValues } from "@/lib/brief-agent/referenceFingerprint";
 import { MODULE_FOLDER_PRESETS } from "@/lib/moduleFolderPresets";
 
@@ -62,6 +63,10 @@ const REFERENCE_SNAPSHOT_CACHE_LIMIT = 20;
 const REFERENCE_SNAPSHOT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AGENT_RUN_CLEARED_KEY = "cafehtml-agent-run-cleared";
 const AGENT_CONSOLE_HEIGHT_KEY = "cafehtml-agent-console-height";
+const AGENT_CONSOLE_MIN_HEIGHT = 220;
+const AGENT_CONSOLE_MAX_HEIGHT = 620;
+const AGENT_CONSOLE_EMERGENCY_HEIGHT = 96;
+const AGENT_CONSOLE_MODULE_GAP = 12;
 type ModuleQuickDestination = "SUBJECT" | "SCENE" | "STYLE" | "MOOD";
 const MODULE_QUICK_DESTINATIONS: ModuleQuickDestination[] = ["SUBJECT", "SCENE", "STYLE", "MOOD"];
 const GENERATION_VISION_CACHE_KEY = "cafehtml-generation-vision-cache-v2";
@@ -409,7 +414,36 @@ export default function PromptBar() {
   const referenceFingerprint = fingerprintModuleFiles(moduleContext.files);
   const briefBoards = compileBriefBoardContext(moduleContext.folders, moduleContext.files);
   const referenceFingerprintRef = useRef(referenceFingerprint);
-  const consoleResizeRef = useRef<{ startY: number; startHeight: number; currentHeight: number } | null>(null);
+  const consoleResizeRef = useRef<{
+    startY: number;
+    startHeight: number;
+    currentHeight: number;
+    maximumHeight: number;
+  } | null>(null);
+
+  const getConsoleMaximumHeight = useCallback((currentHeight: number) => {
+    const viewportMaximum = Math.max(
+      AGENT_CONSOLE_MIN_HEIGHT,
+      Math.min(AGENT_CONSOLE_MAX_HEIGHT, window.innerHeight - 190),
+    );
+
+    if (!window.matchMedia("(max-width: 900px)").matches) return viewportMaximum;
+
+    const modulePanel = document.querySelector<HTMLElement>(
+      ".right-sidebar .mod-panel-wrap.collapsed .module-panel",
+    );
+    const titleBar = document.querySelector<HTMLElement>(".title-bar");
+    if (!modulePanel || !titleBar) return viewportMaximum;
+
+    const moduleRect = modulePanel.getBoundingClientRect();
+    const titleRect = titleBar.getBoundingClientRect();
+    const roomBeforeTitle = titleRect.top - AGENT_CONSOLE_MODULE_GAP - moduleRect.bottom;
+
+    return Math.max(
+      AGENT_CONSOLE_EMERGENCY_HEIGHT,
+      Math.floor(Math.min(viewportMaximum, currentHeight + roomBeforeTitle)),
+    );
+  }, []);
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
@@ -434,8 +468,39 @@ export default function PromptBar() {
 
   useEffect(() => {
     const savedHeight = Number(window.localStorage.getItem(AGENT_CONSOLE_HEIGHT_KEY));
-    if (Number.isFinite(savedHeight) && savedHeight >= 220) setAgentConsoleHeight(savedHeight);
+    if (Number.isFinite(savedHeight) && savedHeight >= AGENT_CONSOLE_MIN_HEIGHT) {
+      setAgentConsoleHeight(Math.min(savedHeight, AGENT_CONSOLE_MAX_HEIGHT));
+    }
   }, []);
+
+  useLayoutEffect(() => {
+    if (!agentConsoleOpen) return;
+
+    let frame = 0;
+    const sidebar = document.querySelector<HTMLElement>(".right-sidebar");
+    const clampToWorkspace = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const consoleElement = agentConsoleScrollRef.current?.parentElement;
+        if (!consoleElement) return;
+        const currentHeight = consoleElement.getBoundingClientRect().height;
+        const maximumHeight = getConsoleMaximumHeight(currentHeight);
+        setAgentConsoleHeight((savedHeight) => {
+          const requestedHeight = savedHeight ?? currentHeight;
+          return requestedHeight > maximumHeight ? maximumHeight : savedHeight;
+        });
+      });
+    };
+
+    clampToWorkspace();
+    window.addEventListener("resize", clampToWorkspace);
+    sidebar?.addEventListener("transitionend", clampToWorkspace);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", clampToWorkspace);
+      sidebar?.removeEventListener("transitionend", clampToWorkspace);
+    };
+  }, [agentConsoleOpen, getConsoleMaximumHeight]);
 
   useEffect(() => {
     const handleTimelineEvent = (event: Event) => {
@@ -678,17 +743,18 @@ export default function PromptBar() {
   const handleConsoleResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    const startHeight = agentConsoleScrollRef.current?.parentElement?.getBoundingClientRect().height || 320;
     consoleResizeRef.current = {
       startY: event.clientY,
-      startHeight: agentConsoleScrollRef.current?.parentElement?.getBoundingClientRect().height || 320,
-      currentHeight: agentConsoleScrollRef.current?.parentElement?.getBoundingClientRect().height || 320,
+      startHeight,
+      currentHeight: startHeight,
+      maximumHeight: getConsoleMaximumHeight(startHeight),
     };
   };
 
   const handleConsoleResizeMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!consoleResizeRef.current) return;
-    const maximum = Math.max(240, Math.min(620, window.innerHeight - 190));
-    const nextHeight = Math.round(Math.min(maximum, Math.max(220,
+    const nextHeight = Math.round(Math.min(consoleResizeRef.current.maximumHeight, Math.max(AGENT_CONSOLE_MIN_HEIGHT,
       consoleResizeRef.current.startHeight + event.clientY - consoleResizeRef.current.startY,
     )));
     consoleResizeRef.current.currentHeight = nextHeight;
@@ -1478,7 +1544,7 @@ export default function PromptBar() {
       setAgentMessages((messages) => [...messages, {
         id: crypto.randomUUID(), role: "system",
         text: `SCENE PLAN READY · Review ${plan.shotCount} shot${plan.shotCount === 1 ? "" : "s"} before generation.`,
-        createdAt: new Date().toISOString(), scenePlan: { plan, model, status: "pending" },
+        createdAt: new Date().toISOString(), scenePlan: { plan, model, referenceFingerprint, status: "pending" },
       }]);
       setPromptText("");
     } catch (error) {
@@ -2479,6 +2545,37 @@ export default function PromptBar() {
       .catch((error) => console.error("Failed to persist decision answers", error));
     void submitAgentMessage(text);
   };
+  const updateSceneShot = (messageId: string, shotIndex: number, prompt: string) => {
+    setAgentMessages((messages) => messages.map((message) => {
+      if (message.id !== messageId || !message.scenePlan || message.scenePlan.status !== "pending") return message;
+      return {
+        ...message,
+        scenePlan: {
+          ...message.scenePlan,
+          plan: replaceSceneShotPrompt(message.scenePlan.plan, shotIndex, prompt),
+        },
+      };
+    }));
+  };
+  const moveSceneShot = (messageId: string, shotIndex: number, direction: -1 | 1) => {
+    setAgentMessages((messages) => messages.map((message) => {
+      if (message.id !== messageId || !message.scenePlan || message.scenePlan.status !== "pending") return message;
+      return { ...message, scenePlan: { ...message.scenePlan, plan: moveScenePlanShot(message.scenePlan.plan, shotIndex, direction) } };
+    }));
+  };
+  const rejectScenePlan = (messageId: string) => {
+    setAgentMessages((messages) => messages.map((message) => message.id === messageId && message.scenePlan
+      ? { ...message, scenePlan: { ...message.scenePlan, status: "rejected" }, text: "SCENE PLAN REJECTED · No images were generated." }
+      : message));
+  };
+  const approveScenePlan = (message: AgentMessage) => {
+    if (!message.scenePlan || message.scenePlan.status !== "pending") return;
+    if (!scenePlanCanExecute(message.scenePlan.status, message.scenePlan.referenceFingerprint, referenceFingerprint)) {
+      setGenerationError("References changed after this Scene Plan was created. Run /generate-scene again before approval.");
+      return;
+    }
+    void executeScenePlan(message.id, message.scenePlan.plan, message.scenePlan.model);
+  };
   const newestMessages = [...agentMessages].reverse();
   const displayedMessages = newestMessages.slice(0, transcriptLimit);
   const resolveMessageMedia = (media: NonNullable<AgentMessage["media"]>[number]) => {
@@ -3132,6 +3229,49 @@ export default function PromptBar() {
                         })()}
                         {message.promptArtifact.sourceFingerprint && message.promptArtifact.sourceFingerprint !== referenceFingerprint && (
                           <div className="agent-line agent-muted">&gt; REFS CHANGED SINCE THIS PROMPT.</div>
+                        )}
+                      </div>
+                    )}
+                    {message.scenePlan && (
+                      <div className={`agent-scene-plan status-${message.scenePlan.status}`}>
+                        <div className="agent-artifact-head">
+                          <span>&gt; <mark>SCENE PLAN</mark> · {message.scenePlan.plan.title}</span>
+                          <span className="agent-tool-status">{message.scenePlan.status.toUpperCase()}</span>
+                        </div>
+                        <div className="agent-scene-intent">{message.scenePlan.plan.intent}</div>
+                        <div className="agent-scene-shots">
+                          {message.scenePlan.plan.shots.map((shot, index) => (
+                            <div className="agent-scene-shot" key={`${message.id}:shot:${shot.index}`}>
+                              <div className="agent-scene-shot-head">
+                                <b>{String(index + 1).padStart(2, "0")} · {shot.title}</b>
+                                {message.scenePlan!.status === "pending" && (
+                                  <span>
+                                    <button type="button" disabled={index === 0} onClick={() => moveSceneShot(message.id, shot.index, -1)}>↑</button>
+                                    <button type="button" disabled={index === message.scenePlan!.plan.shots.length - 1} onClick={() => moveSceneShot(message.id, shot.index, 1)}>↓</button>
+                                  </span>
+                                )}
+                              </div>
+                              <small>{shot.purpose} · {shot.camera}</small>
+                              {message.scenePlan!.status === "pending" ? (
+                                <textarea
+                                  aria-label={`Shot ${index + 1} prompt`}
+                                  value={shot.prompt}
+                                  onChange={(event) => updateSceneShot(message.id, shot.index, event.currentTarget.value)}
+                                />
+                              ) : (
+                                <CollapsibleChatText text={shot.prompt} className="agent-line agent-muted" />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        {message.scenePlan.referenceFingerprint !== referenceFingerprint && message.scenePlan.status === "pending" && (
+                          <div className="agent-line agent-muted">&gt; REFERENCES CHANGED · REPLAN REQUIRED</div>
+                        )}
+                        {message.scenePlan.status === "pending" && (
+                          <div className="agent-tool-controls">
+                            <button type="button" onClick={() => approveScenePlan(message)}>APPROVE &amp; GENERATE</button>
+                            <button type="button" onClick={() => rejectScenePlan(message.id)}>REJECT</button>
+                          </div>
                         )}
                       </div>
                     )}
